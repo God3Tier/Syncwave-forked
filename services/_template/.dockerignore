@@ -1,0 +1,13 @@
+# Keep the build context small and the image free of local files.
+target/
+build/
+node_modules/
+.venv/
+__pycache__/
+.env
+.env.*
+*.md
+.gitlab-ci.yml
+compose.yaml
+Dockerfile
+.dockerignore

@@ -1,0 +1,19 @@
+# buf configuration for SyncWave's internal gRPC contracts (plan.md §10).
+#
+# Layout: one package per service and major version, directory = package:
+#   syncwave/catalogue/v1/catalogue.proto   ->  package syncwave.catalogue.v1;
+#   syncwave/playlist/v1/playlist.proto     ->  package syncwave.playlist.v1;
+#   syncwave/streaming/v1/streaming.proto   ->  package syncwave.streaming.v1;
+#
+# CI (`contracts:proto`) runs `buf lint` and, in merge requests,
+# `buf breaking` against the MR's target branch.
+# Locally (Docker):  docker run --rm -v "$PWD:/w" -w /w bufbuild/buf:1.73.0 lint
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

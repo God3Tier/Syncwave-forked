@@ -1,0 +1,41 @@
+# Lint and test jobs for a Java service built with Maven (pom.xml in SERVICE_DIR).
+#
+# In services/<name>/.gitlab-ci.yml:
+#   include:
+#     - local: ci/service.yml
+#     - local: ci/presets/java-maven.yml
+#   lint: { extends: .java-lint }
+#   test: { extends: .java-test }
+#
+# To use a different JDK, set `image:` on your job, e.g. maven:3.9-eclipse-temurin-25.
+
+.java-maven:
+  image: maven:3.9-eclipse-temurin-21
+  variables:
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+    MAVEN_CLI_OPTS: "--batch-mode --errors --no-transfer-progress"
+  cache:
+    key: maven-$SERVICE      # one dependency cache per service
+    paths:
+      - .m2/repository
+
+# Static analysis with Checkstyle (Google style). Violations are printed but
+# only errors fail the job. Once the team agrees on a style, make it strict
+# with -Dcheckstyle.violationSeverity=warning, or configure the plugin in pom.xml.
+.java-lint:
+  extends: [.lint, .java-maven]
+  script:
+    - >
+      mvn $MAVEN_CLI_OPTS
+      org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check
+      -Dcheckstyle.config.location=google_checks.xml
+      -Dcheckstyle.consoleOutput=true
+      -Dcheckstyle.violationSeverity=error
+
+# Unit and integration tests; Surefire reports are shown in the MR's test tab.
+.java-test:
+  extends: [.test, .java-maven]
+  variables:
+    TEST_REPORTS: target/surefire-reports/TEST-*.xml
+  script:
+    - mvn $MAVEN_CLI_OPTS verify

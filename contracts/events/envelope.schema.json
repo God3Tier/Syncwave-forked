@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/envelope.schema.json",
+  "title": "SyncWave event envelope",
+  "description": "Every AMQP message published to the syncwave.events exchange has this shape. Per-event schemas (e.g. song-uploaded.schema.json) reference this envelope and constrain event_type and payload.",
+  "type": "object",
+  "required": ["event_id", "event_type", "version", "song_id", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "description": "Unique per event. Consumers use it to detect duplicate deliveries (idempotency). Also sent as the AMQP message_id property.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_type": {
+      "description": "PascalCase event name. Also sent as the AMQP type property. Routing keys are listed in contracts/events/README.md.",
+      "type": "string",
+      "enum": [
+        "SongUploaded",
+        "LyricsProcessed",
+        "LyricsProcessingFailed",
+        "WaveformProcessed",
+        "WaveformProcessingFailed",
+        "SongReady"
+      ]
+    },
+    "version": {
+      "description": "Payload schema version for this event_type. Bump it for breaking payload changes.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "song_id": {
+      "description": "The song this event is about.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "description": "When the event happened (ISO-8601, UTC).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer": {
+      "description": "Optional. Name of the publishing service, e.g. \"upload\". Useful in logs.",
+      "type": "string"
+    },
+    "correlation_id": {
+      "description": "Optional. The event_id of the SongUploaded event that started this processing flow, copied onto every follow-up event so one upload can be traced end to end.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "payload": {
+      "description": "Event-specific data, defined by the per-event schema.",
+      "type": "object"
+    }
+  }
+}
