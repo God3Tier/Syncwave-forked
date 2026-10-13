@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/seek_to.schema.json",
+  "title": "SEEK_TO",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "SEEK_TO" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "target_server_time_ms", "position_ms", "resume_playback"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "target_server_time_ms": { "type": "integer", "minimum": 0 },
+        "position_ms": { "type": "integer", "minimum": 0 },
+        "resume_playback": { "type": "boolean" }
+      }
+    }
+  }
+}

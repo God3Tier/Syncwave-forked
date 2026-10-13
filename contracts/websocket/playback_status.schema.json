@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/playback_status.schema.json",
+  "title": "PLAYBACK_STATUS",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "PLAYBACK_STATUS" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "measured_server_time_ms", "position_ms", "buffering"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "measured_server_time_ms": { "type": "integer", "minimum": 0 },
+        "position_ms": { "type": "integer", "minimum": 0 },
+        "buffering": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -2,13 +2,16 @@
 
 Browsers connect through the gateway, e.g. `ws://localhost:8080/api/sync/ws`
 (the gateway forwards WebSocket upgrades for every `/api/<service>/` path).
-Which service hosts which socket (Jam, Sync, or both) is decided by the
-Jam/Sync owner and recorded here.
+Jam remains the user-facing room and queue service. Browsers send playback
+controls to Jam, Jam authorizes them, and Jam calls Sync internally. Sync
+hosts the timing/readiness/playback-coordination socket; it does not accept
+queue edits or owner playback commands directly from browsers.
 
-> Status: **skeleton**. The message list comes from plan.md §8. Payloads
-> are to be defined by the Jam/Sync owner before frontend work starts
-> (plan.md §10), as `<message>.schema.json` files plus examples in
-> `examples/`, which CI validates like the event schemas.
+> Status: **in progress**. `JOINED`, `TIME_PING`, `TIME_PONG`, `PREPARE`,
+> `READY`, `PARTICIPANT_STATE`, `PLAY_AT`, `PAUSE_AT`, `RESUME_AT`,
+> `SEEK_TO`, `PLAYBACK_STATUS`, `SYNC_CORRECTION`, and `ERROR` have JSON
+> Schemas and examples validated by CI. Add each remaining message contract
+> with its implementation slice.
 
 ## Proposed message frame
 
@@ -31,6 +34,9 @@ Jam/Sync owner and recorded here.
 
 | Type              | Direction       | Purpose                                              |
 |-------------------|-----------------|------------------------------------------------------|
+| `PAUSE_AT`        | server to client | Pause at a shared future time and position          |
+| `RESUME_AT`       | server to client | Resume from a position at a shared future time      |
+| `SEEK_TO`         | server to client | Seek at a shared time, preserving pause state       |
 | `JOIN`            | client → server | Join a Jam                                           |
 | `LEAVE`           | client → server | Leave a Jam                                          |
 | `QUEUE_UPDATED`   | server → client | Shared queue changed                                 |

@@ -1,0 +1,10 @@
+{
+  "type": "ERROR",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 7,
+  "sent_at_ms": 1791460001002,
+  "payload": {
+    "code": "STALE_GENERATION",
+    "message": "READY generation is not active"
+  }
+}

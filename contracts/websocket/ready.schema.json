@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/ready.schema.json",
+  "title": "READY",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "READY" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "buffered_duration_ms", "media_duration_ms"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "buffered_duration_ms": { "type": "integer", "minimum": 0 },
+        "media_duration_ms": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}
