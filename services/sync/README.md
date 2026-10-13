@@ -49,6 +49,15 @@ then coordinates clocks, readiness, scheduled playback, and drift correction.
 - Each dependency call has a configurable 750 ms timeout. HTTP and gRPC map
   not-found, not-ready, unavailable, and timeout failures separately, and no
   false `PREPARE` is emitted on failure
+- JSON lifecycle logs and transport correlation IDs, without tokens or signed
+  stream URLs
+- Prometheus metrics at `GET /metrics` for connections, readiness/timing,
+  drift/corrections, dependency calls, and protocol errors
+- WebSocket idle timeout, 64 KiB application message bound, per-connection
+  rate limit, and explicit replacement/restart close codes
+- Periodic browser playback reports and client-side application of scheduled
+  rate/seek corrections
+- Versioned Alembic migrations, applied before the container starts the API
 
 The versioned gRPC contract is in
 `contracts/grpc/syncwave/sync/v1/sync.proto`; generated Python bindings are
@@ -95,16 +104,22 @@ the same target server timestamp and remained in `PLAYING` after their first
 
 | Browser | Clock offset | Timer-start error |
 | --- | ---: | ---: |
-| 1 | +0.5 ms | 1 ms |
-| 2 | +0.5 ms | 12 ms |
-| 3 | -0.5 ms | 9 ms |
-| 4 | -0.5 ms | 15 ms |
-| 5 | -0.5 ms | 7 ms |
+| 1 | -1.0 ms | 6 ms |
+| 2 | -2.0 ms | 3 ms |
+| 3 | -1.5 ms | 4 ms |
+| 4 | -2.0 ms | 4 ms |
+| 5 | -1.0 ms | 4 ms |
 
-The observed max-to-min start-error spread was **14 ms**, within the current
+The latest observed max-to-min start-error spread was **3 ms**, within the current
 100 ms target. This proves the browser scheduling path on local loopback; it
 does not replace a later test across five physical devices and real Wi-Fi,
 where audio hardware latency and network asymmetry will differ.
+
+The same run also exercised periodic reporting. Headless Web Audio clock lag
+caused a scheduled seek on each client; an additional injected 400 ms delay on
+client 5 produced `SEEK (-403ms)`, after which no further correction was issued
+before the test melody ended. This is correction-path evidence, not a claim
+about physical audio-device drift.
 
 ## Test
 
@@ -126,17 +141,19 @@ python -m grpc_tools.protoc \
 
 ## Persistence
 
-Compose uses Sync's existing isolated PostgreSQL database. Tables are created
-idempotently during service startup for the current project phase. Tests use
-SQLite through the same repository interface and include a service-restart
-recovery test.
+Compose uses Sync's existing isolated PostgreSQL database. Alembic applies the
+versioned schema before the API starts and safely adopts databases created by
+the earlier bootstrap implementation. Tests use SQLite through the same
+repository interface and cover migration upgrade/downgrade and service-restart
+recovery.
+
+Prometheus queries, JSON-log filters, the physical-device procedure, and the
+multi-instance scaling boundary are documented in [OBSERVABILITY.md](OBSERVABILITY.md).
 
 ## Deliberate limitations of this slice
 
 - Temporary internal HTTP compatibility remains until Jam switches fully to
   the generated gRPC client.
-- Database migrations are not versioned yet; add Alembic before schemas begin
-  changing across deployed versions.
 - Catalogue and Streaming currently use deterministic local fakes because
   their versioned contracts/services are not present in this repository yet;
   replace the fake implementations behind the existing interfaces when those

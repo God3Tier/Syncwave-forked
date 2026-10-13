@@ -1625,8 +1625,11 @@ Current implementation status (13 October 2026):
   performs five clock samples, schedules Web Audio from `PLAY_AT`, reports
   playback status, and displays the measured start error
 - Five isolated local Chromium sessions completed one Jam start using the
-  same target timestamp; measured timer-start errors were 1, 12, 9, 15, and
-  7 ms (14 ms max-to-min spread), with every client remaining in `PLAYING`
+  same target timestamp; the latest measured timer-start errors were 6, 3, 4,
+  4, and 4 ms (3 ms max-to-min spread)
+- Periodic reports drove scheduled seek corrections in headless Web Audio; an
+  injected 400 ms delay produced `SEEK (-403ms)` and did not cause a repeated
+  correction before the generated melody ended
 - The five-browser result is loopback evidence only; the Slice 7 physical
   device and real-Wi-Fi test remains required
 - Per-participant correction hysteresis and a configurable cooldown now
@@ -1657,6 +1660,17 @@ Current implementation status (13 October 2026):
 - Dependency calls use a configurable 750 ms bound and distinguish not found,
   not ready, unavailable, and timeout failures across HTTP and gRPC; tests
   prove a dependency failure cannot create a false playback session
+- Structured JSON logs, safe correlation IDs, and Prometheus metrics now cover
+  HTTP, gRPC, WebSocket lifecycle, dependencies, timing, drift, corrections,
+  and protocol failures
+- WebSocket connections now enforce idle liveness, a 64 KiB message bound,
+  per-connection rate limits, replacement/restart close codes, and graceful
+  service shutdown
+- Clock selection has deterministic latency, asymmetry, staleness, and outlier
+  tests; the browser reports playback periodically and applies rate/seek
+  corrections with a duration calculated to return drift to tolerance
+- Alembic owns the deployed database schema and includes an upgrade/downgrade
+  test plus adoption of databases created by the earlier bootstrap code
 - The live remaining work is tracked in the checklist below; update it when a
   slice is completed instead of adding another separate status list
 
@@ -1679,31 +1693,31 @@ Completed foundation:
 - [x] Add Catalogue/Streaming client boundaries, deterministic fakes,
   dependency timeouts, and stable HTTP/gRPC failure mapping
 - [x] Build the browser melody harness and complete a five-browser loopback
-  run with a measured 14 ms start-error spread
-- [x] Cover the current slice with 27 automated tests and 14 validated
+  run with a measured 3 ms start-error spread
+- [x] Cover the current slice with 43 automated tests and 14 validated
   WebSocket schemas/examples
 
-Next priority -- observability:
+Completed observability:
 
-- [ ] Add structured JSON logs with `jam_id`, `participant_id`, `generation`,
+- [x] Add structured JSON logs with `jam_id`, `participant_id`, `generation`,
   `request_id`, message type, outcome, and duration where applicable
-- [ ] Propagate or generate correlation IDs across HTTP, gRPC, and WebSocket
+- [x] Propagate or generate correlation IDs across HTTP, gRPC, and WebSocket
   operations without logging tokens or signed stream URLs
-- [ ] Expose Prometheus metrics for connections, readiness, start error,
+- [x] Expose Prometheus metrics for connections, readiness, start error,
   drift, corrections, dependency duration/failures, and protocol errors
-- [ ] Add tests that verify required log context and metric increments
+- [x] Add tests that verify required log context and metric increments
 
 Then -- protocol and service hardening:
 
-- [ ] Add WebSocket heartbeat/liveness handling, maximum message size, and
+- [x] Add WebSocket heartbeat/liveness handling, maximum message size, and
   per-connection rate limits
-- [ ] Add explicit shutdown/reconnect close codes and test duplicate live
+- [x] Add explicit shutdown/reconnect close codes and test duplicate live
   connection replacement under load
-- [ ] Add deterministic clock-offset tests for asymmetric latency, jitter,
+- [x] Add deterministic clock-offset tests for asymmetric latency, jitter,
   stale samples, and outlier rejection
-- [ ] Send periodic browser `PLAYBACK_STATUS` reports and demonstrate that an
+- [x] Send periodic browser `PLAYBACK_STATUS` reports and demonstrate that an
   intentionally delayed client converges after correction
-- [ ] Add Alembic migrations before making further deployed schema changes
+- [x] Add Alembic migrations before making further deployed schema changes
 - [ ] Replace the temporary internal HTTP adapters after Jam switches to the
   generated gRPC client
 - [ ] Replace Catalogue/Streaming fakes with real deadline-bound gRPC clients
@@ -1719,7 +1733,7 @@ Final integration and evidence:
   results under injected latency/jitter/packet loss
 - [ ] Tune lead time and correction thresholds from the measurements, then
   record the final configuration and any missed targets honestly
-- [ ] Add dashboards/log queries, the final demo procedure, known limitations,
+- [x] Add dashboards/log queries, the final demo procedure, known limitations,
   and the documented path to multi-instance routing/pub-sub
 
 #### Slice 0 --- Contracts and skeleton
