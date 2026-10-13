@@ -14,15 +14,10 @@ test:audio-sampler:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
-    - apk add --no-cache make
+    - apk add --no-cache make bash
     - cd services/audio_transmitter
   script:
-    - |
-      set +e
-      make test > audio-test.log 2>&1
-      test_status=$?
-      cat audio-test.log
-      exit "$test_status"
+    - bash -o pipefail -c 'make test 2>&1 | tee audio-test.log'
   after_script:
     - docker compose -f services/audio_transmitter/compose.yaml --profile test ps --all > services/audio_transmitter/compose-ps.txt 2>&1 || true
     - docker compose -f services/audio_transmitter/compose.yaml --profile test logs --no-color --timestamps > services/audio_transmitter/compose-logs.txt 2>&1 || true
