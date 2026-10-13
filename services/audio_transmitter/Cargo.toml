@@ -1,0 +1,21 @@
+[package]
+name = "audio_transmitter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web = "4"
+async-trait = "0.1"
+aws-config = "1"
+aws-sdk-s3 = "1.152.0"
+aws-smithy-types = "1.8.1"
+bytes = "1.12.1"
+diesel = { version = "2.3", features = ["postgres", "r2d2"] }
+dotenvy = "0.15"
+moka = { version = "0.12", features = ["future"] }
+r2d2 = "0.8.10"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+futures-util = "0.3"
