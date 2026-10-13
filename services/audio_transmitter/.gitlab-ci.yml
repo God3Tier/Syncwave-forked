@@ -1,0 +1,17 @@
+# Audio sampler test pipeline. Orchestrator CI is intentionally separate.
+
+stages:
+  - test
+
+test:audio-sampler:
+  stage: test
+  image: docker:29-cli
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - apk add --no-cache make
+    - cd services/audio_transmitter
+  script:
+    - make test
