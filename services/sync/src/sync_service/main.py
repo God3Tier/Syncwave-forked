@@ -1,12 +1,23 @@
+import asyncio
 import json
 import time
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -36,10 +47,19 @@ from sync_service.models import (
     StartSessionResponse,
     TimePingFrame,
 )
+from sync_service.observability import (
+    OperationTimer,
+    bind_correlation_id,
+    configure_logging,
+    log_event,
+    metrics,
+    reset_correlation_id,
+)
 from sync_service.repository import SessionRepository
 from sync_service.timing import choose_correction, expected_position_ms
 
 settings = get_settings()
+configure_logging(settings.log_level)
 repository = SessionRepository(settings.database_url)
 manager = SessionManager(repository)
 dependencies = create_default_dependencies(settings)
@@ -62,12 +82,40 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await manager.shutdown_connections()
         if grpc_server is not None:
             await grpc_server.stop(grace=2)
         await manager.close()
 
 
 app = FastAPI(title="SyncWave Sync Service", version="0.2.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def observe_http(request: Request, call_next: Any) -> Response:
+    request_correlation_id, context_token = bind_correlation_id(
+        request.headers.get("x-correlation-id")
+    )
+    timer = OperationTimer()
+    outcome = "success"
+    try:
+        response = await call_next(request)
+        if response.status_code >= 400:
+            outcome = "rejected" if response.status_code < 500 else "failure"
+        response.headers["X-Correlation-ID"] = request_correlation_id
+        return response
+    except Exception:
+        outcome = "failure"
+        raise
+    finally:
+        log_event(
+            "http_request",
+            transport="http",
+            message_type=f"{request.method} {request.url.path}",
+            outcome=outcome,
+            duration_ms=timer.elapsed_ms(),
+        )
+        reset_correlation_id(context_token)
 
 
 def epoch_ms() -> int:
@@ -176,6 +224,11 @@ async def ready() -> dict[str, str]:
     return {"status": "ready"}
 
 
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics() -> Response:
+    return Response(content=metrics.render(), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
 async def demo() -> str:
     return DEMO_HTML
@@ -209,6 +262,15 @@ async def start_session(
     session = await manager.start(
         request,
         prepare_deadline_ms=epoch_ms() + settings.prepare_timeout_ms,
+    )
+    log_event(
+        "session_started",
+        transport="http",
+        jam_id=str(session.jam_id),
+        generation=session.generation,
+        request_id=str(request.request_id),
+        message_type="START_PLAYBACK",
+        outcome="accepted",
     )
     return StartSessionResponse(
         jam_id=session.jam_id,
@@ -316,6 +378,9 @@ async def submit_readiness_decision(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
     if scheduled:
+        metrics.prepare_duration_ms.observe(
+            max(0, now_ms - (session.prepare_deadline_ms - settings.prepare_timeout_ms))
+        )
         await manager.broadcast(
             session,
             server_frame(
@@ -488,6 +553,16 @@ async def skip_playback(
 
 
 async def send_error(websocket: WebSocket, session: Any, code: str, message: str) -> None:
+    metrics.protocol_errors_total.labels(code=code).inc()
+    log_event(
+        "protocol_error",
+        transport="websocket",
+        jam_id=str(session.jam_id),
+        generation=session.generation,
+        message_type="ERROR",
+        error_code=code,
+        outcome="rejected",
+    )
     await websocket.send_json(
         server_frame(
             session=session,
@@ -503,8 +578,13 @@ async def websocket_endpoint(
     jam_id: UUID,
     participant_id: UUID,
     token: str,
+    correlation_id: str | None = None,
 ) -> None:
     settings = get_settings()
+    _, context_token = bind_correlation_id(
+        websocket.headers.get("x-correlation-id") or correlation_id
+    )
+    connection_id = uuid4().hex
     session = manager.get(jam_id)
     participant = None if session is None else session.participants.get(participant_id)
 
@@ -517,14 +597,34 @@ async def websocket_endpoint(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="unauthorized participant",
         )
+        log_event(
+            "websocket_rejected",
+            transport="websocket",
+            jam_id=str(jam_id),
+            participant_id=str(participant_id),
+            connection_id=connection_id,
+            outcome="unauthorized",
+        )
+        reset_correlation_id(context_token)
         return
 
     await websocket.accept()
     if participant.connection is not None:
-        await participant.connection.close(code=status.WS_1008_POLICY_VIOLATION, reason="replaced")
+        await participant.connection.close(code=4001, reason="new connection replaced this client")
     participant.connection = websocket
     participant.last_seq = -1
     participant.correction_gate.reset()
+    metrics.websocket_connections.inc()
+    log_event(
+        "participant_joined",
+        transport="websocket",
+        jam_id=str(jam_id),
+        participant_id=str(participant_id),
+        connection_id=connection_id,
+        generation=session.generation,
+        message_type="JOINED",
+        outcome="accepted",
+    )
     await websocket.send_json(
         server_frame(
             session=session,
@@ -580,9 +680,29 @@ async def websocket_endpoint(
         )
 
     try:
+        message_times: deque[int] = deque()
         while True:
-            raw_message = await websocket.receive_text()
+            try:
+                raw_message = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=settings.websocket_idle_timeout_ms / 1_000,
+                )
+            except TimeoutError:
+                await websocket.close(code=1001, reason="heartbeat timeout")
+                break
             received_at_ms = epoch_ms()
+            if len(raw_message.encode("utf-8")) > settings.websocket_max_message_bytes:
+                metrics.protocol_errors_total.labels(code="MESSAGE_TOO_LARGE").inc()
+                await websocket.close(code=1009, reason="message too large")
+                break
+            window_start_ms = received_at_ms - settings.websocket_rate_limit_window_ms
+            while message_times and message_times[0] <= window_start_ms:
+                message_times.popleft()
+            if len(message_times) >= settings.websocket_rate_limit_messages:
+                metrics.protocol_errors_total.labels(code="RATE_LIMITED").inc()
+                await websocket.close(code=1013, reason="message rate exceeded")
+                break
+            message_times.append(received_at_ms)
             try:
                 data = json.loads(raw_message)
             except json.JSONDecodeError:
@@ -634,6 +754,16 @@ async def websocket_endpoint(
                         participant_id,
                         epoch_ms() + settings.start_lead_time_ms,
                     )
+                    log_event(
+                        "participant_ready",
+                        transport="websocket",
+                        jam_id=str(jam_id),
+                        participant_id=str(participant_id),
+                        connection_id=connection_id,
+                        generation=session.generation,
+                        message_type="READY",
+                        outcome="scheduled" if scheduled else "waiting",
+                    )
                     await manager.broadcast(
                         session,
                         server_frame(
@@ -648,6 +778,13 @@ async def websocket_endpoint(
                         ),
                     )
                     if scheduled:
+                        metrics.prepare_duration_ms.observe(
+                            max(
+                                0,
+                                received_at_ms
+                                - (session.prepare_deadline_ms - settings.prepare_timeout_ms),
+                            )
+                        )
                         await manager.broadcast(
                             session,
                             server_frame(
@@ -682,6 +819,12 @@ async def websocket_endpoint(
                         session,
                         frame.payload.measured_server_time_ms,
                     )
+                    if frame.payload.clock_offset_ms is not None:
+                        metrics.clock_offset_ms.observe(frame.payload.clock_offset_ms)
+                    if frame.payload.round_trip_delay_ms is not None:
+                        metrics.round_trip_delay_ms.observe(frame.payload.round_trip_delay_ms)
+                    if frame.payload.start_error_ms is not None:
+                        metrics.start_error_ms.observe(abs(frame.payload.start_error_ms))
                     if frame.payload.buffering:
                         continue
 
@@ -692,6 +835,7 @@ async def websocket_endpoint(
                         measured_server_time_ms=frame.payload.measured_server_time_ms,
                     )
                     drift_ms = frame.payload.position_ms - expected_at_measurement
+                    metrics.drift_ms.observe(abs(drift_ms))
                     apply_at_ms = epoch_ms() + settings.correction_lead_time_ms
                     expected_at_apply = expected_position_ms(
                         anchor_server_time_ms=session.anchor_server_time_ms,
@@ -716,6 +860,22 @@ async def websocket_endpoint(
                         cooldown_ms=settings.correction_cooldown_ms,
                     ):
                         assert correction is not None
+                        metrics.corrections_total.labels(
+                            method=correction.method,
+                            reason="drift",
+                        ).inc()
+                        log_event(
+                            "correction_issued",
+                            transport="websocket",
+                            jam_id=str(jam_id),
+                            participant_id=str(participant_id),
+                            connection_id=connection_id,
+                            generation=session.generation,
+                            message_type="SYNC_CORRECTION",
+                            outcome=correction.method,
+                            drift_ms=correction.drift_ms,
+                            method=correction.method,
+                        )
                         await websocket.send_json(
                             server_frame(
                                 session=session,
@@ -746,4 +906,17 @@ async def websocket_endpoint(
                     str(error.errors()[0]["msg"]),
                 )
     except WebSocketDisconnect:
+        pass
+    finally:
         await manager.disconnect(jam_id, participant_id, websocket)
+        metrics.websocket_connections.dec()
+        log_event(
+            "participant_disconnected",
+            transport="websocket",
+            jam_id=str(jam_id),
+            participant_id=str(participant_id),
+            connection_id=connection_id,
+            generation=session.generation,
+            outcome="closed",
+        )
+        reset_correlation_id(context_token)

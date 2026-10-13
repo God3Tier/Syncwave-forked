@@ -15,6 +15,7 @@ from sync_service.dependencies import (
 )
 from sync_service.manager import SessionManager, SyncSession
 from sync_service.models import PlaybackState, ReadinessDecision, StartSessionRequest
+from sync_service.observability import bind_correlation_id, log_event, metrics
 from syncwave.sync.v1 import sync_pb2, sync_pb2_grpc
 
 
@@ -87,8 +88,15 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
 
     async def _authorize(self, context: grpc.aio.ServicerContext) -> None:
         metadata = {item.key.lower(): item.value for item in context.invocation_metadata()}
+        request_correlation_id, _ = bind_correlation_id(metadata.get("x-correlation-id"))
+        await context.send_initial_metadata((("x-correlation-id", request_correlation_id),))
         token = metadata.get("x-internal-token")
         if token is None or not compare_digest(token, self._settings.internal_service_token):
+            log_event(
+                "grpc_request",
+                transport="grpc",
+                outcome="unauthenticated",
+            )
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid service token")
 
     async def _session(
@@ -171,6 +179,15 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
         session = await self._manager.start(
             command,
             prepare_deadline_ms=epoch_ms() + self._settings.prepare_timeout_ms,
+        )
+        log_event(
+            "session_started",
+            transport="grpc",
+            jam_id=str(session.jam_id),
+            generation=session.generation,
+            request_id=str(command.request_id),
+            message_type="StartPlayback",
+            outcome="accepted",
         )
         return sync_pb2.StartPlaybackResponse(playback=playback_snapshot(session))
 
@@ -349,6 +366,13 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             await self._abort_validation(context, error)
             raise AssertionError("context.abort must terminate the RPC") from error
         if scheduled:
+            metrics.prepare_duration_ms.observe(
+                max(
+                    0,
+                    now_ms
+                    - (session.prepare_deadline_ms - self._settings.prepare_timeout_ms),
+                )
+            )
             await self._manager.broadcast(
                 session,
                 server_frame(

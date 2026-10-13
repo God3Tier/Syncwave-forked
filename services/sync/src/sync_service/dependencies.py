@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -6,6 +7,7 @@ from typing import Protocol, TypeVar
 from uuid import UUID
 
 from sync_service.config import Settings
+from sync_service.observability import log_event, metrics
 
 T = TypeVar("T")
 
@@ -105,10 +107,30 @@ class PlaybackDependencies:
         return await self._with_timeout(self.streaming.get_stream(song_id), "streaming")
 
     async def _with_timeout(self, operation: Awaitable[T], dependency: str) -> T:
+        started = time.perf_counter()
+        outcome = "success"
         try:
             return await asyncio.wait_for(operation, timeout=self.timeout_seconds)
         except TimeoutError as error:
+            outcome = "timeout"
             raise DependencyTimeoutError(f"{dependency} timed out") from error
+        except DependencyError:
+            outcome = "failure"
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - started) * 1_000
+            metrics.dependency_duration_ms.labels(
+                service=dependency,
+                method="resolve",
+                status=outcome,
+            ).observe(duration_ms)
+            log_event(
+                "dependency_request",
+                transport="internal",
+                message_type=f"{dependency}.resolve",
+                outcome=outcome,
+                duration_ms=round(duration_ms, 3),
+            )
 
 
 def create_default_dependencies(settings: Settings) -> PlaybackDependencies:

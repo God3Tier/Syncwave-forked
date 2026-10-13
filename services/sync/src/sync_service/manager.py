@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import WebSocket
 
 from sync_service.models import PlaybackState, ReadinessDecision, StartSessionRequest
+from sync_service.observability import log_event, metrics
 from sync_service.repository import PersistedSession, SessionRepository
 from sync_service.timing import CorrectionGate, expected_position_ms
 
@@ -59,6 +60,16 @@ class SessionManager:
     async def close(self) -> None:
         await self._repository.close()
 
+    async def shutdown_connections(self) -> None:
+        connections = [
+            participant.connection
+            for session in self._sessions.values()
+            for participant in session.participants.values()
+            if participant.connection is not None
+        ]
+        for connection in connections:
+            await connection.close(code=1012, reason="sync service restarting")
+
     async def ping(self) -> None:
         await self._repository.ping()
 
@@ -85,6 +96,15 @@ class SessionManager:
             self._sessions[request.jam_id] = session
             self._request_results[request.request_id] = session
             await self._repository.save_start(request.request_id, self._to_persisted(session))
+            metrics.ready_participants.set(self.ready_participant_count())
+            log_event(
+                "generation_started",
+                jam_id=str(session.jam_id),
+                generation=session.generation,
+                request_id=str(request.request_id),
+                message_type="START_PLAYBACK",
+                outcome="preparing",
+            )
             return session
 
     def get(self, jam_id: UUID) -> SyncSession | None:
@@ -146,6 +166,14 @@ class SessionManager:
 
             self._request_results[request_id] = session
             await self._repository.save_start(request_id, self._to_persisted(session))
+            log_event(
+                "readiness_decision_applied",
+                jam_id=str(session.jam_id),
+                generation=session.generation,
+                request_id=str(request_id),
+                message_type=decision.value,
+                outcome=session.state.value,
+            )
             return session, scheduled
 
     async def mark_ready(
@@ -161,6 +189,7 @@ class SessionManager:
                 return False
 
             session.participants[participant_id].ready = True
+            metrics.ready_participants.set(self.ready_participant_count())
             if not all(participant.ready for participant in session.participants.values()):
                 return False
 
@@ -214,6 +243,7 @@ class SessionManager:
             session.playback_rate = 1.0
             session.state = PlaybackState.PAUSED
             await self._save_command(request_id, session)
+            self._log_control(session, request_id, "PAUSE", "applied")
             return session, True
 
     async def resume(
@@ -233,6 +263,7 @@ class SessionManager:
             session.playback_rate = 1.0
             session.state = PlaybackState.SCHEDULED
             await self._save_command(request_id, session)
+            self._log_control(session, request_id, "RESUME", "applied")
             return session, True
 
     async def seek(
@@ -260,6 +291,7 @@ class SessionManager:
             if resulting_state is not PlaybackState.PAUSED:
                 session.state = PlaybackState.SCHEDULED
             await self._save_command(request_id, session)
+            self._log_control(session, request_id, "SEEK", "applied")
             return session, True, resulting_state
 
     async def skip(
@@ -297,8 +329,26 @@ class SessionManager:
             for participant in session.participants.values():
                 participant.ready = False
                 participant.correction_gate.reset()
+            metrics.ready_participants.set(self.ready_participant_count())
             await self._save_command(request_id, session)
+            self._log_control(session, request_id, "SKIP", "preparing")
             return session, True
+
+    @staticmethod
+    def _log_control(
+        session: SyncSession,
+        request_id: UUID,
+        message_type: str,
+        outcome: str,
+    ) -> None:
+        log_event(
+            "playback_control_applied",
+            jam_id=str(session.jam_id),
+            generation=session.generation,
+            request_id=str(request_id),
+            message_type=message_type,
+            outcome=outcome,
+        )
 
     def _validate_control(
         self,
@@ -312,6 +362,13 @@ class SessionManager:
             raise ValueError("stale generation")
         if session.state not in allowed_states:
             raise ValueError(f"command is invalid while playback is {session.state.value}")
+
+    def ready_participant_count(self) -> int:
+        return sum(
+            participant.ready
+            for active_session in self._sessions.values()
+            for participant in active_session.participants.values()
+        )
 
     @staticmethod
     def _validate_request_jam(previous: SyncSession, session: SyncSession) -> None:

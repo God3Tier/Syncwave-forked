@@ -218,3 +218,18 @@ async def test_grpc_maps_catalogue_and_streaming_failures(grpc_stack: GrpcStack)
     with pytest.raises(grpc.aio.AioRpcError) as timeout_error:
         await stub.StartPlayback(timed_out, metadata=AUTH_METADATA, timeout=2)
     assert timeout_error.value.code() is grpc.StatusCode.DEADLINE_EXCEEDED
+
+
+@pytest.mark.anyio
+async def test_grpc_correlation_id_is_propagated(grpc_stack: GrpcStack) -> None:
+    _, stub, _, _, _ = grpc_stack
+    call = stub.StartPlayback(
+        start_request(),
+        metadata=AUTH_METADATA + (("x-correlation-id", "grpc-jam-42"),),
+        timeout=2,
+    )
+
+    await call
+    metadata = await call.initial_metadata()
+
+    assert metadata["x-correlation-id"] == "grpc-jam-42"

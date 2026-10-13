@@ -6,6 +6,7 @@ from functools import lru_cache
 @dataclass(frozen=True, slots=True)
 class Settings:
     service_name: str = "sync"
+    log_level: str = "INFO"
     internal_service_token: str = "local-jam-to-sync-token"
     mock_sync_token: str = "local-sync-participant-token"
     database_url: str = "postgresql+asyncpg://sync:sync@localhost:5432/sync"
@@ -21,12 +22,17 @@ class Settings:
     correction_lead_time_ms: int = 500
     correction_hysteresis_ms: int = 20
     correction_cooldown_ms: int = 3_000
+    websocket_idle_timeout_ms: int = 45_000
+    websocket_max_message_bytes: int = 64 * 1024
+    websocket_rate_limit_messages: int = 30
+    websocket_rate_limit_window_ms: int = 1_000
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "sync"),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
         internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", "local-jam-to-sync-token"),
         mock_sync_token=os.getenv("MOCK_SYNC_TOKEN", "local-sync-participant-token"),
         database_url=os.getenv(
@@ -45,4 +51,8 @@ def get_settings() -> Settings:
         correction_lead_time_ms=int(os.getenv("CORRECTION_LEAD_TIME_MS", "500")),
         correction_hysteresis_ms=int(os.getenv("CORRECTION_HYSTERESIS_MS", "20")),
         correction_cooldown_ms=int(os.getenv("CORRECTION_COOLDOWN_MS", "3000")),
+        websocket_idle_timeout_ms=int(os.getenv("WEBSOCKET_IDLE_TIMEOUT_MS", "45000")),
+        websocket_max_message_bytes=int(os.getenv("WEBSOCKET_MAX_MESSAGE_BYTES", "65536")),
+        websocket_rate_limit_messages=int(os.getenv("WEBSOCKET_RATE_LIMIT_MESSAGES", "30")),
+        websocket_rate_limit_window_ms=int(os.getenv("WEBSOCKET_RATE_LIMIT_WINDOW_MS", "1000")),
     )
