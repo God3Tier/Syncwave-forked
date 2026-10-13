@@ -1,4 +1,7 @@
-# Audio sampler test pipeline. Orchestrator CI is intentionally separate.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "parent_pipeline"'
+    - when: never
 
 stages:
   - test
