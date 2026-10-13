@@ -70,7 +70,10 @@ const token = params.get('token') || (slot ? 'local-sync-participant-token' : nu
 const $ = id => document.getElementById(id);
 $('participant').textContent = participantId || 'missing';
 let socket, context, audioBuffer, source, seq = 0, generation = 0;
-let clockOffsetMs = 0, offsetSamples = [];
+let clockOffsetMs = 0, roundTripDelayMs = 0, startErrorMs = null;
+let pendingStartErrorMs = null, offsetSamples = [];
+let heartbeatTimer, statusTimer, playbackAnchorContextTime = 0, playbackAnchorPositionMs = 0;
+let playbackRate = 1;
 const log = message => { $('log').textContent += `${new Date().toISOString()} ${message}\n`; };
 const frame = (type, payload) => ({type, jam_id: jamId, seq: seq++, sent_at_ms: Date.now(), payload});
 const setState = value => { $('state').textContent = value; document.body.dataset.state = value; };
@@ -88,6 +91,37 @@ function sampleClock() {
   socket.send(JSON.stringify(frame('TIME_PING', {sample_id: sampleId, client_sent_ms: Date.now()})));
 }
 
+function currentPositionMs() {
+  if (!context || playbackAnchorContextTime === 0) return playbackAnchorPositionMs;
+  return Math.max(0, playbackAnchorPositionMs +
+    (context.currentTime - playbackAnchorContextTime) * 1000 * playbackRate);
+}
+
+function reanchorPlayback(rate) {
+  playbackAnchorPositionMs = currentPositionMs();
+  playbackAnchorContextTime = context.currentTime;
+  playbackRate = rate;
+  if (source) source.playbackRate.setValueAtTime(rate, context.currentTime);
+}
+
+function startStatusReports() {
+  clearInterval(statusTimer);
+  statusTimer = setInterval(() => {
+    if (!socket || socket.readyState !== WebSocket.OPEN || $('state').textContent !== 'PLAYING') return;
+    const report = frame('PLAYBACK_STATUS', {
+      generation,
+      measured_server_time_ms: Math.round(Date.now() + clockOffsetMs),
+      position_ms: Math.round(currentPositionMs()),
+      buffering: false,
+      clock_offset_ms: clockOffsetMs,
+      round_trip_delay_ms: roundTripDelayMs,
+      start_error_ms: pendingStartErrorMs
+    });
+    pendingStartErrorMs = null;
+    socket.send(JSON.stringify(report));
+  }, 1000);
+}
+
 function schedulePlayback(payload) {
   if (source) source.stop();
   source = context.createBufferSource();
@@ -96,6 +130,18 @@ function schedulePlayback(payload) {
   const serverNow = Date.now() + clockOffsetMs;
   const delayMs = Math.max(0, payload.target_server_time_ms - serverNow);
   const when = context.currentTime + delayMs / 1000;
+  playbackAnchorContextTime = when;
+  playbackAnchorPositionMs = payload.start_position_ms;
+  playbackRate = payload.playback_rate || 1;
+  source.playbackRate.value = playbackRate;
+  const activeSource = source;
+  source.onended = () => {
+    if (source === activeSource && $('state').textContent === 'PLAYING') {
+      clearInterval(statusTimer);
+      setState('ENDED');
+      log('test melody ended');
+    }
+  };
   source.start(when, payload.start_position_ms / 1000);
   $('target').textContent = String(payload.target_server_time_ms);
   setState('SCHEDULED');
@@ -103,16 +149,13 @@ function schedulePlayback(payload) {
   setTimeout(() => {
     const measuredServerTime = Date.now() + clockOffsetMs;
     const errorMs = Math.round(measuredServerTime - payload.target_server_time_ms);
+    startErrorMs = errorMs;
+    pendingStartErrorMs = errorMs;
     $('start-error').textContent = `${errorMs} ms`;
     document.body.dataset.startErrorMs = String(errorMs);
     setState('PLAYING');
     log(`playback started; measured timer error ${errorMs}ms`);
-    setTimeout(() => socket.send(JSON.stringify(frame('PLAYBACK_STATUS', {
-      generation,
-      measured_server_time_ms: Math.round(Date.now() + clockOffsetMs),
-      position_ms: 1000,
-      buffering: false
-    }))), 1000);
+    startStatusReports();
   }, delayMs);
 }
 
@@ -125,6 +168,8 @@ function schedulePause(payload) {
   $('target').textContent = String(payload.target_server_time_ms);
   setState('PAUSE_SCHEDULED');
   setTimeout(() => {
+    playbackAnchorPositionMs = payload.position_ms;
+    playbackAnchorContextTime = 0;
     setState('PAUSED');
     log(`paused at ${payload.position_ms}ms`);
   }, delayMs);
@@ -160,6 +205,7 @@ async function handle(message) {
       offsetSamples.sort((a, b) => a.delay - b.delay);
       const best = offsetSamples.slice(0, 3).map(sample => sample.offset).sort((a, b) => a - b);
       clockOffsetMs = best[1];
+      roundTripDelayMs = offsetSamples[0].delay;
       $('offset').textContent = `${clockOffsetMs.toFixed(1)} ms`;
       log('clock sampling complete');
     }
@@ -182,6 +228,19 @@ async function handle(message) {
     scheduleSeek(data.payload);
   } else if (data.type === 'SYNC_CORRECTION') {
     $('correction').textContent = `${data.payload.method} (${data.payload.drift_ms}ms)`;
+    const delayMs = Math.max(0, data.payload.apply_at_server_time_ms - (Date.now() + clockOffsetMs));
+    if (data.payload.method === 'SEEK') {
+      schedulePlayback({
+        target_server_time_ms: data.payload.apply_at_server_time_ms,
+        start_position_ms: data.payload.target_position_ms,
+        playback_rate: 1
+      });
+    } else {
+      setTimeout(() => {
+        reanchorPlayback(data.payload.playback_rate);
+        setTimeout(() => reanchorPlayback(1), data.payload.duration_ms);
+      }, delayMs);
+    }
   } else if (data.type === 'ERROR') {
     setState(`ERROR: ${data.payload.code}`);
   }
@@ -197,7 +256,18 @@ $('arm').addEventListener('click', async () => {
   const base = location.pathname.startsWith('/api/sync/') ? '/api/sync' : '';
   socket = new WebSocket(`${scheme}://${location.host}${base}/ws?jam_id=${jamId}&participant_id=${participantId}&token=${encodeURIComponent(token)}`);
   socket.onmessage = handle;
-  socket.onclose = event => { if ($('state').textContent !== 'PLAYING') setState(`CLOSED:${event.code}`); };
+  socket.onopen = () => {
+    heartbeatTimer = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(frame('TIME_PING', {sample_id: crypto.randomUUID(), client_sent_ms: Date.now()})));
+      }
+    }, 15000);
+  };
+  socket.onclose = event => {
+    clearInterval(heartbeatTimer);
+    clearInterval(statusTimer);
+    setState(`CLOSED:${event.code}`);
+  };
   socket.onerror = () => setState('SOCKET_ERROR');
   setState('CONNECTING');
 });

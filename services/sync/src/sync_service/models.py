@@ -112,6 +112,9 @@ class PlaybackStatusPayload(StrictModel):
     measured_server_time_ms: int = Field(ge=0)
     position_ms: int = Field(ge=0)
     buffering: bool
+    clock_offset_ms: float | None = None
+    round_trip_delay_ms: float | None = Field(default=None, ge=0)
+    start_error_ms: int | None = None
 
 
 class TimePingFrame(ClientFrame):

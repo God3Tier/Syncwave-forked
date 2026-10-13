@@ -7,6 +7,9 @@
     "generation": 1,
     "measured_server_time_ms": 1791460005000,
     "position_ms": 1700,
-    "buffering": false
+    "buffering": false,
+    "clock_offset_ms": 1.5,
+    "round_trip_delay_ms": 12,
+    "start_error_ms": 8
   }
 }

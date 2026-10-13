@@ -18,7 +18,10 @@
         "generation": { "type": "integer", "minimum": 1 },
         "measured_server_time_ms": { "type": "integer", "minimum": 0 },
         "position_ms": { "type": "integer", "minimum": 0 },
-        "buffering": { "type": "boolean" }
+        "buffering": { "type": "boolean" },
+        "clock_offset_ms": { "type": "number" },
+        "round_trip_delay_ms": { "type": "number", "minimum": 0 },
+        "start_error_ms": { "type": "integer" }
       }
     }
   }
