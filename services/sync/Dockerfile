@@ -13,8 +13,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --requirement requirements.txt
 
 COPY src ./src
+COPY alembic.ini .
+COPY migrations ./migrations
 
 USER app
 EXPOSE 8080 50051
 
-CMD ["sh", "-c", "uvicorn sync_service.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn sync_service.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
