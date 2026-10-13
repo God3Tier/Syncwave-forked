@@ -1,0 +1,10 @@
+[package]
+name = "song_request_orchestrator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web = "4"
+bytes = "1.12.1"
+diesel = { version = "2.3", features = ["postgres", "r2d2"] }
+dotenvy = "0.15"
