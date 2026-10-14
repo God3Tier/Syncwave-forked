@@ -77,6 +77,20 @@ class JamManager:
             await self._save(jam)
         return self.get(jam.jam_id, include_token=True)
 
+    async def refresh(self, jam_id: UUID) -> JamResponse:
+        async with self._lock:
+            jam = self._find(jam_id)
+            if jam.sync_generation is None:
+                return self.get(jam_id)
+            snapshot = await self._sync.playback_state(jam.jam_id)
+            changed = jam.sync_generation != snapshot.generation or jam.state != snapshot.state
+            self._apply_snapshot(jam, snapshot.generation, snapshot.state)
+            if changed:
+                await self._save(jam)
+        if changed:
+            await self.broadcast(jam_id)
+        return self.get(jam_id)
+
     async def join(self, jam_id: UUID, participant_id: UUID) -> JamResponse:
         async with self._lock:
             jam = self._find(jam_id)

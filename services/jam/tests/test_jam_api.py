@@ -1,6 +1,10 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+
+from jam_service.main import sync_client
+from jam_service.models import JamState
+from jam_service.sync_client import SyncSnapshot
 
 
 def create_jam(client: TestClient, owner_id: str) -> dict:
@@ -129,3 +133,25 @@ def test_websocket_receives_initial_and_updated_queue(client: TestClient) -> Non
             json={"actor_id": owner_id, "song_id": str(uuid4())},
         )
         assert len(websocket.receive_json()["queue"]) == 1
+
+
+def test_get_reconciles_readiness_driven_sync_state(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    client.post(
+        f"/jams/{jam_id}/queue",
+        json={"actor_id": owner_id, "song_id": str(uuid4())},
+    ).raise_for_status()
+    started = client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"actor_id": owner_id, "request_id": str(uuid4())},
+    )
+    assert started.json()["state"] == "PREPARING"
+
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(
+        generation=1,
+        state=JamState.SCHEDULED,
+    )
+    refreshed = client.get(f"/jams/{jam_id}")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["state"] == "SCHEDULED"

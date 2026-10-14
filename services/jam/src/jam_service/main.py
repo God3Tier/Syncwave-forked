@@ -102,7 +102,7 @@ async def create_jam(request: CreateJamRequest, _: Authenticated) -> JamResponse
 
 @app.get("/jams/{jam_id}", response_model=JamResponse)
 async def get_jam(jam_id: UUID, _: Authenticated) -> JamResponse:
-    return manager.get(jam_id)
+    return await manager.refresh(jam_id)
 
 
 @app.post("/jams/{jam_id}/members", response_model=JamResponse)

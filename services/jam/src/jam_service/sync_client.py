@@ -86,6 +86,9 @@ class SyncClient:
     async def readiness(self, jam_id: UUID) -> ReadinessStatus:
         raise NotImplementedError
 
+    async def playback_state(self, jam_id: UUID) -> SyncSnapshot:
+        raise NotImplementedError
+
     async def update_participants(
         self,
         request_id: UUID,
@@ -140,6 +143,12 @@ class FakeSyncClient(SyncClient):
         if snapshot is None:
             raise SyncClientError("playback session not found")
         return ReadinessStatus(snapshot.generation, 0, False, False, [], [])
+
+    async def playback_state(self, jam_id):
+        snapshot = self._snapshots.get(jam_id)
+        if snapshot is None:
+            raise SyncClientError("playback session not found")
+        return snapshot
 
     async def update_participants(self, request_id, jam_id, generation, participant_ids):
         return self._check(jam_id, generation)
@@ -246,6 +255,12 @@ class GrpcSyncClient(SyncClient):
             decision_required=response.decision_required,
             ready_participant_ids=[UUID(value) for value in response.ready_participant_ids],
             unready_participant_ids=[UUID(value) for value in response.unready_participant_ids],
+        )
+
+    async def playback_state(self, jam_id):
+        return await self._call(
+            self._stub.GetPlaybackState,
+            sync_pb2.GetPlaybackStateRequest(jam_id=str(jam_id)),
         )
 
     async def update_participants(self, request_id, jam_id, generation, participant_ids):
