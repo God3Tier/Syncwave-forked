@@ -1723,8 +1723,8 @@ Then -- protocol and service hardening:
 - [x] Send periodic browser `PLAYBACK_STATUS` reports and demonstrate that an
   intentionally delayed client converges after correction
 - [x] Add Alembic migrations before making further deployed schema changes
-- [ ] Replace the temporary internal HTTP adapters after Jam switches to the
-  generated gRPC client
+- [x] Switch Jam playback control to the generated, authenticated Sync gRPC
+  client; keep temporary Sync HTTP adapters only for backward compatibility
 - [x] Add configurable deadline-bound Catalogue/Streaming gRPC clients and a
   versioned media query contract
 - [ ] Switch local/CI configuration from fakes after Catalogue and Streaming
@@ -1732,8 +1732,9 @@ Then -- protocol and service hardening:
 
 Final integration and evidence:
 
-- [ ] Run the full Jam-to-Sync flow through the real Jam service and production
-  frontend, including members queueing while only the owner controls playback
+- [x] Run the backend Jam-to-Sync flow through the real Jam service, including
+  members queueing while only the owner controls playback
+- [ ] Connect the production frontend to the Jam HTTP/WebSocket API
 - [ ] Run at least 20 starts across physical laptops/phones on real Wi-Fi and
   record P50/P95/max client-to-client start difference
 - [ ] Measure stable-playback drift, correction count, reconnect recovery, and
