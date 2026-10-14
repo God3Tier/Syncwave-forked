@@ -23,10 +23,7 @@ def activate(client: TestClient) -> tuple[str, str, str]:
     }
     response = client.post("/internal/v1/sessions", headers=INTERNAL_HEADERS, json=body)
     assert response.status_code == 201
-    path = (
-        f"/ws?jam_id={jam_id}&participant_id={participant_id}"
-        "&token=local-sync-participant-token"
-    )
+    path = f"/ws?jam_id={jam_id}&participant_id={participant_id}&token=local-sync-participant-token"
     return jam_id, participant_id, path
 
 

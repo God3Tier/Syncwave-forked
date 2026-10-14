@@ -796,11 +796,11 @@ async def websocket_endpoint(
                             server_frame(
                                 session=session,
                                 message_type="PLAY_AT",
-                            payload=play_at_payload(
-                                session,
-                                target_server_time_ms=session.anchor_server_time_ms,
-                                start_position_ms=session.anchor_position_ms,
-                            ),
+                                payload=play_at_payload(
+                                    session,
+                                    target_server_time_ms=session.anchor_server_time_ms,
+                                    start_position_ms=session.anchor_position_ms,
+                                ),
                             ),
                         )
                 elif data.get("type") == "PLAYBACK_STATUS":

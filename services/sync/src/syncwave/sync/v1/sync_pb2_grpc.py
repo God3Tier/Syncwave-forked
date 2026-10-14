@@ -60,6 +60,11 @@ class SyncControlServiceStub(object):
                 request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackRequest.SerializeToString,
                 response_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackResponse.FromString,
                 _registered_method=True)
+        self.UpdateParticipants = channel.unary_unary(
+                '/syncwave.sync.v1.SyncControlService/UpdateParticipants',
+                request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.SerializeToString,
+                response_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.FromString,
+                _registered_method=True)
         self.SubmitReadinessDecision = channel.unary_unary(
                 '/syncwave.sync.v1.SyncControlService/SubmitReadinessDecision',
                 request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SubmitReadinessDecisionRequest.SerializeToString,
@@ -111,6 +116,12 @@ class SyncControlServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateParticipants(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SubmitReadinessDecision(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -156,6 +167,11 @@ def add_SyncControlServiceServicer_to_server(servicer, server):
                     servicer.SkipPlayback,
                     request_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackRequest.FromString,
                     response_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackResponse.SerializeToString,
+            ),
+            'UpdateParticipants': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateParticipants,
+                    request_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.FromString,
+                    response_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.SerializeToString,
             ),
             'SubmitReadinessDecision': grpc.unary_unary_rpc_method_handler(
                     servicer.SubmitReadinessDecision,
@@ -309,6 +325,33 @@ class SyncControlService(object):
             '/syncwave.sync.v1.SyncControlService/SkipPlayback',
             syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackRequest.SerializeToString,
             syncwave_dot_sync_dot_v1_dot_sync__pb2.SkipPlaybackResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateParticipants(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/syncwave.sync.v1.SyncControlService/UpdateParticipants',
+            syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.SerializeToString,
+            syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.FromString,
             options,
             channel_credentials,
             insecure,

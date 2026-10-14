@@ -26,15 +26,11 @@ def clock_sample(
     """Calculate the standard four-timestamp NTP offset and network delay."""
     return ClockSample(
         sampled_at_ms=client_received_ms,
-        offset_ms=(
-            (server_received_ms - client_sent_ms)
-            + (server_sent_ms - client_received_ms)
-        )
+        offset_ms=((server_received_ms - client_sent_ms) + (server_sent_ms - client_received_ms))
         / 2,
         round_trip_delay_ms=max(
             0,
-            (client_received_ms - client_sent_ms)
-            - (server_sent_ms - server_received_ms),
+            (client_received_ms - client_sent_ms) - (server_sent_ms - server_received_ms),
         ),
     )
 
@@ -50,9 +46,7 @@ def select_clock_estimate(
     recent = [sample for sample in samples if now_ms - sample.sampled_at_ms <= max_age_ms]
     if not recent:
         return None
-    candidates = sorted(recent, key=lambda sample: sample.round_trip_delay_ms)[
-        :best_sample_count
-    ]
+    candidates = sorted(recent, key=lambda sample: sample.round_trip_delay_ms)[:best_sample_count]
     center = median(sample.offset_ms for sample in candidates)
     mad = median(abs(sample.offset_ms - center) for sample in candidates)
     tolerance = max(10.0, 3 * mad)
@@ -105,18 +99,14 @@ class CorrectionGate:
         if correction is None:
             return False
 
-        if (
-            self.last_issued_at_ms is not None
-            and now_ms - self.last_issued_at_ms < cooldown_ms
-        ):
+        if self.last_issued_at_ms is not None and now_ms - self.last_issued_at_ms < cooldown_ms:
             return False
 
         if not self.active:
             if absolute_drift <= ignore_threshold_ms + hysteresis_ms:
                 return False
         elif not (
-            self.last_method is CorrectionMethod.RATE
-            and correction.method is CorrectionMethod.SEEK
+            self.last_method is CorrectionMethod.RATE and correction.method is CorrectionMethod.SEEK
         ):
             return False
 

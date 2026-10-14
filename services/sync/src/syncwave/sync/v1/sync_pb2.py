@@ -24,17 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1bsyncwave/sync/v1/sync.proto\x12\x10syncwave.sync.v1\";\n\x11PlaybackSelection\x12\x15\n\rqueue_item_id\x18\x01 \x01(\t\x12\x0f\n\x07song_id\x18\x02 \x01(\t\"\x9d\x01\n\x14StartPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x10\n\x08owner_id\x18\x03 \x01(\t\x12\x36\n\tselection\x18\x04 \x01(\x0b\x32#.syncwave.sync.v1.PlaybackSelection\x12\x17\n\x0fparticipant_ids\x18\x05 \x03(\t\"N\n\x14PausePlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\"O\n\x15ResumePlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\"b\n\x13SeekPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12\x13\n\x0bposition_ms\x18\x04 \x01(\x03\"\x8a\x01\n\x13SkipPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12;\n\x0enext_selection\x18\x04 \x01(\x0b\x32#.syncwave.sync.v1.PlaybackSelection\"\x8f\x01\n\x1eSubmitReadinessDecisionRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12\x35\n\x08\x64\x65\x63ision\x18\x04 \x01(\x0e\x32#.syncwave.sync.v1.ReadinessDecision\")\n\x17GetPlaybackStateRequest\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\"+\n\x19GetReadinessStatusRequest\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\"\xe6\x01\n\x10PlaybackSnapshot\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\x12\x12\n\ngeneration\x18\x02 \x01(\x03\x12.\n\x05state\x18\x03 \x01(\x0e\x32\x1f.syncwave.sync.v1.PlaybackState\x12\x0f\n\x07song_id\x18\x04 \x01(\t\x12\x1d\n\x15\x61nchor_server_time_ms\x18\x05 \x01(\x03\x12\x1a\n\x12\x61nchor_position_ms\x18\x06 \x01(\x03\x12\x15\n\rplayback_rate\x18\x07 \x01(\x01\x12\x1b\n\x13prepare_deadline_ms\x18\x08 \x01(\x03\"M\n\x15StartPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"M\n\x15PausePlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"N\n\x16ResumePlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"L\n\x14SeekPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"L\n\x14SkipPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"W\n\x1fSubmitReadinessDecisionResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"\xcb\x01\n\x1aGetReadinessStatusResponse\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\x12\x12\n\ngeneration\x18\x02 \x01(\x03\x12\x1b\n\x13prepare_deadline_ms\x18\x03 \x01(\x03\x12\x11\n\ttimed_out\x18\x04 \x01(\x08\x12\x19\n\x11\x64\x65\x63ision_required\x18\x05 \x01(\x08\x12\x1d\n\x15ready_participant_ids\x18\x06 \x03(\t\x12\x1f\n\x17unready_participant_ids\x18\x07 \x03(\t\"P\n\x18GetPlaybackStateResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot*\xd5\x01\n\rPlaybackState\x12\x1e\n\x1aPLAYBACK_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13PLAYBACK_STATE_IDLE\x10\x01\x12\x1c\n\x18PLAYBACK_STATE_PREPARING\x10\x02\x12\x1c\n\x18PLAYBACK_STATE_SCHEDULED\x10\x03\x12\x1a\n\x16PLAYBACK_STATE_PLAYING\x10\x04\x12\x19\n\x15PLAYBACK_STATE_PAUSED\x10\x05\x12\x18\n\x14PLAYBACK_STATE_ENDED\x10\x06*\x94\x01\n\x11ReadinessDecision\x12\"\n\x1eREADINESS_DECISION_UNSPECIFIED\x10\x00\x12\x1f\n\x1bREADINESS_DECISION_CONTINUE\x10\x01\x12\x1b\n\x17READINESS_DECISION_WAIT\x10\x02\x12\x1d\n\x19READINESS_DECISION_CANCEL\x10\x03\x32\xd7\x06\n\x12SyncControlService\x12`\n\rStartPlayback\x12&.syncwave.sync.v1.StartPlaybackRequest\x1a\'.syncwave.sync.v1.StartPlaybackResponse\x12`\n\rPausePlayback\x12&.syncwave.sync.v1.PausePlaybackRequest\x1a\'.syncwave.sync.v1.PausePlaybackResponse\x12\x63\n\x0eResumePlayback\x12\'.syncwave.sync.v1.ResumePlaybackRequest\x1a(.syncwave.sync.v1.ResumePlaybackResponse\x12]\n\x0cSeekPlayback\x12%.syncwave.sync.v1.SeekPlaybackRequest\x1a&.syncwave.sync.v1.SeekPlaybackResponse\x12]\n\x0cSkipPlayback\x12%.syncwave.sync.v1.SkipPlaybackRequest\x1a&.syncwave.sync.v1.SkipPlaybackResponse\x12~\n\x17SubmitReadinessDecision\x12\x30.syncwave.sync.v1.SubmitReadinessDecisionRequest\x1a\x31.syncwave.sync.v1.SubmitReadinessDecisionResponse\x12o\n\x12GetReadinessStatus\x12+.syncwave.sync.v1.GetReadinessStatusRequest\x1a,.syncwave.sync.v1.GetReadinessStatusResponse\x12i\n\x10GetPlaybackState\x12).syncwave.sync.v1.GetPlaybackStateRequest\x1a*.syncwave.sync.v1.GetPlaybackStateResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1bsyncwave/sync/v1/sync.proto\x12\x10syncwave.sync.v1\";\n\x11PlaybackSelection\x12\x15\n\rqueue_item_id\x18\x01 \x01(\t\x12\x0f\n\x07song_id\x18\x02 \x01(\t\"\x9d\x01\n\x14StartPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x10\n\x08owner_id\x18\x03 \x01(\t\x12\x36\n\tselection\x18\x04 \x01(\x0b\x32#.syncwave.sync.v1.PlaybackSelection\x12\x17\n\x0fparticipant_ids\x18\x05 \x03(\t\"N\n\x14PausePlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\"O\n\x15ResumePlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\"b\n\x13SeekPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12\x13\n\x0bposition_ms\x18\x04 \x01(\x03\"\x8a\x01\n\x13SkipPlaybackRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12;\n\x0enext_selection\x18\x04 \x01(\x0b\x32#.syncwave.sync.v1.PlaybackSelection\"l\n\x19UpdateParticipantsRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12\x17\n\x0fparticipant_ids\x18\x04 \x03(\t\"\x8f\x01\n\x1eSubmitReadinessDecisionRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06jam_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x03\x12\x35\n\x08\x64\x65\x63ision\x18\x04 \x01(\x0e\x32#.syncwave.sync.v1.ReadinessDecision\")\n\x17GetPlaybackStateRequest\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\"+\n\x19GetReadinessStatusRequest\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\"\xe6\x01\n\x10PlaybackSnapshot\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\x12\x12\n\ngeneration\x18\x02 \x01(\x03\x12.\n\x05state\x18\x03 \x01(\x0e\x32\x1f.syncwave.sync.v1.PlaybackState\x12\x0f\n\x07song_id\x18\x04 \x01(\t\x12\x1d\n\x15\x61nchor_server_time_ms\x18\x05 \x01(\x03\x12\x1a\n\x12\x61nchor_position_ms\x18\x06 \x01(\x03\x12\x15\n\rplayback_rate\x18\x07 \x01(\x01\x12\x1b\n\x13prepare_deadline_ms\x18\x08 \x01(\x03\"M\n\x15StartPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"M\n\x15PausePlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"N\n\x16ResumePlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"L\n\x14SeekPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"L\n\x14SkipPlaybackResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"R\n\x1aUpdateParticipantsResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"W\n\x1fSubmitReadinessDecisionResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot\"\xcb\x01\n\x1aGetReadinessStatusResponse\x12\x0e\n\x06jam_id\x18\x01 \x01(\t\x12\x12\n\ngeneration\x18\x02 \x01(\x03\x12\x1b\n\x13prepare_deadline_ms\x18\x03 \x01(\x03\x12\x11\n\ttimed_out\x18\x04 \x01(\x08\x12\x19\n\x11\x64\x65\x63ision_required\x18\x05 \x01(\x08\x12\x1d\n\x15ready_participant_ids\x18\x06 \x03(\t\x12\x1f\n\x17unready_participant_ids\x18\x07 \x03(\t\"P\n\x18GetPlaybackStateResponse\x12\x34\n\x08playback\x18\x01 \x01(\x0b\x32\".syncwave.sync.v1.PlaybackSnapshot*\xd5\x01\n\rPlaybackState\x12\x1e\n\x1aPLAYBACK_STATE_UNSPECIFIED\x10\x00\x12\x17\n\x13PLAYBACK_STATE_IDLE\x10\x01\x12\x1c\n\x18PLAYBACK_STATE_PREPARING\x10\x02\x12\x1c\n\x18PLAYBACK_STATE_SCHEDULED\x10\x03\x12\x1a\n\x16PLAYBACK_STATE_PLAYING\x10\x04\x12\x19\n\x15PLAYBACK_STATE_PAUSED\x10\x05\x12\x18\n\x14PLAYBACK_STATE_ENDED\x10\x06*\x94\x01\n\x11ReadinessDecision\x12\"\n\x1eREADINESS_DECISION_UNSPECIFIED\x10\x00\x12\x1f\n\x1bREADINESS_DECISION_CONTINUE\x10\x01\x12\x1b\n\x17READINESS_DECISION_WAIT\x10\x02\x12\x1d\n\x19READINESS_DECISION_CANCEL\x10\x03\x32\xc8\x07\n\x12SyncControlService\x12`\n\rStartPlayback\x12&.syncwave.sync.v1.StartPlaybackRequest\x1a\'.syncwave.sync.v1.StartPlaybackResponse\x12`\n\rPausePlayback\x12&.syncwave.sync.v1.PausePlaybackRequest\x1a\'.syncwave.sync.v1.PausePlaybackResponse\x12\x63\n\x0eResumePlayback\x12\'.syncwave.sync.v1.ResumePlaybackRequest\x1a(.syncwave.sync.v1.ResumePlaybackResponse\x12]\n\x0cSeekPlayback\x12%.syncwave.sync.v1.SeekPlaybackRequest\x1a&.syncwave.sync.v1.SeekPlaybackResponse\x12]\n\x0cSkipPlayback\x12%.syncwave.sync.v1.SkipPlaybackRequest\x1a&.syncwave.sync.v1.SkipPlaybackResponse\x12o\n\x12UpdateParticipants\x12+.syncwave.sync.v1.UpdateParticipantsRequest\x1a,.syncwave.sync.v1.UpdateParticipantsResponse\x12~\n\x17SubmitReadinessDecision\x12\x30.syncwave.sync.v1.SubmitReadinessDecisionRequest\x1a\x31.syncwave.sync.v1.SubmitReadinessDecisionResponse\x12o\n\x12GetReadinessStatus\x12+.syncwave.sync.v1.GetReadinessStatusRequest\x1a,.syncwave.sync.v1.GetReadinessStatusResponse\x12i\n\x10GetPlaybackState\x12).syncwave.sync.v1.GetPlaybackStateRequest\x1a*.syncwave.sync.v1.GetPlaybackStateResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'syncwave.sync.v1.sync_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_PLAYBACKSTATE']._serialized_start=1911
-  _globals['_PLAYBACKSTATE']._serialized_end=2124
-  _globals['_READINESSDECISION']._serialized_start=2127
-  _globals['_READINESSDECISION']._serialized_end=2275
+  _globals['_PLAYBACKSTATE']._serialized_start=2105
+  _globals['_PLAYBACKSTATE']._serialized_end=2318
+  _globals['_READINESSDECISION']._serialized_start=2321
+  _globals['_READINESSDECISION']._serialized_end=2469
   _globals['_PLAYBACKSELECTION']._serialized_start=49
   _globals['_PLAYBACKSELECTION']._serialized_end=108
   _globals['_STARTPLAYBACKREQUEST']._serialized_start=111
@@ -47,30 +47,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SEEKPLAYBACKREQUEST']._serialized_end=529
   _globals['_SKIPPLAYBACKREQUEST']._serialized_start=532
   _globals['_SKIPPLAYBACKREQUEST']._serialized_end=670
-  _globals['_SUBMITREADINESSDECISIONREQUEST']._serialized_start=673
-  _globals['_SUBMITREADINESSDECISIONREQUEST']._serialized_end=816
-  _globals['_GETPLAYBACKSTATEREQUEST']._serialized_start=818
-  _globals['_GETPLAYBACKSTATEREQUEST']._serialized_end=859
-  _globals['_GETREADINESSSTATUSREQUEST']._serialized_start=861
-  _globals['_GETREADINESSSTATUSREQUEST']._serialized_end=904
-  _globals['_PLAYBACKSNAPSHOT']._serialized_start=907
-  _globals['_PLAYBACKSNAPSHOT']._serialized_end=1137
-  _globals['_STARTPLAYBACKRESPONSE']._serialized_start=1139
-  _globals['_STARTPLAYBACKRESPONSE']._serialized_end=1216
-  _globals['_PAUSEPLAYBACKRESPONSE']._serialized_start=1218
-  _globals['_PAUSEPLAYBACKRESPONSE']._serialized_end=1295
-  _globals['_RESUMEPLAYBACKRESPONSE']._serialized_start=1297
-  _globals['_RESUMEPLAYBACKRESPONSE']._serialized_end=1375
-  _globals['_SEEKPLAYBACKRESPONSE']._serialized_start=1377
-  _globals['_SEEKPLAYBACKRESPONSE']._serialized_end=1453
-  _globals['_SKIPPLAYBACKRESPONSE']._serialized_start=1455
-  _globals['_SKIPPLAYBACKRESPONSE']._serialized_end=1531
-  _globals['_SUBMITREADINESSDECISIONRESPONSE']._serialized_start=1533
-  _globals['_SUBMITREADINESSDECISIONRESPONSE']._serialized_end=1620
-  _globals['_GETREADINESSSTATUSRESPONSE']._serialized_start=1623
-  _globals['_GETREADINESSSTATUSRESPONSE']._serialized_end=1826
-  _globals['_GETPLAYBACKSTATERESPONSE']._serialized_start=1828
-  _globals['_GETPLAYBACKSTATERESPONSE']._serialized_end=1908
-  _globals['_SYNCCONTROLSERVICE']._serialized_start=2278
-  _globals['_SYNCCONTROLSERVICE']._serialized_end=3133
+  _globals['_UPDATEPARTICIPANTSREQUEST']._serialized_start=672
+  _globals['_UPDATEPARTICIPANTSREQUEST']._serialized_end=780
+  _globals['_SUBMITREADINESSDECISIONREQUEST']._serialized_start=783
+  _globals['_SUBMITREADINESSDECISIONREQUEST']._serialized_end=926
+  _globals['_GETPLAYBACKSTATEREQUEST']._serialized_start=928
+  _globals['_GETPLAYBACKSTATEREQUEST']._serialized_end=969
+  _globals['_GETREADINESSSTATUSREQUEST']._serialized_start=971
+  _globals['_GETREADINESSSTATUSREQUEST']._serialized_end=1014
+  _globals['_PLAYBACKSNAPSHOT']._serialized_start=1017
+  _globals['_PLAYBACKSNAPSHOT']._serialized_end=1247
+  _globals['_STARTPLAYBACKRESPONSE']._serialized_start=1249
+  _globals['_STARTPLAYBACKRESPONSE']._serialized_end=1326
+  _globals['_PAUSEPLAYBACKRESPONSE']._serialized_start=1328
+  _globals['_PAUSEPLAYBACKRESPONSE']._serialized_end=1405
+  _globals['_RESUMEPLAYBACKRESPONSE']._serialized_start=1407
+  _globals['_RESUMEPLAYBACKRESPONSE']._serialized_end=1485
+  _globals['_SEEKPLAYBACKRESPONSE']._serialized_start=1487
+  _globals['_SEEKPLAYBACKRESPONSE']._serialized_end=1563
+  _globals['_SKIPPLAYBACKRESPONSE']._serialized_start=1565
+  _globals['_SKIPPLAYBACKRESPONSE']._serialized_end=1641
+  _globals['_UPDATEPARTICIPANTSRESPONSE']._serialized_start=1643
+  _globals['_UPDATEPARTICIPANTSRESPONSE']._serialized_end=1725
+  _globals['_SUBMITREADINESSDECISIONRESPONSE']._serialized_start=1727
+  _globals['_SUBMITREADINESSDECISIONRESPONSE']._serialized_end=1814
+  _globals['_GETREADINESSSTATUSRESPONSE']._serialized_start=1817
+  _globals['_GETREADINESSSTATUSRESPONSE']._serialized_end=2020
+  _globals['_GETPLAYBACKSTATERESPONSE']._serialized_start=2022
+  _globals['_GETPLAYBACKSTATERESPONSE']._serialized_end=2102
+  _globals['_SYNCCONTROLSERVICE']._serialized_start=2472
+  _globals['_SYNCCONTROLSERVICE']._serialized_end=3440
 # @@protoc_insertion_point(module_scope)

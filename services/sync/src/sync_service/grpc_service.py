@@ -340,6 +340,31 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             )
         return sync_pb2.SkipPlaybackResponse(playback=playback_snapshot(session))
 
+    async def UpdateParticipants(
+        self,
+        request: sync_pb2.UpdateParticipantsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sync_pb2.UpdateParticipantsResponse:
+        await self._authorize(context)
+        session = await self._session(request.jam_id, context)
+        request_id = await self._uuid(request.request_id, "request_id", context)
+        try:
+            participant_ids = {
+                await self._uuid(value, "participant_ids", context)
+                for value in request.participant_ids
+            }
+            if session.owner_id not in participant_ids:
+                raise ValueError("owner must remain a participant")
+            session, removed_connections = await self._manager.update_participants(
+                session, request_id, request.generation, participant_ids
+            )
+        except ValueError as error:
+            await self._abort_validation(context, error)
+            raise AssertionError("context.abort must terminate the RPC") from error
+        for connection in removed_connections:
+            await connection.close(code=4403, reason="Jam membership removed")
+        return sync_pb2.UpdateParticipantsResponse(playback=playback_snapshot(session))
+
     async def SubmitReadinessDecision(
         self,
         request: sync_pb2.SubmitReadinessDecisionRequest,
@@ -374,8 +399,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             metrics.prepare_duration_ms.observe(
                 max(
                     0,
-                    now_ms
-                    - (session.prepare_deadline_ms - self._settings.prepare_timeout_ms),
+                    now_ms - (session.prepare_deadline_ms - self._settings.prepare_timeout_ms),
                 )
             )
             await self._manager.broadcast(

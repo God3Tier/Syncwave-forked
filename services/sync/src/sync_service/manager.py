@@ -120,6 +120,35 @@ class SessionManager:
     def has_request(self, request_id: UUID) -> bool:
         return request_id in self._request_results
 
+    async def update_participants(
+        self,
+        session: SyncSession,
+        request_id: UUID,
+        generation: int,
+        participant_ids: set[UUID],
+    ) -> tuple[SyncSession, list[WebSocket]]:
+        async with self._lock:
+            previous = self._request_results.get(request_id)
+            if previous is not None:
+                return previous, []
+            if generation != session.generation:
+                raise ValueError("stale generation")
+            removed_connections = [
+                participant.connection
+                for participant_id, participant in session.participants.items()
+                if participant_id not in participant_ids and participant.connection is not None
+            ]
+            session.participants = {
+                participant_id: session.participants.get(
+                    participant_id, Participant(participant_id)
+                )
+                for participant_id in participant_ids
+            }
+            self._request_results[request_id] = session
+            await self._repository.save_start(request_id, self._to_persisted(session))
+            metrics.ready_participants.set(self.ready_participant_count())
+            return session, removed_connections
+
     @staticmethod
     def readiness_status(
         session: SyncSession,

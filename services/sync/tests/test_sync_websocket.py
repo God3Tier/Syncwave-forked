@@ -122,15 +122,15 @@ def test_prepare_uses_dependency_resolved_stream_url(
         "owner_id": str(participant_id),
         "participant_ids": [str(participant_id)],
     }
-    assert client.post(
-        "/internal/v1/sessions",
-        headers=INTERNAL_HEADERS,
-        json=body,
-    ).status_code == 201
-    path = (
-        f"/ws?jam_id={body['jam_id']}&participant_id={participant_id}"
-        f"&token={PARTICIPANT_TOKEN}"
+    assert (
+        client.post(
+            "/internal/v1/sessions",
+            headers=INTERNAL_HEADERS,
+            json=body,
+        ).status_code
+        == 201
     )
+    path = f"/ws?jam_id={body['jam_id']}&participant_id={participant_id}&token={PARTICIPANT_TOKEN}"
 
     with client.websocket_connect(path) as websocket:
         _, prepare = receive_handshake(websocket)

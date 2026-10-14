@@ -9,6 +9,7 @@ service SyncControlService {
   rpc ResumePlayback(ResumePlaybackRequest) returns (ResumePlaybackResponse);
   rpc SeekPlayback(SeekPlaybackRequest) returns (SeekPlaybackResponse);
   rpc SkipPlayback(SkipPlaybackRequest) returns (SkipPlaybackResponse);
+  rpc UpdateParticipants(UpdateParticipantsRequest) returns (UpdateParticipantsResponse);
   rpc SubmitReadinessDecision(SubmitReadinessDecisionRequest) returns (SubmitReadinessDecisionResponse);
   rpc GetReadinessStatus(GetReadinessStatusRequest) returns (GetReadinessStatusResponse);
   rpc GetPlaybackState(GetPlaybackStateRequest) returns (GetPlaybackStateResponse);
@@ -70,6 +71,13 @@ message SkipPlaybackRequest {
   PlaybackSelection next_selection = 4;
 }
 
+message UpdateParticipantsRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  repeated string participant_ids = 4;
+}
+
 message SubmitReadinessDecisionRequest {
   string request_id = 1;
   string jam_id = 2;
@@ -113,6 +121,10 @@ message SeekPlaybackResponse {
 }
 
 message SkipPlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message UpdateParticipantsResponse {
   PlaybackSnapshot playback = 1;
 }
 

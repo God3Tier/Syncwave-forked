@@ -13,6 +13,8 @@ then coordinates clocks, readiness, scheduled playback, and drift correction.
 - Generated `SyncControlService` gRPC server on internal port `50051`, with
   authenticated start, pause, resume, seek, skip, readiness-decision, and
   state/readiness query RPCs
+- Authenticated participant-set updates keep late joins and leaves consistent
+  between Jam authorization and Sync WebSocket admission
 - `POST /internal/v1/sessions` remains as temporary HTTP compatibility for
   integration before Jam adopts the generated gRPC client
 - `GET /internal/v1/sessions/{jam_id}` returns the current playback snapshot

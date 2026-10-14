@@ -101,6 +101,28 @@ async def test_generated_grpc_service_runs_full_control_flow(
     )
     assert readiness.unready_participant_ids == request.participant_ids
 
+    late_participant_id = str(uuid4())
+    updated = await stub.UpdateParticipants(
+        sync_pb2.UpdateParticipantsRequest(
+            request_id=str(uuid4()),
+            jam_id=request.jam_id,
+            generation=1,
+            participant_ids=[request.owner_id, late_participant_id],
+        ),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert updated.playback.generation == 1
+    readiness = await stub.GetReadinessStatus(
+        sync_pb2.GetReadinessStatusRequest(jam_id=request.jam_id),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert set(readiness.unready_participant_ids) == {
+        request.owner_id,
+        late_participant_id,
+    }
+
     session = manager.get(UUID(request.jam_id))
     assert session is not None
     session.state = PlaybackState.PLAYING

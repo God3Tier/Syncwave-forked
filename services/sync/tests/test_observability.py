@@ -84,10 +84,7 @@ def test_protocol_error_counter_increments(client: TestClient) -> None:
     )
     counter = metrics.protocol_errors_total.labels(code="INVALID_MESSAGE")
     before = counter._value.get()
-    path = (
-        f"/ws?jam_id={jam_id}&participant_id={participant_id}"
-        "&token=local-sync-participant-token"
-    )
+    path = f"/ws?jam_id={jam_id}&participant_id={participant_id}&token=local-sync-participant-token"
 
     with client.websocket_connect(path) as websocket:
         websocket.receive_json()
