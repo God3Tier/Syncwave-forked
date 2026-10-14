@@ -1,0 +1,1 @@
+"""Generated shared SyncWave contracts."""
