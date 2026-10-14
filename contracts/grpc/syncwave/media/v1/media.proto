@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package syncwave.media.v1;
+
+// Sync reads canonical readiness from Catalogue before scheduling playback.
+service CatalogueQueryService {
+  rpc GetSong(GetSongRequest) returns (GetSongResponse);
+}
+
+// Sync asks Streaming for control-plane metadata only. Audio still travels
+// directly from Streaming/S3 to the browser.
+service StreamingQueryService {
+  rpc GetStreamInfo(GetStreamInfoRequest) returns (GetStreamInfoResponse);
+}
+
+enum ProcessingStatus {
+  PROCESSING_STATUS_UNSPECIFIED = 0;
+  PROCESSING_STATUS_PROCESSING = 1;
+  PROCESSING_STATUS_READY = 2;
+  PROCESSING_STATUS_FAILED = 3;
+}
+
+message GetSongRequest {
+  string song_id = 1;
+}
+
+message GetSongResponse {
+  string song_id = 1;
+  ProcessingStatus processing_status = 2;
+  int64 duration_ms = 3;
+}
+
+message GetStreamInfoRequest {
+  string song_id = 1;
+}
+
+message GetStreamInfoResponse {
+  string song_id = 1;
+  string stream_url = 2;
+  bool supports_ranges = 3;
+}
