@@ -49,6 +49,12 @@ then coordinates clocks, readiness, scheduled playback, and drift correction.
 - Each dependency call has a configurable 750 ms timeout. HTTP and gRPC map
   not-found, not-ready, unavailable, and timeout failures separately, and no
   false `PREPARE` is emitted on failure
+- Optional deadline-bound gRPC clients implement the shared media query
+  contract. Set `CATALOGUE_GRPC_TARGET` and `STREAMING_GRPC_TARGET` to use
+  real services; leaving either blank keeps that dependency's deterministic
+  development fake
+- The resolved stream URL is persisted with the authoritative session and is
+  reused after restart instead of being replaced by a hard-coded route
 - JSON lifecycle logs and transport correlation IDs, without tokens or signed
   stream URLs
 - Prometheus metrics at `GET /metrics` for connections, readiness/timing,
@@ -139,6 +145,24 @@ python -m grpc_tools.protoc \
   ../../contracts/grpc/syncwave/sync/v1/sync.proto
 ```
 
+Run the same command for `syncwave/media/v1/media.proto` when the Catalogue or
+Streaming query contract changes.
+
+## Current cross-service contract findings
+
+The shared Sync/Jam contract uses UUID strings for `song_id`. The Streaming
+implementation currently present on `origin/dev` is named `audio_transmitter`
+and exposes HTTP `/tracks/{track_id}/audio` and
+`/tracks/{track_id}/audio/range` with a signed 32-bit integer `track_id`.
+It does not yet implement `StreamingQueryService.GetStreamInfo`, and its
+duration field is in seconds rather than the shared `duration_ms` convention.
+
+Sync therefore does not silently call that incompatible HTTP API. The agreed
+boundary is `contracts/grpc/syncwave/media/v1/media.proto`: Streaming must map
+the canonical UUID to its storage object and return the browser-facing URL;
+Catalogue must report canonical processing readiness. Until those services
+implement that contract, local Sync runs use deterministic fakes.
+
 ## Persistence
 
 Compose uses Sync's existing isolated PostgreSQL database. Alembic applies the
@@ -155,7 +179,5 @@ multi-instance scaling boundary are documented in [OBSERVABILITY.md](OBSERVABILI
 - Temporary internal HTTP compatibility remains until Jam switches fully to
   the generated gRPC client.
 - Catalogue and Streaming currently use deterministic local fakes because
-  their versioned contracts/services are not present in this repository yet;
-  replace the fake implementations behind the existing interfaces when those
-  contracts land.
+  their services do not yet implement the versioned media query contract.
 - Mock tokens are local-development values only.

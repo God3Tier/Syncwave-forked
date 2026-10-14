@@ -1660,6 +1660,11 @@ Current implementation status (13 October 2026):
 - Dependency calls use a configurable 750 ms bound and distinguish not found,
   not ready, unavailable, and timeout failures across HTTP and gRPC; tests
   prove a dependency failure cannot create a false playback session
+- A versioned Catalogue/Streaming gRPC query contract and deadline-bound Sync
+  clients now exist; the resolved stream URL is persisted and survives restart
+- The current `audio_transmitter` branch is not contract-compatible yet: it
+  uses integer track IDs, seconds, and HTTP byte endpoints instead of canonical
+  UUIDs, milliseconds, and `GetStreamInfo`; this must be resolved with its owner
 - Structured JSON logs, safe correlation IDs, and Prometheus metrics now cover
   HTTP, gRPC, WebSocket lifecycle, dependencies, timing, drift, corrections,
   and protocol failures
@@ -1720,8 +1725,10 @@ Then -- protocol and service hardening:
 - [x] Add Alembic migrations before making further deployed schema changes
 - [ ] Replace the temporary internal HTTP adapters after Jam switches to the
   generated gRPC client
-- [ ] Replace Catalogue/Streaming fakes with real deadline-bound gRPC clients
-  when those versioned contracts become available
+- [x] Add configurable deadline-bound Catalogue/Streaming gRPC clients and a
+  versioned media query contract
+- [ ] Switch local/CI configuration from fakes after Catalogue and Streaming
+  implement that contract
 
 Final integration and evidence:
 
