@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS music_metadata (
+    id SERIAL PRIMARY KEY,
+    song_name TEXT NOT NULL,
+    timestamp BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+);

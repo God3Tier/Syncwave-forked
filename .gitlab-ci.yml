@@ -165,6 +165,16 @@ recommendation:
     - exists: [services/recommendation/.gitlab-ci.yml]
       changes: [services/recommendation/**/*, ci/**/*]
 
+audio_transmitter:
+  extends: .service-trigger
+  variables:
+    CONTRACT_PATHS: ""
+  trigger:
+    include: services/audio_transmitter/.gitlab-ci.yml
+  rules:
+    - exists: [services/audio_transmitter/.gitlab-ci.yml]
+      changes: [services/audio_transmitter/**/*, ci/**/*]
+
 jam:
   extends: .service-trigger
   variables:
