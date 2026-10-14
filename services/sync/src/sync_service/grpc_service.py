@@ -12,6 +12,7 @@ from sync_service.dependencies import (
     PlaybackDependencies,
     SongNotFoundError,
     SongNotReadyError,
+    StreamSource,
 )
 from sync_service.manager import SessionManager, SyncSession
 from sync_service.models import PlaybackState, ReadinessDecision, StartSessionRequest
@@ -42,7 +43,7 @@ def prepare_payload(session: SyncSession) -> dict[str, object]:
         "generation": session.generation,
         "queue_item_id": str(session.queue_item_id),
         "song_id": str(session.song_id),
-        "stream_url": f"/api/streaming/songs/{session.song_id}/audio",
+        "stream_url": session.stream_url,
         "start_position_ms": 0,
     }
 
@@ -144,9 +145,9 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
         self,
         song_id: UUID,
         context: grpc.aio.ServicerContext,
-    ) -> None:
+    ) -> StreamSource:
         try:
-            await self._dependencies.resolve(song_id)
+            return await self._dependencies.resolve(song_id)
         except SongNotFoundError as error:
             await context.abort(grpc.StatusCode.NOT_FOUND, str(error))
         except SongNotReadyError as error:
@@ -174,11 +175,13 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
         except (ValueError, ValidationError) as error:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
             raise AssertionError("context.abort must terminate the RPC") from error
+        stream = None
         if not self._manager.has_request(command.request_id):
-            await self._resolve_dependencies(command.song_id, context)
+            stream = await self._resolve_dependencies(command.song_id, context)
         session = await self._manager.start(
             command,
             prepare_deadline_ms=epoch_ms() + self._settings.prepare_timeout_ms,
+            stream_url=None if stream is None else stream.stream_url,
         )
         log_event(
             "session_started",
@@ -314,8 +317,9 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             "next_selection.song_id",
             context,
         )
+        stream = None
         if not self._manager.has_request(request_id):
-            await self._resolve_dependencies(song_id, context)
+            stream = await self._resolve_dependencies(song_id, context)
         try:
             session, applied = await self._manager.skip(
                 session,
@@ -324,6 +328,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 queue_item_id,
                 song_id,
                 epoch_ms() + self._settings.prepare_timeout_ms,
+                stream_url=None if stream is None else stream.stream_url,
             )
         except ValueError as error:
             await self._abort_validation(context, error)

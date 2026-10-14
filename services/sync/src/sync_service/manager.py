@@ -24,6 +24,7 @@ class SyncSession:
     jam_id: UUID
     queue_item_id: UUID
     song_id: UUID
+    stream_url: str
     owner_id: UUID
     generation: int = 1
     state: PlaybackState = PlaybackState.PREPARING
@@ -73,7 +74,12 @@ class SessionManager:
     async def ping(self) -> None:
         await self._repository.ping()
 
-    async def start(self, request: StartSessionRequest, prepare_deadline_ms: int) -> SyncSession:
+    async def start(
+        self,
+        request: StartSessionRequest,
+        prepare_deadline_ms: int,
+        stream_url: str | None = None,
+    ) -> SyncSession:
         async with self._lock:
             previous = self._request_results.get(request.request_id)
             if previous is not None:
@@ -85,6 +91,7 @@ class SessionManager:
                 jam_id=request.jam_id,
                 queue_item_id=request.queue_item_id,
                 song_id=request.song_id,
+                stream_url=stream_url or f"/api/streaming/songs/{request.song_id}/audio",
                 owner_id=request.owner_id,
                 generation=generation,
                 prepare_deadline_ms=prepare_deadline_ms,
@@ -302,6 +309,7 @@ class SessionManager:
         queue_item_id: UUID,
         song_id: UUID,
         prepare_deadline_ms: int,
+        stream_url: str | None = None,
     ) -> tuple[SyncSession, bool]:
         async with self._lock:
             previous = self._request_results.get(request_id)
@@ -321,6 +329,7 @@ class SessionManager:
             session.generation += 1
             session.queue_item_id = queue_item_id
             session.song_id = song_id
+            session.stream_url = stream_url or f"/api/streaming/songs/{song_id}/audio"
             session.state = PlaybackState.PREPARING
             session.anchor_server_time_ms = None
             session.anchor_position_ms = 0
@@ -416,6 +425,7 @@ class SessionManager:
             state=session.state.value,
             queue_item_id=session.queue_item_id,
             song_id=session.song_id,
+            stream_url=session.stream_url,
             owner_id=session.owner_id,
             participant_ids=tuple(session.participants),
             anchor_server_time_ms=session.anchor_server_time_ms,
@@ -430,6 +440,7 @@ class SessionManager:
             jam_id=value.jam_id,
             queue_item_id=value.queue_item_id,
             song_id=value.song_id,
+            stream_url=value.stream_url,
             owner_id=value.owner_id,
             generation=value.generation,
             state=PlaybackState(value.state),

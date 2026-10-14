@@ -18,6 +18,7 @@ class SyncSessionRecord(Base):
     state: Mapped[str] = mapped_column(String(32))
     queue_item_id: Mapped[str] = mapped_column(String(36))
     song_id: Mapped[str] = mapped_column(String(36))
+    stream_url: Mapped[str] = mapped_column(String(2048))
     owner_id: Mapped[str] = mapped_column(String(36))
     participant_ids: Mapped[list[str]] = mapped_column(JSON)
     anchor_server_time_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -40,6 +41,7 @@ class PersistedSession:
     state: str
     queue_item_id: UUID
     song_id: UUID
+    stream_url: str
     owner_id: UUID
     participant_ids: tuple[UUID, ...]
     anchor_server_time_ms: int | None
@@ -79,6 +81,7 @@ class SessionRepository:
                 state=row.state,
                 queue_item_id=UUID(row.queue_item_id),
                 song_id=UUID(row.song_id),
+                stream_url=row.stream_url,
                 owner_id=UUID(row.owner_id),
                 participant_ids=tuple(UUID(value) for value in row.participant_ids),
                 anchor_server_time_ms=row.anchor_server_time_ms,
@@ -120,6 +123,7 @@ class SessionRepository:
             "state": value.state,
             "queue_item_id": str(value.queue_item_id),
             "song_id": str(value.song_id),
+            "stream_url": value.stream_url,
             "owner_id": str(value.owner_id),
             "participant_ids": [str(item) for item in value.participant_ids],
             "anchor_server_time_ms": value.anchor_server_time_ms,

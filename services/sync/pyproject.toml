@@ -7,7 +7,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/sync_service/demo.py" = ["E501"]
-"src/syncwave/sync/v1/*_pb2*.py" = ["ALL"]
+"src/syncwave/**/*_pb2*.py" = ["ALL"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

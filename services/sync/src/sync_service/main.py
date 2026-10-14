@@ -29,6 +29,7 @@ from sync_service.dependencies import (
     DependencyTimeoutError,
     SongNotFoundError,
     SongNotReadyError,
+    StreamSource,
     create_default_dependencies,
 )
 from sync_service.manager import SessionManager
@@ -83,6 +84,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await manager.shutdown_connections()
+        await dependencies.close()
         if grpc_server is not None:
             await grpc_server.stop(grace=2)
         await manager.close()
@@ -139,7 +141,7 @@ def prepare_payload(session: Any) -> dict[str, object]:
         "generation": session.generation,
         "queue_item_id": str(session.queue_item_id),
         "song_id": str(session.song_id),
-        "stream_url": f"/api/streaming/songs/{session.song_id}/audio",
+        "stream_url": session.stream_url,
         "start_position_ms": 0,
     }
 
@@ -188,9 +190,9 @@ def require_internal_session(
     return session
 
 
-async def resolve_playback_dependencies(song_id: UUID) -> None:
+async def resolve_playback_dependencies(song_id: UUID) -> StreamSource:
     try:
-        await dependencies.resolve(song_id)
+        return await dependencies.resolve(song_id)
     except SongNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SongNotReadyError as error:
@@ -257,11 +259,13 @@ async def start_session(
             detail="invalid service token",
         )
 
+    stream = None
     if not manager.has_request(request.request_id):
-        await resolve_playback_dependencies(request.song_id)
+        stream = await resolve_playback_dependencies(request.song_id)
     session = await manager.start(
         request,
         prepare_deadline_ms=epoch_ms() + settings.prepare_timeout_ms,
+        stream_url=None if stream is None else stream.stream_url,
     )
     log_event(
         "session_started",
@@ -527,8 +531,9 @@ async def skip_playback(
 ) -> PlaybackSnapshotResponse:
     settings = get_settings()
     session = require_internal_session(jam_id, x_internal_token)
+    stream = None
     if not manager.has_request(request.request_id):
-        await resolve_playback_dependencies(request.song_id)
+        stream = await resolve_playback_dependencies(request.song_id)
     try:
         session, applied = await manager.skip(
             session,
@@ -537,6 +542,7 @@ async def skip_playback(
             request.queue_item_id,
             request.song_id,
             epoch_ms() + settings.prepare_timeout_ms,
+            stream_url=None if stream is None else stream.stream_url,
         )
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error

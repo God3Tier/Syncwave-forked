@@ -3,7 +3,11 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from sync_service.dependencies import FakeCatalogueClient, SongProcessingStatus
+from sync_service.dependencies import (
+    FakeCatalogueClient,
+    FakeStreamingClient,
+    SongProcessingStatus,
+)
 from sync_service.main import app, dependencies, manager
 from sync_service.models import PlaybackState
 
@@ -98,6 +102,40 @@ def test_time_ping_returns_four_timestamp_exchange(client: TestClient) -> None:
     assert pong["payload"]["sample_id"] == sample_id
     assert pong["payload"]["client_sent_ms"] == 1_000
     assert pong["payload"]["server_received_ms"] <= pong["payload"]["server_sent_ms"]
+
+
+def test_prepare_uses_dependency_resolved_stream_url(
+    client: TestClient,
+    monkeypatch: object,
+) -> None:
+    song_id = uuid4()
+    participant_id = uuid4()
+    stream_url = f"/api/audio/tracks/{song_id}/audio"
+    streaming = dependencies.streaming
+    assert isinstance(streaming, FakeStreamingClient)
+    monkeypatch.setitem(streaming.stream_urls, song_id, stream_url)
+    body = {
+        "request_id": str(uuid4()),
+        "jam_id": str(uuid4()),
+        "queue_item_id": str(uuid4()),
+        "song_id": str(song_id),
+        "owner_id": str(participant_id),
+        "participant_ids": [str(participant_id)],
+    }
+    assert client.post(
+        "/internal/v1/sessions",
+        headers=INTERNAL_HEADERS,
+        json=body,
+    ).status_code == 201
+    path = (
+        f"/ws?jam_id={body['jam_id']}&participant_id={participant_id}"
+        f"&token={PARTICIPANT_TOKEN}"
+    )
+
+    with client.websocket_connect(path) as websocket:
+        _, prepare = receive_handshake(websocket)
+
+    assert prepare["payload"]["stream_url"] == stream_url
 
 
 def test_stale_sequence_is_rejected(client: TestClient) -> None:
