@@ -1,11 +1,10 @@
 mod node;
-mod ringbufferimpl; 
+mod ringbufferimpl;
 
 /*
  * Figure out the commands for this sliding window thing
  */
 pub trait RingBuffer {
-	fn next_song(&self); 
-	fn prev_song(&self); 
-	
+    async fn next_song(&mut self); 
+    async fn prev_song(&mut self);
 }

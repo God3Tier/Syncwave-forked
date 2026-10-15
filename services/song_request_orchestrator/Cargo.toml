@@ -8,3 +8,5 @@ actix-web = "4"
 bytes = "1.12.1"
 diesel = { version = "2.3", features = ["postgres", "r2d2"] }
 dotenvy = "0.15"
+reqwest = "0.13.5"
+tokio = "1.53.3"
