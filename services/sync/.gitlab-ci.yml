@@ -13,6 +13,18 @@ lint:
     - ruff check src tests
     - ruff format --check src tests
 
+contracts:
+  extends: .lint
+  image: python:3.12-slim
+  script:
+    - pip install --quiet -r requirements-dev.txt
+    - >-
+      python ../../ci/scripts/check-python-grpc-bindings.py
+      --proto-root ../../contracts/grpc
+      --output src
+      syncwave/sync/v1/sync.proto
+      syncwave/media/v1/media.proto
+
 test:
   extends: .test
   image: python:3.12-slim
