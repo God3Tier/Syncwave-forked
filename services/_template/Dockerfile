@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Template Dockerfile: a Java 21 + Maven example. Replace it with your
+# Template Dockerfile: a Java 25 + Maven example. Replace it with your
 # service's own build, keeping the conventions every SyncWave image follows:
 #   - listens on port 8080 for HTTP (and 50051 if it serves gRPC)
 #   - answers GET /health with 200 {"status":"ok"}  (used by the HEALTHCHECK)
@@ -10,7 +10,7 @@
 #         COPY --from=contracts grpc/ /contracts/grpc/
 #     and list that folder in your CONTRACT_PATHS in the root .gitlab-ci.yml.
 
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /src
 # Dependencies first: this layer is reused (locally and from the CI cache)
 # until pom.xml changes.
@@ -19,7 +19,7 @@ RUN mvn --batch-mode --quiet dependency:go-offline
 COPY src ./src
 RUN mvn --batch-mode --quiet -DskipTests package
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /src/target/*.jar app.jar

@@ -10,7 +10,7 @@
 # To use a different JDK, set `image:` on your job, e.g. maven:3.9-eclipse-temurin-25.
 
 .java-maven:
-  image: maven:3.9-eclipse-temurin-21
+  image: maven:3.9-eclipse-temurin-25
   variables:
     MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
     MAVEN_CLI_OPTS: "--batch-mode --errors --no-transfer-progress"
