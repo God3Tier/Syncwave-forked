@@ -22,7 +22,10 @@ if docker buildx imagetools inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
   echo "$IMAGE:$TAG already exists - skipping build."
 else
   # The docker-container driver supports exporting the layer cache to the registry.
-  docker buildx create --use --driver docker-container >/dev/null
+  # dind's TLS settings arrive as DOCKER_* variables, which buildx refuses to
+  # build a builder from; a named context copies them into the context store.
+  docker context create ci-builder >/dev/null
+  docker buildx create --use --driver docker-container ci-builder >/dev/null
   docker buildx build \
     --platform linux/amd64 \
     --build-context contracts=contracts \
