@@ -1,0 +1,28 @@
+# Playlist Service (README.md), included from the root docker-compose.yml.
+# The API behind the gateway at /api/playlist. It needs only Postgres: no
+# RabbitMQ and no S3.
+
+services:
+  playlist:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/playlist:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/playlist:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: playlist
+      PORT: "8080"
+      LOG_LEVEL: INFO
+      # Postgres: this service's own database (infrastructure/postgres/init.sql).
+      # Separate variables, never a URL with the password inside: in production
+      # the password is injected on its own from AWS Secrets Manager.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: playlist
+      DB_USER: playlist
+      DB_PASSWORD: playlist
+    depends_on:
+      postgres:
+        condition: service_healthy
