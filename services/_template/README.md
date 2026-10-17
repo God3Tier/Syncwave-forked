@@ -1,6 +1,6 @@
 # <Name> Service
 
-**Owner:** <name> · **Language/framework:** <e.g. Java 21 / Spring Boot>
+**Owner:** <name> · **Language/framework:** <e.g. Java 25 / Spring Boot>
 
 <One or two sentences: what this service is responsible for, from plan.md §3.>
 
