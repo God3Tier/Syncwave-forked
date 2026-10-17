@@ -41,6 +41,8 @@ A per-event schema reuses the envelope and constrains the payload:
 | `event_type`               | Routing key          | Producer  | Consumed by (queue)                   |
 |----------------------------|----------------------|-----------|---------------------------------------|
 | `SongUploaded`             | `song.uploaded`      | Upload    | Lyrics, Waveform                      |
+| `LyricsProcessed`          | `lyrics.processed`   | Lyrics    | Catalogue                             |
+| `LyricsProcessingFailed`   | `lyrics.failed`      | Lyrics    | Catalogue                             |
 | `WaveformProcessed`        | `waveform.processed` | Waveform  | Catalogue                             |
 | `WaveformProcessingFailed` | `waveform.failed`    | Waveform  | Catalogue                             |
 | `SongReady`                | `song.ready`         | Catalogue | Search                                |
@@ -55,6 +57,8 @@ The per-event schemas are the source of truth; this is a summary.
 | `event_type`               | Schema                                     | `payload`                                              |
 |----------------------------|--------------------------------------------|--------------------------------------------------------|
 | `SongUploaded`             | `song-uploaded.schema.json` (**proposal**) | `audio_reference` (S3 key), optional `lyrics_reference` (S3 key of an `.lrc` file; absent/null = no lyrics) |
+| `LyricsProcessed`          | `lyrics-processed.schema.json`             | `line_count`                                           |
+| `LyricsProcessingFailed`   | `lyrics-processing-failed.schema.json`     | `error_code`, `message`, `attempts`                    |
 | `WaveformProcessed`        | `waveform-processed.schema.json`           | `points`, `duration_ms`                                |
 | `WaveformProcessingFailed` | `waveform-processing-failed.schema.json`   | `error_code`, `message`, `attempts`                    |
 
