@@ -16,6 +16,7 @@ name: syncwave
 
 include:
   - services/recommendation/compose.yaml
+  - services/lyrics/compose.yaml
 
 services:
   # Single browser-facing entry point: http://localhost:8080
