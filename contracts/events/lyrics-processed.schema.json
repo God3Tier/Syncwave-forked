@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/lyrics-processed.schema.json",
+  "title": "LyricsProcessed",
+  "description": "Published by Lyrics on routing key lyrics.processed once a song's lyrics are stored and retrievable from GET /api/lyrics/songs/{song_id}/lyrics. Catalogue sets lyrics_status = READY. May be published again for the same song (duplicate SongUploaded delivery); consumers must be idempotent.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "LyricsProcessed" },
+    "payload": {
+      "type": "object",
+      "required": ["line_count"],
+      "additionalProperties": false,
+      "properties": {
+        "line_count": {
+          "description": "Number of timestamped lyric lines stored. 0 for a song uploaded without lyrics (instrumental).",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

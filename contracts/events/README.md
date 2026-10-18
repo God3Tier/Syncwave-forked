@@ -50,6 +50,28 @@ A per-event schema reuses the envelope and constrains the payload:
 Catalogue publishes `SongReady` once `processing_status` becomes `READY`
 (see the Song contract in [`../README.md`](../README.md)).
 
+### Payloads
+
+The per-event schemas are the source of truth; this is a summary.
+
+| `event_type`               | Schema                                     | `payload`                                              |
+|----------------------------|--------------------------------------------|--------------------------------------------------------|
+| `SongUploaded`             | `song-uploaded.schema.json` (**proposal**) | `audio_reference` (S3 key), optional `lyrics_reference` (S3 key of an `.lrc` file; absent/null = no lyrics) |
+| `LyricsProcessed`          | `lyrics-processed.schema.json`             | `line_count`                                           |
+| `LyricsProcessingFailed`   | `lyrics-processing-failed.schema.json`     | `error_code`, `message`, `attempts`                    |
+| `WaveformProcessed`        | `waveform-processed.schema.json`           | `points`, `duration_ms`                                |
+| `WaveformProcessingFailed` | `waveform-processing-failed.schema.json`   | `error_code`, `message`, `attempts`                    |
+
+`song-uploaded.schema.json` was written by the Lyrics/Waveform owner so the
+consumers could be built before the Upload Service. It contains only what
+the consumers need and is **pending approval by the Upload owner**, who may
+add fields. Lyrics and Waveform ignore payload fields they do not use.
+
+Follow-up events copy the `SongUploaded` `event_id` into `correlation_id`.
+`…Processed` can be published more than once for the same song (a
+duplicate `SongUploaded` delivery re-announces the stored result), so
+Catalogue must treat it idempotently.
+
 ## Topology
 
 ```text
