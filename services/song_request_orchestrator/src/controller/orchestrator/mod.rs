@@ -1,38 +1,21 @@
-use actix_web::{HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 
-pub fn configure(config: &mut actix_web::web::ServiceConfig) {
-    config.route("/health", actix_web::web::get().to(health_check));
+use crate::security::UserId;
+
+#[cfg(test)]
+mod test;
+
+pub fn configure(config: &mut web::ServiceConfig) {
+    config.route("/health", web::get().to(health_check));
+    config.route("/me", web::get().to(me));
 }
 
 pub async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use actix_web::{App, body::to_bytes, http::StatusCode, test};
-
-    #[actix_web::test]
-    async fn health_check_returns_ok() {
-        let app =
-            test::init_service(App::new().route("/health", actix_web::web::get().to(health_check)))
-                .await;
-        let response =
-            test::call_service(&app, test::TestRequest::get().uri("/health").to_request()).await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(to_bytes(response.into_body()).await.unwrap(), b"OK"[..]);
-    }
-
-    #[actix_web::test]
-    async fn unknown_route_returns_not_found() {
-        let app =
-            test::init_service(App::new().route("/health", actix_web::web::get().to(health_check)))
-                .await;
-        let response =
-            test::call_service(&app, test::TestRequest::get().uri("/missing").to_request()).await;
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
+/// Example protected route: the authenticated user's ID is supplied as a
+/// handler parameter by the Cognito middleware via the [`UserId`] extractor.
+pub async fn me(user_id: UserId) -> impl Responder {
+    HttpResponse::Ok().json(serde_json::json!({ "user_id": user_id.as_str() }))
 }

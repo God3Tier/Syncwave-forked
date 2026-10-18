@@ -1,5 +1,5 @@
-use crate::Error;
 use crate::store::Storage;
+use crate::store::errors::StoreError; 
 use aws_sdk_s3::Client;
 use bytes::Bytes;
 use moka::future::Cache;
@@ -26,7 +26,7 @@ impl AudioStore {
 
 #[async_trait::async_trait]
 impl Storage for AudioStore {
-    async fn get_track(&self, id: i32) -> Result<Bytes, Error> {
+    async fn get_track(&self, id: i32) -> Result<Bytes, StoreError> {
         match self.audio_stash.get(&id).await {
             Some(bytes) => Ok(bytes),
             None => {
@@ -52,7 +52,7 @@ impl Storage for AudioStore {
         start_time: u64,
         end_time: u64,
         total_time: i64,
-    ) -> Result<Bytes, Error> {
+    ) -> Result<Bytes, StoreError> {
         let audio = self.get_track(id).await?;
         let audio_len = audio.len(); 
 
