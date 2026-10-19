@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package syncwave.sync.v1;
+
+// Jam calls this service after authorizing an owner action.
+service SyncControlService {
+  rpc StartPlayback(StartPlaybackRequest) returns (StartPlaybackResponse);
+  rpc PausePlayback(PausePlaybackRequest) returns (PausePlaybackResponse);
+  rpc ResumePlayback(ResumePlaybackRequest) returns (ResumePlaybackResponse);
+  rpc SeekPlayback(SeekPlaybackRequest) returns (SeekPlaybackResponse);
+  rpc SkipPlayback(SkipPlaybackRequest) returns (SkipPlaybackResponse);
+  rpc UpdateParticipants(UpdateParticipantsRequest) returns (UpdateParticipantsResponse);
+  rpc SubmitReadinessDecision(SubmitReadinessDecisionRequest) returns (SubmitReadinessDecisionResponse);
+  rpc GetReadinessStatus(GetReadinessStatusRequest) returns (GetReadinessStatusResponse);
+  rpc GetPlaybackState(GetPlaybackStateRequest) returns (GetPlaybackStateResponse);
+}
+
+enum PlaybackState {
+  PLAYBACK_STATE_UNSPECIFIED = 0;
+  PLAYBACK_STATE_IDLE = 1;
+  PLAYBACK_STATE_PREPARING = 2;
+  PLAYBACK_STATE_SCHEDULED = 3;
+  PLAYBACK_STATE_PLAYING = 4;
+  PLAYBACK_STATE_PAUSED = 5;
+  PLAYBACK_STATE_ENDED = 6;
+}
+
+enum ReadinessDecision {
+  READINESS_DECISION_UNSPECIFIED = 0;
+  READINESS_DECISION_CONTINUE = 1;
+  READINESS_DECISION_WAIT = 2;
+  READINESS_DECISION_CANCEL = 3;
+}
+
+message PlaybackSelection {
+  string queue_item_id = 1;
+  string song_id = 2;
+}
+
+message StartPlaybackRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  string owner_id = 3;
+  PlaybackSelection selection = 4;
+  repeated string participant_ids = 5;
+}
+
+message PausePlaybackRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+}
+
+message ResumePlaybackRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+}
+
+message SeekPlaybackRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  int64 position_ms = 4;
+}
+
+message SkipPlaybackRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  PlaybackSelection next_selection = 4;
+}
+
+message UpdateParticipantsRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  repeated string participant_ids = 4;
+}
+
+message SubmitReadinessDecisionRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  ReadinessDecision decision = 4;
+}
+
+message GetPlaybackStateRequest {
+  string jam_id = 1;
+}
+
+message GetReadinessStatusRequest {
+  string jam_id = 1;
+}
+
+message PlaybackSnapshot {
+  string jam_id = 1;
+  int64 generation = 2;
+  PlaybackState state = 3;
+  string song_id = 4;
+  int64 anchor_server_time_ms = 5;
+  int64 anchor_position_ms = 6;
+  double playback_rate = 7;
+  int64 prepare_deadline_ms = 8;
+}
+
+message StartPlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message PausePlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message ResumePlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message SeekPlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message SkipPlaybackResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message UpdateParticipantsResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message SubmitReadinessDecisionResponse {
+  PlaybackSnapshot playback = 1;
+}
+
+message GetReadinessStatusResponse {
+  string jam_id = 1;
+  int64 generation = 2;
+  int64 prepare_deadline_ms = 3;
+  bool timed_out = 4;
+  bool decision_required = 5;
+  repeated string ready_participant_ids = 6;
+  repeated string unready_participant_ids = 7;
+}
+
+message GetPlaybackStateResponse {
+  PlaybackSnapshot playback = 1;
+}

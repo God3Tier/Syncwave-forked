@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/time_ping.schema.json",
+  "title": "TIME_PING",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "TIME_PING" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_id", "client_sent_ms"],
+      "properties": {
+        "sample_id": { "type": "string", "format": "uuid" },
+        "client_sent_ms": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "type": "SEEK_TO",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 14,
+  "sent_at_ms": 1791460020000,
+  "payload": {
+    "generation": 1,
+    "target_server_time_ms": 1791460020500,
+    "position_ms": 42000,
+    "resume_playback": true
+  }
+}
