@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/waveform-processing-failed.schema.json",
+  "title": "WaveformProcessingFailed",
+  "description": "Published by Waveform on routing key waveform.failed when it gives up on a song's waveform: immediately for a permanent problem (e.g. undecodable audio), or after the 3rd attempt for a transient one. The SongUploaded message is also moved to waveform.song-uploaded.dlq. Catalogue sets waveform_status = FAILED.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "WaveformProcessingFailed" },
+    "payload": {
+      "type": "object",
+      "required": ["error_code", "message", "attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "description": "Machine-readable reason, e.g. INVALID_EVENT, AUDIO_NOT_FOUND, AUDIO_TOO_LARGE, AUDIO_UNDECODABLE, AUDIO_EMPTY, DECODE_TIMEOUT, PROCESSING_ERROR.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]*$"
+        },
+        "message": {
+          "description": "Human-readable detail for logs and the UI.",
+          "type": "string"
+        },
+        "attempts": {
+          "description": "How many times processing was attempted before giving up.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

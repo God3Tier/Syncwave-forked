@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/waveform-processed.schema.json",
+  "title": "WaveformProcessed",
+  "description": "Published by Waveform on routing key waveform.processed once a song's waveform is stored and retrievable from GET /api/waveform/songs/{song_id}/waveform. Catalogue sets waveform_status = READY. May be published again for the same song (duplicate SongUploaded delivery); consumers must be idempotent.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "WaveformProcessed" },
+    "payload": {
+      "type": "object",
+      "required": ["points", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "description": "Number of peak values stored for the song.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_ms": {
+          "description": "Audio duration measured while decoding, in milliseconds.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
