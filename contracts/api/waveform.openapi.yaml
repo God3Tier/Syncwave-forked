@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Waveform Service
+  version: 1.0.0
+  description: |
+    Waveform data for playback visualisation: peaks for an overview of the
+    whole song (e.g. the seek bar), and frequency-band levels over time for a
+    visualiser that pulses with the music. Both are generated asynchronously
+    from the `SongUploaded` event (`contracts/events/`); this API only reads
+    the result.
+
+    Browsers call it through the gateway, e.g.
+    `GET http://localhost:8080/api/waveform/songs/{song_id}/waveform?points=200`.
+    The paths below are the service's own paths, without the `/api/waveform`
+    prefix.
+servers:
+  - url: http://waveform:8080
+    description: Inside Docker Compose (the gateway adds the /api/waveform prefix)
+security: []
+tags:
+  - name: waveform
+    description: Waveform retrieval
+  - name: operations
+    description: Health checks
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: getHealth
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /songs/{song_id}/waveform:
+    get:
+      tags: [waveform]
+      operationId: getSongWaveform
+      summary: Get a song's waveform peaks and their processing status
+      description: |
+        Returns 200 for every song the Waveform Service has received a
+        `SongUploaded` event for. `peaks` is only filled when `status` is
+        `READY`; poll while it is `PROCESSING`.
+      parameters:
+        - name: song_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: points
+          in: query
+          required: false
+          description: |
+            Return at most this many peaks, e.g. the width of the waveform in
+            pixels. Each returned peak is the maximum of the stored peaks it
+            covers. Defaults to every stored peak (normally 1000).
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Waveform peaks, or the current processing status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Waveform"
+              examples:
+                ready:
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: READY
+                    points: 4
+                    duration_ms: 215040
+                    peaks: [0.12, 0.87, 1.0, 0.42]
+                    updated_at: "2026-10-08T12:00:03.500Z"
+                processing:
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: PROCESSING
+                    points: 0
+                    duration_ms: null
+                    peaks: []
+                    updated_at: "2026-10-08T12:00:00.100Z"
+        "400":
+          description: "`song_id` is not a UUID, or `points` is not a positive integer."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "No `SongUploaded` event has been received for this song (`WAVEFORM_NOT_FOUND`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /songs/{song_id}/waveform/bands:
+    get:
+      tags: [waveform]
+      operationId: getSongWaveformBands
+      summary: Get a song's frequency-band levels over time, for a visualiser
+      description: |
+        What a visualiser animates in time with playback, like the bars in a
+        lyrics video: `frame_rate` times a second (normally 25), how loud
+        each of `band_count` frequency bands is (normally 50, log-spaced from
+        50 Hz to 11 kHz).
+
+        At playback position `t` seconds, draw frame `f = floor(t * frame_rate)`
+        (or blend it with frame `f + 1`): its `band_count` levels are bytes
+        `f * band_count` to `(f + 1) * band_count - 1` of the decoded `levels`.
+
+        Returns 200 for every song the Waveform Service has received a
+        `SongUploaded` event for. `levels` is only filled when `status` is
+        `READY`; poll `GET /songs/{song_id}/waveform` while it is `PROCESSING`.
+      parameters:
+        - name: song_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Band levels, or the current processing status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaveformBands"
+              examples:
+                ready:
+                  summary: 2 frames of 4 bands (real songs have thousands of frames of 50)
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: READY
+                    frame_rate: 25.0
+                    frame_count: 2
+                    band_count: 4
+                    band_edges_hz: [50.0, 300.0, 1500.0, 5000.0, 11025.0]
+                    levels: DMhaHij/eDw=
+                    updated_at: "2026-10-08T12:00:03.500Z"
+                processing:
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: PROCESSING
+                    frame_rate: null
+                    frame_count: 0
+                    band_count: 0
+                    band_edges_hz: []
+                    levels: ""
+                    updated_at: "2026-10-08T12:00:00.100Z"
+        "400":
+          description: "`song_id` is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "No `SongUploaded` event has been received for this song (`WAVEFORM_NOT_FOUND`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Waveform:
+      type: object
+      required: [song_id, status, points, duration_ms, peaks, updated_at]
+      properties:
+        song_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PROCESSING, READY, FAILED]
+        points:
+          description: Number of values in `peaks`.
+          type: integer
+          minimum: 0
+        duration_ms:
+          description: Audio duration measured while decoding. Null unless `status` is `READY`.
+          type: [integer, "null"]
+          minimum: 0
+        peaks:
+          description: |
+            Peak amplitude per equal-length slice of the song, from start to
+            end, normalised to 0..1 (1 = full scale). Empty unless `status` is
+            `READY`.
+          type: array
+          items:
+            type: number
+            minimum: 0
+            maximum: 1
+        error:
+          description: Only present when `status` is `FAILED`.
+          $ref: "#/components/schemas/ErrorDetail"
+        updated_at:
+          type: string
+          format: date-time
+    WaveformBands:
+      type: object
+      required:
+        [song_id, status, frame_rate, frame_count, band_count, band_edges_hz, levels, updated_at]
+      properties:
+        song_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PROCESSING, READY, FAILED]
+        frame_rate:
+          description: |
+            Frames per second. Frame `i` is centred on `i / frame_rate`
+            seconds into the song. Null when there are no levels.
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        frame_count:
+          type: integer
+          minimum: 0
+        band_count:
+          type: integer
+          minimum: 0
+        band_edges_hz:
+          description: |
+            The `band_count + 1` band edges in Hz, lowest first: band `b`
+            covers `band_edges_hz[b]` to `band_edges_hz[b + 1]`. Empty when
+            there are no levels.
+          type: array
+          items:
+            type: number
+            minimum: 0
+        levels:
+          description: |
+            Base64 of `frame_count * band_count` bytes, frame after frame,
+            each frame's bands lowest first. 0 is silent and 255 the song's
+            loudest moments, on a dB scale 48 dB deep, tilted up 3 dB per
+            octave so the treble moves as visibly as the bass. Empty unless
+            `status` is `READY`.
+          type: string
+          contentEncoding: base64
+        error:
+          description: Only present when `status` is `FAILED`.
+          $ref: "#/components/schemas/ErrorDetail"
+        updated_at:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [WAVEFORM_NOT_FOUND]
+        message:
+          type: string
