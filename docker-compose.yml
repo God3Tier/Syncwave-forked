@@ -15,6 +15,7 @@
 name: syncwave
 
 include:
+  - services/recommendation/compose.yaml
   - services/lyrics/compose.yaml
 
 services:

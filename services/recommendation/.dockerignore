@@ -1,0 +1,14 @@
+# Keep the build context small and the image free of local files.
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+tests/
+.env
+.env.*
+*.md
+.gitlab-ci.yml
+compose.yaml
+Dockerfile
+.dockerignore

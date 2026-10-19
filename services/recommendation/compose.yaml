@@ -1,0 +1,29 @@
+# Recommendation Service (README.md), included from the root docker-compose.yml.
+# The API behind the gateway at /api/recommendation. It needs no database,
+# RabbitMQ or S3: only the Catalogue and the Weather API, both stubbed for now.
+
+services:
+  recommendation:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/recommendation:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/recommendation:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: recommendation
+      PORT: "8080"
+      LOG_LEVEL: INFO
+      # `stub` until the Catalogue Service lists songs; then `http`.
+      CATALOGUE_MODE: stub
+      CATALOGUE_URL: http://catalogue:8080
+      CATALOGUE_TIMEOUT_SECONDS: "3"
+      CANDIDATE_LIMIT: "100"
+      # `stub` until a real Weather API provider is wired in; `off` exercises the fallback.
+      WEATHER_MODE: stub
+      WEATHER_STUB_CONDITION: RAIN
+      WEATHER_TIMEOUT_SECONDS: "2"
+    env_file:
+      - path: ../../.env      # optional third-party secrets: WEATHER_API_KEY
+        required: false
