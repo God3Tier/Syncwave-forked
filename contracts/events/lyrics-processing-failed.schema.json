@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/lyrics-processing-failed.schema.json",
+  "title": "LyricsProcessingFailed",
+  "description": "Published by Lyrics on routing key lyrics.failed when it gives up on a song's lyrics: immediately for a permanent problem (e.g. invalid LRC), or after the 3rd attempt for a transient one. The SongUploaded message is also moved to lyrics.song-uploaded.dlq. Catalogue sets lyrics_status = FAILED.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "LyricsProcessingFailed" },
+    "payload": {
+      "type": "object",
+      "required": ["error_code", "message", "attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "description": "Machine-readable reason, e.g. INVALID_EVENT, LYRICS_FILE_NOT_FOUND, LYRICS_TOO_LARGE, LYRICS_INVALID_ENCODING, LYRICS_INVALID, LYRICS_NOT_TIMESTAMPED, PROCESSING_ERROR.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]*$"
+        },
+        "message": {
+          "description": "Human-readable detail for logs and the UI.",
+          "type": "string"
+        },
+        "attempts": {
+          "description": "How many times processing was attempted before giving up.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,199 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Recommendation Service
+  version: 1.0.0
+  description: |
+    Song recommendations for the Discover & Listen scenario. The service picks
+    candidate songs from the Catalogue and uses the current weather at the
+    caller's location as **one supporting signal**. Weather is not required:
+    without it, or when the Weather API fails, the service still returns
+    recommendations.
+
+    Browsers call it through the gateway, e.g.
+    `GET http://localhost:8080/api/recommendation/recommendations?lat=1.35&lon=103.82`.
+    The paths below are the service's own paths, without the
+    `/api/recommendation` prefix.
+
+    Only songs whose Catalogue `processing_status` is `READY` are recommended,
+    so every returned `song_id` can be streamed. The Weather API is called by
+    this service, never by the browser, so its key stays on the server.
+servers:
+  - url: http://recommendation:8080
+    description: Inside Docker Compose (the gateway adds the /api/recommendation prefix)
+security: []
+tags:
+  - name: recommendations
+    description: Song recommendations
+  - name: operations
+    description: Health checks
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: getHealth
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /recommendations:
+    get:
+      tags: [recommendations]
+      operationId: getRecommendations
+      summary: Get recommended songs
+      description: |
+        Pass `lat` and `lon` together to let the weather influence the result.
+        Omit both for recommendations without weather.
+
+        `weather_used` says whether weather actually influenced this response.
+        It is `false` when no location was sent **or** when the Weather API
+        failed or timed out. A Weather API failure never produces an error
+        response; the endpoint falls back to recommendations without weather.
+      parameters:
+        - name: lat
+          in: query
+          description: Latitude of the caller. Must be sent together with `lon`.
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - name: lon
+          in: query
+          description: Longitude of the caller. Must be sent together with `lat`.
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+        - name: limit
+          in: query
+          description: Maximum number of songs to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Recommended songs, best match first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recommendations"
+              examples:
+                withWeather:
+                  value:
+                    items:
+                      - song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                        title: Rainy Window
+                        artist: Example Artist
+                        duration_ms: 214000
+                        reason: WEATHER_MATCH
+                      - song_id: 7e91d5a2-60c4-4b38-9f0e-2a4b6c8d1e35
+                        title: Another Song
+                        artist: Another Artist
+                        duration_ms: 187000
+                        reason: GENERAL
+                    weather_used: true
+                    weather:
+                      condition: RAIN
+                      temperature_c: 26.4
+                weatherUnavailable:
+                  description: The Weather API failed, so the fallback was used.
+                  value:
+                    items:
+                      - song_id: 7e91d5a2-60c4-4b38-9f0e-2a4b6c8d1e35
+                        title: Another Song
+                        artist: Another Artist
+                        duration_ms: 187000
+                        reason: GENERAL
+                    weather_used: false
+                    weather: null
+        "400":
+          description: "Invalid query (`INVALID_REQUEST`), e.g. only one of `lat` and `lon`, or a value out of range."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The Catalogue Service could not be reached, so there are no candidate songs (`CATALOGUE_UNAVAILABLE`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Recommendations:
+      type: object
+      required: [items, weather_used, weather]
+      properties:
+        items:
+          description: Best match first. Empty when there are no READY songs.
+          type: array
+          items:
+            $ref: "#/components/schemas/RecommendedSong"
+        weather_used:
+          description: True only if weather actually influenced `items`.
+          type: boolean
+        weather:
+          description: The weather that was used. `null` when `weather_used` is false.
+          oneOf:
+            - $ref: "#/components/schemas/Weather"
+            - type: "null"
+    RecommendedSong:
+      description: |
+        A subset of the Song contract (`contracts/README.md`), enough for the
+        browser to render a list without another Catalogue call. Audio is
+        fetched from the Streaming Service by `song_id`.
+      type: object
+      required: [song_id, title, artist, duration_ms, reason]
+      properties:
+        song_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        artist:
+          type: string
+        duration_ms:
+          type: integer
+          minimum: 0
+        reason:
+          description: |
+            Why the song was picked. `WEATHER_MATCH` means the weather signal
+            favoured it; `GENERAL` means the default selection.
+          type: string
+          enum: [WEATHER_MATCH, GENERAL]
+    Weather:
+      type: object
+      required: [condition, temperature_c]
+      properties:
+        condition:
+          type: string
+          enum: [CLEAR, CLOUDY, RAIN, STORM, SNOW, FOG, OTHER]
+        temperature_c:
+          type: number
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [CATALOGUE_UNAVAILABLE]
+        message:
+          type: string

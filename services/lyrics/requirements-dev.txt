@@ -1,0 +1,6 @@
+-r requirements.txt
+aiosqlite==0.22.1
+httpx2==2.13.1
+jsonschema==4.26.0
+pytest==9.1.1
+ruff==0.17.1
