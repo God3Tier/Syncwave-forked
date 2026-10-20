@@ -20,6 +20,7 @@ include:
   - services/waveform/compose.yaml
   - services/recommendation/compose.yaml
   - services/lyrics/compose.yaml
+  - services/playlist/compose.yaml
 
 services:
   # Single browser-facing entry point: http://localhost:8080
