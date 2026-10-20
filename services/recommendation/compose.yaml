@@ -20,8 +20,9 @@ services:
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
       CANDIDATE_LIMIT: "100"
-      # `stub` until a real Weather API provider is wired in; `off` exercises the fallback.
-      WEATHER_MODE: stub
+      # `stub` for a fixed condition, `off` to exercise the fallback, `open-meteo`
+      # for the real Open-Meteo API (needs internet, no key).
+      WEATHER_MODE: ${WEATHER_MODE:-stub}
       WEATHER_STUB_CONDITION: RAIN
       WEATHER_TIMEOUT_SECONDS: "2"
     env_file:

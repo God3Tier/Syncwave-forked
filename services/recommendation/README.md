@@ -7,15 +7,16 @@ the Catalogue for songs that are ready to play and uses the current weather as
 **one supporting signal** to order them. Weather is optional: without it, or
 when the Weather API fails, the service still recommends.
 
-> **Status:** the Catalogue and the Weather API are both **stubbed** for now.
-> See [Stubs](#stubs-and-what-is-assumed) for what is real and what is not.
+> **Status:** the Weather API is **real** (Open-Meteo, `WEATHER_MODE=open-meteo`);
+> it defaults to a stub so the service runs offline. The Catalogue is still
+> **stubbed**. See [Stubs](#stubs-and-what-is-assumed) for what is real and what is not.
 
 ## Interfaces
 
 | Kind             | Contract                                                                                   | Notes |
 |------------------|--------------------------------------------------------------------------------------------|-------|
 | REST             | [`contracts/api/recommendation.openapi.yaml`](../../contracts/api/recommendation.openapi.yaml) | via gateway at `/api/recommendation/...` |
-| Calls            | Catalogue Service `GET /songs` (assumed), Weather API                                      | see below |
+| Calls            | Catalogue Service `GET /songs` (assumed), Open-Meteo (weather)                             | see below |
 | Events published | none                                                                                       | |
 | Events consumed  | none                                                                                       | |
 | gRPC             | none                                                                                       | |
@@ -57,7 +58,7 @@ the weather signal can only be as good as that field.
 | Dependency  | Now                                   | Setting                  | To make it real |
 |-------------|---------------------------------------|--------------------------|-----------------|
 | Catalogue   | 8 fixed demo songs (`StubCatalogue`)  | `CATALOGUE_MODE=stub`    | set `http` and `CATALOGUE_URL` once the Catalogue lists songs |
-| Weather API | the same condition for every location | `WEATHER_MODE=stub`      | add a client class with `current(lat, lon)` in `weather.py` |
+| Weather API | the same condition for every location | `WEATHER_MODE=stub`      | already built: set `WEATHER_MODE=open-meteo` (needs internet, no key) |
 
 - The stub songs have fixed ids that **do not exist** in the real Catalogue or
   Streaming Service, so a browser cannot play them.
@@ -71,8 +72,13 @@ the weather signal can only be as good as that field.
 
   If the Catalogue's real API differs, only `catalogue.py` changes.
 - `WEATHER_MODE=off` behaves like a Weather API that is down. It exists to see
-  the fallback working locally. A real provider's key goes in `WEATHER_API_KEY`
-  in the repository's `.env` (see `.env.example`); nothing reads it yet.
+  the fallback working locally.
+- `WEATHER_MODE=open-meteo` calls [Open-Meteo](https://open-meteo.com), which
+  needs **no API key**, for the current weather at `lat`/`lon`. Its WMO weather
+  code is mapped to the contract's `condition` (0-1 CLEAR, 2-3 CLOUDY, 45/48 FOG,
+  51-67 and 80-82 RAIN, 71-77 and 85-86 SNOW, 95-99 STORM, anything else OTHER).
+  Any failure becomes the same "no weather" fallback as above. Open-Meteo's free
+  tier is for non-commercial use, which fits this project.
 
 ## Data owned
 
@@ -90,7 +96,8 @@ See `.env.example` for every variable. Locally, Compose sets them
 | `CATALOGUE_URL`             | `http://catalogue:8080`  | the Catalogue Service (`http` mode) |
 | `CATALOGUE_TIMEOUT_SECONDS` | `3`                      | longer calls count as the Catalogue being down |
 | `CANDIDATE_LIMIT`           | `100`                    | songs requested before ranking (at least `limit`) |
-| `WEATHER_MODE`              | `stub`                   | `stub` or `off` |
+| `WEATHER_MODE`              | `stub`                   | `stub`, `off` or `open-meteo` |
+| `WEATHER_URL`               | `https://api.open-meteo.com/v1/forecast` | the Open-Meteo endpoint (`open-meteo` mode) |
 | `WEATHER_STUB_CONDITION`    | `RAIN`                   | what the stub returns |
 | `WEATHER_TIMEOUT_SECONDS`   | `2`                      | a slower lookup is abandoned |
 

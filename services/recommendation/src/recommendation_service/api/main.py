@@ -24,7 +24,7 @@ from recommendation_service.config import Settings, configure_logging, get_setti
 from recommendation_service.errors import InvalidRequest, RecommendationError
 from recommendation_service.models import Recommendation, Weather
 from recommendation_service.service import Result, recommend
-from recommendation_service.weather import NoWeather, StubWeather, WeatherClient
+from recommendation_service.weather import NoWeather, OpenMeteoWeather, StubWeather, WeatherClient
 
 
 class ErrorDetail(BaseModel):
@@ -83,9 +83,11 @@ def build_catalogue(settings: Settings, client: httpx2.AsyncClient) -> Catalogue
     return StubCatalogue()
 
 
-def build_weather(settings: Settings) -> WeatherClient:
+def build_weather(settings: Settings, client: httpx2.AsyncClient) -> WeatherClient:
     if settings.weather_mode == "off":
         return NoWeather()
+    if settings.weather_mode == "open-meteo":
+        return OpenMeteoWeather(settings.weather_url, client)
     return StubWeather(settings.weather_stub_condition)
 
 
@@ -96,7 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with httpx2.AsyncClient(timeout=settings.catalogue_timeout_seconds) as client:
         app.state.settings = settings
         app.state.catalogue = build_catalogue(settings, client)
-        app.state.weather = build_weather(settings)
+        app.state.weather = build_weather(settings, client)
         yield
 
 

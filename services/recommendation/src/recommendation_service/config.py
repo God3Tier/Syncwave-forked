@@ -8,7 +8,7 @@ from functools import lru_cache
 from recommendation_service.models import CONDITIONS
 
 CATALOGUE_MODES = ("stub", "http")
-WEATHER_MODES = ("stub", "off")
+WEATHER_MODES = ("stub", "off", "open-meteo")
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,7 @@ class Settings:
     catalogue_timeout_seconds: float
     candidate_limit: int
     weather_mode: str
+    weather_url: str
     weather_stub_condition: str
     weather_timeout_seconds: float
 
@@ -44,6 +45,7 @@ def get_settings() -> Settings:
         catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
         candidate_limit=int(os.getenv("CANDIDATE_LIMIT", "100")),
         weather_mode=_choice("WEATHER_MODE", "stub", WEATHER_MODES),
+        weather_url=os.getenv("WEATHER_URL", "https://api.open-meteo.com/v1/forecast"),
         weather_stub_condition=_choice("WEATHER_STUB_CONDITION", "RAIN", CONDITIONS, upper=True),
         weather_timeout_seconds=float(os.getenv("WEATHER_TIMEOUT_SECONDS", "2")),
     )

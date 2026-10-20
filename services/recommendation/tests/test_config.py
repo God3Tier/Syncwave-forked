@@ -40,7 +40,7 @@ def test_values_are_case_insensitive_and_the_url_loses_its_trailing_slash(
     ("name", "value"),
     [
         ("CATALOGUE_MODE", "nope"),
-        ("WEATHER_MODE", "http"),  # a real provider is not implemented yet
+        ("WEATHER_MODE", "http"),  # the real provider's mode is `open-meteo`
         ("WEATHER_STUB_CONDITION", "HURRICANE"),
     ],
 )
@@ -51,3 +51,13 @@ def test_an_unknown_choice_fails_at_start_up(
 
     with pytest.raises(ValueError, match=name):
         get_settings()
+
+
+def test_open_meteo_is_a_weather_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEATHER_MODE", "Open-Meteo")
+    monkeypatch.delenv("WEATHER_URL", raising=False)
+
+    settings = get_settings()
+
+    assert settings.weather_mode == "open-meteo"
+    assert settings.weather_url == "https://api.open-meteo.com/v1/forecast"
