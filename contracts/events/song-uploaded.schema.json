@@ -2,17 +2,27 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://syncwave.local/contracts/events/song-uploaded.schema.json",
   "title": "SongUploaded",
-  "description": "PROPOSAL, pending approval by the Upload Service owner (plan.md §10). Published by Upload on routing key song.uploaded after the audio (and lyrics, if any) are stored in S3 and the upload is committed. Consumed by Lyrics and Waveform. Upload may add further payload fields; consumers ignore fields they do not use.",
+  "description": "Published by Upload on routing key song.uploaded after the audio (and lyrics, if any) are stored in S3 and the upload is committed. Carries the canonical song metadata so Catalogue can create the initial Song record. Consumed by Catalogue, Lyrics and Waveform. Upload may add further payload fields; consumers ignore fields they do not use.",
   "type": "object",
   "allOf": [{ "$ref": "envelope.schema.json" }],
   "properties": {
     "event_type": { "const": "SongUploaded" },
     "payload": {
       "type": "object",
-      "required": ["audio_reference"],
+      "required": ["audio_reference", "title", "artist"],
       "properties": {
         "audio_reference": {
           "description": "S3 object key of the uploaded audio in the audio bucket, e.g. \"audio/<song_id>.mp3\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "description": "Canonical song title.",
+          "type": "string",
+          "minLength": 1
+        },
+        "artist": {
+          "description": "Canonical artist name.",
           "type": "string",
           "minLength": 1
         },
@@ -22,6 +32,11 @@
             { "type": "string", "minLength": 1 },
             { "type": "null" }
           ]
+        },
+        "duration_ms": {
+          "description": "Audio duration in milliseconds, if Upload measured it. Otherwise unknown until Waveform reports it.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

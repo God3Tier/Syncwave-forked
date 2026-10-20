@@ -40,7 +40,7 @@ A per-event schema reuses the envelope and constrains the payload:
 
 | `event_type`               | Routing key          | Producer  | Consumed by (queue)                   |
 |----------------------------|----------------------|-----------|---------------------------------------|
-| `SongUploaded`             | `song.uploaded`      | Upload    | Lyrics, Waveform                      |
+| `SongUploaded`             | `song.uploaded`      | Upload    | Catalogue, Lyrics, Waveform           |
 | `LyricsProcessed`          | `lyrics.processed`   | Lyrics    | Catalogue                             |
 | `LyricsProcessingFailed`   | `lyrics.failed`      | Lyrics    | Catalogue                             |
 | `WaveformProcessed`        | `waveform.processed` | Waveform  | Catalogue                             |
@@ -62,12 +62,17 @@ The per-event schemas are the source of truth; this is a summary.
 | `WaveformProcessed`        | `waveform-processed.schema.json`           | `points`, `duration_ms`                                |
 | `WaveformProcessingFailed` | `waveform-processing-failed.schema.json`   | `error_code`, `message`, `attempts`                    |
 
-`song-uploaded.schema.json` was written by the Lyrics/Waveform owner so the
-consumers could be built before the Upload Service. It contains only what
-the consumers need and is **pending approval by the Upload owner**, who may
-add fields. Lyrics and Waveform ignore payload fields they do not use.
+`song-uploaded.schema.json` was written by the Lyrics/Waveform owner so the consumers could be built before the Upload Service. It now also carries the canonical song metadata (`title`, `artist`) so 
+Catalogue can create the initial Song record. 
+Upload may add further payload fields; consumers ignore fields they do not use. 
+Catalogue ignores `duration_ms` until Waveform measures it.
 
 Follow-up events copy the `SongUploaded` `event_id` into `correlation_id`.
+
+Catalogue creates each song from `SongUploaded`, then updates
+`lyrics_status`/`waveform_status` from `LyricsProcessed`/`WaveformProcessed`
+(and their `...Failed` variants), derives `processing_status`, and publishes
+`SongReady` only when the song first becomes fully `READY`. PARTIAL songs are never published.
 `…Processed` can be published more than once for the same song (a
 duplicate `SongUploaded` delivery re-announces the stored result), so
 Catalogue must treat it idempotently.
