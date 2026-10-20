@@ -1,0 +1,12 @@
+{
+  "type": "PARTICIPANT_STATE",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 6,
+  "sent_at_ms": 1791460001001,
+  "payload": {
+    "participant_id": "55555555-5555-4555-8555-555555555555",
+    "generation": 1,
+    "connected": true,
+    "ready": true
+  }
+}

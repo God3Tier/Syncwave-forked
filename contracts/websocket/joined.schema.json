@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/joined.schema.json",
+  "title": "JOINED",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "JOINED" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_id", "generation", "state", "song_id"],
+      "properties": {
+        "participant_id": { "type": "string", "format": "uuid" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["PREPARING", "SCHEDULED", "PLAYING", "PAUSED", "ENDED"] },
+        "song_id": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}

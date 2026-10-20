@@ -1,0 +1,65 @@
+# Waveform Service (README.md), included from the root docker-compose.yml.
+# One image runs as two containers: the API behind the gateway, and the AMQP
+# worker, which has no port.
+
+x-waveform-environment: &waveform-environment
+  SERVICE_NAME: waveform
+  PORT: "8080"
+  LOG_LEVEL: INFO
+  # RabbitMQ (topology: contracts/events/README.md). Separate variables, never
+  # a URL with the password inside: in production the password is injected on
+  # its own from AWS Secrets Manager.
+  AMQP_HOST: rabbitmq
+  AMQP_PORT: "5672"
+  AMQP_USER: syncwave
+  AMQP_PASSWORD: syncwave
+  AMQP_PREFETCH: "2"
+  # Postgres: this service's own database (infrastructure/postgres/init.sql)
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: waveform
+  DB_USER: waveform
+  DB_PASSWORD: waveform
+  # S3: RustFS locally. In production the endpoint/path-style/key variables
+  # are not set: the SDK talks to real S3 with the ECS task role's credentials.
+  S3_ENDPOINT_URL: http://s3:9000
+  S3_FORCE_PATH_STYLE: "true"
+  AWS_ACCESS_KEY_ID: syncwave
+  AWS_SECRET_ACCESS_KEY: syncwave-secret
+  AWS_REGION: us-east-1
+  S3_BUCKET: syncwave-audio
+  WAVEFORM_POINTS: "1000"
+  WAVEFORM_SAMPLE_RATE: "22050"
+  WAVEFORM_FRAME_RATE: "25"
+  WAVEFORM_BANDS: "50"
+  WAVEFORM_MAX_AUDIO_BYTES: "209715200"
+  WAVEFORM_DECODE_TIMEOUT_S: "120"
+
+services:
+  waveform:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/waveform:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/waveform:${IMAGE_TAG:-local}
+    environment: *waveform-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  waveform-worker:
+    image: ${IMAGE_REGISTRY:-syncwave}/waveform:${IMAGE_TAG:-local}
+    command: ["python", "-m", "waveform_service.worker"]
+    environment: *waveform-environment
+    healthcheck:
+      disable: true
+    restart: on-failure
+    depends_on:
+      waveform:
+        condition: service_healthy   # its start-up has applied the migrations
+      rabbitmq-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully

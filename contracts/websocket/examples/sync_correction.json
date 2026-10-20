@@ -1,0 +1,15 @@
+{
+  "type": "SYNC_CORRECTION",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 10,
+  "sent_at_ms": 1791460005001,
+  "payload": {
+    "generation": 1,
+    "method": "SEEK",
+    "drift_ms": 400,
+    "target_position_ms": 2500,
+    "playback_rate": 1.0,
+    "apply_at_server_time_ms": 1791460005501,
+    "duration_ms": null
+  }
+}

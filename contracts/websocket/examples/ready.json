@@ -1,0 +1,11 @@
+{
+  "type": "READY",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 5,
+  "sent_at_ms": 1791460001000,
+  "payload": {
+    "generation": 1,
+    "buffered_duration_ms": 5000,
+    "media_duration_ms": 180000
+  }
+}
