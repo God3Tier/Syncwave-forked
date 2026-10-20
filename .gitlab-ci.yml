@@ -88,12 +88,12 @@ contracts:schemas:
 catalogue:
   extends: .service-trigger
   variables:
-    CONTRACT_PATHS: contracts/events contracts/grpc
+    CONTRACT_PATHS: contracts/events contracts/grpc contracts/api
   trigger:
     include: services/catalogue/.gitlab-ci.yml
   rules:
     - exists: [services/catalogue/.gitlab-ci.yml]
-      changes: [services/catalogue/**/*, contracts/events/**/*, contracts/grpc/**/*, ci/**/*]
+      changes: [services/catalogue/**/*, contracts/events/**/*, contracts/grpc/**/*, contracts/api/**/*, ci/**/*]
 
 search:
   extends: .service-trigger
