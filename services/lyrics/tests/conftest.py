@@ -145,7 +145,11 @@ def song_uploaded() -> Callable[..., dict[str, Any]]:
     def build(*, song_id: str | None = None, lyrics_reference: str | None = "") -> dict[str, Any]:
         song_id = song_id or str(uuid.uuid4())
         event_id = str(uuid.uuid4())
-        payload: dict[str, Any] = {"audio_reference": f"audio/{song_id}.mp3"}
+        payload: dict[str, Any] = {
+            "audio_reference": f"audio/{song_id}.mp3",
+            "title": "Demo",
+            "artist": "SyncWave Artist",
+        }
         if lyrics_reference is not None:
             payload["lyrics_reference"] = lyrics_reference or f"lyrics/{song_id}.lrc"
         return {

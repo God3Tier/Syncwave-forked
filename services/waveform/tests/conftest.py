@@ -184,6 +184,8 @@ def song_uploaded() -> Callable[..., dict[str, Any]]:
             "correlation_id": event_id,
             "payload": {
                 "audio_reference": f"audio/{song_id}.mp3",
+                "title": "Demo",
+                "artist": "SyncWave Artist",
                 "lyrics_reference": f"lyrics/{song_id}.lrc",
             },
         }
