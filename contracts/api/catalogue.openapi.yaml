@@ -9,11 +9,12 @@ info:
     overall readiness and publishes `SongReady` when a song becomes fully
     processable.
 servers:
-  - url: http://localhost:8080/api/catalogue
-    description: Local gateway (prefix stripped)
+  - url: http://catalogue:8080
+    description: Inside Docker Compose (the gateway adds the /api/catalogue prefix)
 paths:
   /health:
     get:
+      security: []
       summary: Health check
       operationId: catalogueHealth
       responses:
@@ -30,6 +31,7 @@ paths:
                     example: ok
   /songs/{song_id}:
     get:
+      security: []
       summary: Get one song by ID
       operationId: catalogueGetSong
       parameters:
@@ -61,6 +63,7 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
   /songs:
     get:
+      security: []
       summary: List songs
       operationId: catalogueListSongs
       description: |
@@ -115,9 +118,8 @@ components:
         artist:
           type: string
         duration_ms:
-          type: integer
+          type: [integer, "null"]
           minimum: 0
-          nullable: true
           description: Audio duration in milliseconds. null until Waveform has measured it.
         audio_reference:
           type: string
@@ -147,8 +149,7 @@ components:
           items:
             $ref: '#/components/schemas/Song'
         next_cursor:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Opaque paging token; null when there are no more pages.
     ErrorDetail:
       type: object
