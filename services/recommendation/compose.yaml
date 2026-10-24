@@ -16,7 +16,7 @@ services:
       PORT: "8080"
       LOG_LEVEL: INFO
       # `stub` until the Catalogue Service lists songs; then `http`.
-      CATALOGUE_MODE: stub
+      CATALOGUE_MODE: ${CATALOGUE_MODE:-stub}
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
       CANDIDATE_LIMIT: "100"
