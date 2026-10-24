@@ -1,0 +1,2 @@
+-- The legacy integer IDs cannot be reconstructed from UUID song IDs. Keep the
+-- canonical table intact on rollback rather than deleting migrated records.

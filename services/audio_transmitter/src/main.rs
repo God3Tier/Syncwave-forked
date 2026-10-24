@@ -10,7 +10,7 @@ use aws_smithy_types::timeout::TimeoutConfig;
 use std::{env, io, time::Duration};
 use store::audio::AudioStore;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+// pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

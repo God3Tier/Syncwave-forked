@@ -11,11 +11,15 @@ pub fn create_pool(database_url: &str) -> Result<DbPool, diesel::r2d2::PoolError
     Pool::builder().build(manager)
 }
 
-/// Creates the music metadata table if it does not exist yet.
+/// Creates the shared Song contract table if it does not exist yet.
 pub fn initialize_schema(pool: &DbPool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut connection = pool.get()?;
     diesel::sql_query(include_str!(
-        "../migrations/2026-10-09-000001_create_music_metadata/up.sql"
+        "../migrations/2026-10-24-000001_migrate_song_contract/create_songs.sql"
+    ))
+    .execute(&mut connection)?;
+    diesel::sql_query(include_str!(
+        "../migrations/2026-10-24-000001_migrate_song_contract/up.sql"
     ))
     .execute(&mut connection)?;
     Ok(())
