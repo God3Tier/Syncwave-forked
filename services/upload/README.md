@@ -18,6 +18,12 @@ The gateway exposes these routes at `/api/upload/...`. The table above and
 examples below describe how to use the API. The standalone API contract is
 [`contracts/api/upload.openapi.yaml`](../../contracts/api/upload.openapi.yaml).
 
+Swagger UI is available at <http://localhost:8080/api/upload/docs> when the
+service and gateway are running. Expand `POST /uploads`, choose **Try it out**,
+enter title/artist, select an audio file and optional lyrics file, and click
+**Execute**. A successful upload returns `202` with a receipt. Copy its
+`song_id` into `GET /uploads/{song_id}` to check event delivery status.
+
 1. Validate title/artist, optional positive duration, file size/type and audio
    header. Audio is spooled to disk by the multipart parser, then passed to S3
    as a file object; it is not loaded into one large Python byte string.
@@ -34,6 +40,21 @@ examples below describe how to use the API. The standalone API contract is
 6. Lyrics and Waveform consume independently. Catalogue registers the song
    and its initial processing state from the event, then handles processing
    results. Upload never writes Catalogue's database.
+
+## Supported audio formats
+
+The `audio` upload field accepts these file formats:
+
+- MP3 (`.mp3`)
+- WAV (`.wav`)
+- FLAC (`.flac`)
+- Ogg (`.ogg`)
+- M4A (`.m4a`)
+
+File extensions are case-insensitive. The audio header must match the file
+extension; renaming an unsupported file does not make it valid. Empty files
+are rejected. The default maximum audio file size is **190 MiB**, configurable
+through `UPLOAD_MAX_AUDIO_BYTES`.
 
 ## State and ownership
 

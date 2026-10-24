@@ -68,8 +68,6 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
     root_path="/api/upload",
-    openapi_url=None,
-    docs_url=None,
     redoc_url=None,
 )
 
