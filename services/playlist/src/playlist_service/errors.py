@@ -26,3 +26,16 @@ class SongAlreadyInPlaylist(PlaylistError):
 
 class InvalidRequest(PlaylistError):
     code = "INVALID_REQUEST"
+
+
+class SongNotFound(PlaylistError):
+    """The Catalogue says the song does not exist, so it is not added."""
+
+    code = "SONG_NOT_FOUND"
+
+
+class CatalogueUnavailable(PlaylistError):
+    """The Catalogue could not say whether the song exists. The add is refused
+    rather than risking a song that cannot be played."""
+
+    code = "CATALOGUE_UNAVAILABLE"

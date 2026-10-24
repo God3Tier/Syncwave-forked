@@ -18,7 +18,11 @@ info:
     - The order is **persisted**. Reading a playlist twice returns the same
       order, and shuffling saves the new order, so the browser's prefetch
       window (plan.md section 5) stays stable until the order is changed.
-    - `song_id` is not checked against the Catalogue when added.
+    - A `song_id` is checked against the Catalogue when added: a song the
+      Catalogue does not have is refused (`SONG_NOT_FOUND`), and so is any add
+      while the Catalogue cannot be reached (`CATALOGUE_UNAVAILABLE`). Nothing
+      is stored in either case. Songs removed from the Catalogue later are not
+      detected. Every other operation works without the Catalogue.
 servers:
   - url: http://playlist:8080
     description: Inside Docker Compose (the gateway adds the /api/playlist prefix)
@@ -209,9 +213,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
-          $ref: "#/components/responses/PlaylistNotFound"
+          description: "The playlist (`PLAYLIST_NOT_FOUND`) or the song in the Catalogue (`SONG_NOT_FOUND`) does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: "The song is already in the playlist (`SONG_ALREADY_IN_PLAYLIST`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: "The Catalogue could not be asked, so the song was not added (`CATALOGUE_UNAVAILABLE`)."
           content:
             application/json:
               schema:

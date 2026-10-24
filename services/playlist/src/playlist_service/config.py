@@ -13,6 +13,8 @@ class Settings:
     service_name: str
     log_level: str
     database_url: str
+    catalogue_url: str
+    catalogue_timeout_seconds: float
 
 
 def database_url() -> str:
@@ -39,6 +41,8 @@ def get_settings() -> Settings:
         service_name=os.getenv("SERVICE_NAME", "playlist"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         database_url=database_url(),
+        catalogue_url=os.getenv("CATALOGUE_URL", "http://catalogue:8080"),
+        catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
     )
 
 
