@@ -10,8 +10,10 @@ services:
       PORT: "8080"
       GRPC_PORT: "50051"
       DEPENDENCY_TIMEOUT_MS: "750"
-      CATALOGUE_GRPC_TARGET: ${CATALOGUE_GRPC_TARGET:-}
+      CATALOGUE_GRPC_TARGET: ${CATALOGUE_GRPC_TARGET:-catalogue:50051}
+      CATALOGUE_INTERNAL_TOKEN: ${CATALOGUE_INTERNAL_TOKEN:-local-catalogue-internal-token}
       STREAMING_GRPC_TARGET: ${STREAMING_GRPC_TARGET:-}
+      STREAMING_INTERNAL_TOKEN: ${STREAMING_INTERNAL_TOKEN:-local-streaming-internal-token}
       LOG_LEVEL: INFO
       INTERNAL_SERVICE_TOKEN: local-jam-to-sync-token
       MOCK_SYNC_TOKEN: local-sync-participant-token
@@ -33,6 +35,8 @@ services:
       - "50051"
     depends_on:
       postgres:
+        condition: service_healthy
+      catalogue:
         condition: service_healthy
     healthcheck:
       test:

@@ -52,9 +52,10 @@ then coordinates clocks, readiness, scheduled playback, and drift correction.
   not-found, not-ready, unavailable, and timeout failures separately, and no
   false `PREPARE` is emitted on failure
 - Optional deadline-bound gRPC clients implement the shared media query
-  contract. Set `CATALOGUE_GRPC_TARGET` and `STREAMING_GRPC_TARGET` to use
-  real services; leaving either blank keeps that dependency's deterministic
-  development fake
+  contract. Compose uses the real Catalogue at `catalogue:50051` with its
+  own internal token. Set `STREAMING_GRPC_TARGET` when Streaming implements
+  `GetStreamInfo`; leaving a target blank keeps that dependency's
+  deterministic development fake
 - The resolved stream URL is persisted with the authoritative session and is
   reused after restart instead of being replaced by a hard-coded route
 - JSON lifecycle logs and transport correlation IDs, without tokens or signed
@@ -152,18 +153,17 @@ Streaming query contract changes.
 
 ## Current cross-service contract findings
 
-The shared Sync/Jam contract uses UUID strings for `song_id`. The Streaming
-implementation currently present on `origin/dev` is named `audio_transmitter`
-and exposes HTTP `/tracks/{track_id}/audio` and
-`/tracks/{track_id}/audio/range` with a signed 32-bit integer `track_id`.
-It does not yet implement `StreamingQueryService.GetStreamInfo`, and its
-duration field is in seconds rather than the shared `duration_ms` convention.
+The shared Sync/Jam contract and the current `audio_transmitter` use UUID
+strings for `song_id`. Streaming exposes HTTP `/tracks/{track_id}/audio` and
+`/tracks/{track_id}/audio/range`, but does not yet implement
+`StreamingQueryService.GetStreamInfo`.
 
 Sync therefore does not silently call that incompatible HTTP API. The agreed
 boundary is `contracts/grpc/syncwave/media/v1/media.proto`: Streaming must map
-the canonical UUID to its storage object and return the browser-facing URL;
-Catalogue must report canonical processing readiness. Until those services
-implement that contract, local Sync runs use deterministic fakes.
+the canonical UUID to its storage object and return the browser-facing URL.
+Compose now calls the real Catalogue gRPC service for canonical processing
+readiness; only Streaming remains a deterministic fake until it implements
+the contract.
 
 ## Persistence
 
@@ -180,6 +180,7 @@ multi-instance scaling boundary are documented in [OBSERVABILITY.md](OBSERVABILI
 
 - Temporary internal HTTP compatibility remains until Jam switches fully to
   the generated gRPC client.
-- Catalogue and Streaming currently use deterministic local fakes because
-  their services do not yet implement the versioned media query contract.
+- Streaming currently uses a deterministic local fake because it does not yet
+  implement the versioned media query contract. Compose uses the real
+  Catalogue gRPC service.
 - Mock tokens are local-development values only.

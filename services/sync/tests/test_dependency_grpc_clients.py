@@ -4,12 +4,14 @@ from uuid import UUID, uuid4
 import grpc
 import pytest
 
+from sync_service.config import Settings
 from sync_service.dependencies import (
     GrpcCatalogueClient,
     GrpcStreamingClient,
     SongNotFoundError,
     SongProcessingStatus,
     StreamUnavailableError,
+    create_default_dependencies,
 )
 from syncwave.media.v1 import media_pb2, media_pb2_grpc
 
@@ -84,3 +86,20 @@ async def test_media_grpc_clients_map_not_found(media_target: str) -> None:
     finally:
         await catalogue.close()
         await streaming.close()
+
+
+@pytest.mark.anyio
+async def test_default_clients_use_each_upstreams_own_token(media_target: str) -> None:
+    dependencies = create_default_dependencies(
+        Settings(
+            catalogue_grpc_target=media_target,
+            catalogue_internal_token="catalogue-token",
+            streaming_grpc_target=media_target,
+            streaming_internal_token="streaming-token",
+        )
+    )
+    try:
+        assert dependencies.catalogue.token == "catalogue-token"
+        assert dependencies.streaming.token == "streaming-token"
+    finally:
+        await dependencies.close()

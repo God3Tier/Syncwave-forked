@@ -225,7 +225,7 @@ def create_default_dependencies(settings: Settings) -> PlaybackDependencies:
     catalogue: CatalogueClient = (
         GrpcCatalogueClient(
             settings.catalogue_grpc_target,
-            settings.internal_service_token,
+            settings.catalogue_internal_token,
             timeout_seconds,
         )
         if settings.catalogue_grpc_target
@@ -234,7 +234,7 @@ def create_default_dependencies(settings: Settings) -> PlaybackDependencies:
     streaming: StreamingClient = (
         GrpcStreamingClient(
             settings.streaming_grpc_target,
-            settings.internal_service_token,
+            settings.streaming_internal_token,
             timeout_seconds,
         )
         if settings.streaming_grpc_target
