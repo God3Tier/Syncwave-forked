@@ -29,6 +29,16 @@ lint:
     - ruff check src tests migrations
     - ruff format --check src tests migrations
 
+contracts:
+  extends: [.lint, .python]
+  script:
+    - pip install --quiet --requirement requirements-dev.txt
+    - >-
+      python ../../ci/scripts/check-python-grpc-bindings.py
+      --proto-root ../../contracts/grpc
+      --output src
+      syncwave/playlist/v1/playlist.proto
+
 test:
   extends: [.test, .python]
   variables:

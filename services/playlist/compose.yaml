@@ -29,6 +29,13 @@ services:
       CATALOGUE_MODE: ${CATALOGUE_MODE:-off}
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
+      # gRPC GetPlaylist for Jam and Sync (contracts/grpc/syncwave/playlist/v1).
+      # Internal only: not routed by the gateway. Callers send this token in the
+      # x-internal-token header. Local development value, never a real secret.
+      GRPC_PORT: "50051"
+      INTERNAL_SERVICE_TOKEN: local-playlist-internal-token
+    expose:
+      - "50051"
     depends_on:
       postgres:
         condition: service_healthy

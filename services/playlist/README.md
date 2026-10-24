@@ -14,12 +14,17 @@ Titles, artists and audio belong to the Catalogue and Streaming services
 | REST             | [`contracts/api/playlist.openapi.yaml`](../../contracts/api/playlist.openapi.yaml) | via gateway at `/api/playlist/...` |
 | Events published | none                                                                               | |
 | Events consumed  | none                                                                               | |
-| gRPC             | none                                                                               | the Jam Service keeps its own queue, so nothing calls Playlist over gRPC (yet) |
+| gRPC (served)    | [`contracts/grpc/syncwave/playlist/v1/playlist.proto`](../../contracts/grpc/syncwave/playlist/v1/playlist.proto) | `GetPlaylist`, read-only, on internal port 50051; callers send `x-internal-token`. Jam and Sync read playlists from here |
 | Calls (HTTP)     | Catalogue `GET /songs/{song_id}`, only when a song is added and `CATALOGUE_MODE=http` | refuses the add if the song is unknown or the Catalogue is down |
 
 ```text
 browser ──> gateway /api/playlist/playlists/... ──> playlist ──> Postgres (playlist database)
+Jam / Sync ──────── gRPC GetPlaylist (port 50051, internal) ──┘
 ```
+
+Jam and Sync use this service as the one source of playlists: the order they
+play is the order stored here. Only the REST API changes a playlist; gRPC only
+reads.
 
 | Endpoint                                       | What                                                |
 |------------------------------------------------|-----------------------------------------------------|
@@ -33,6 +38,56 @@ browser ──> gateway /api/playlist/playlists/... ──> playlist ──> Pos
 | `DELETE /playlists/{playlist_id}/songs/{song_id}` | remove a song                                    |
 | `POST /playlists/{playlist_id}/shuffle`        | shuffle and save the new order                      |
 | `GET /health`                                  | liveness                                            |
+
+## Calling `GetPlaylist` over gRPC (for Jam and Sync)
+
+Read-only. Use it to get a playlist's songs in play order. It cannot change a
+playlist; edits go through the REST API.
+
+| What           | Value |
+|----------------|-------|
+| Address        | `playlist:50051` inside Docker Compose. Plain gRPC (no TLS), internal only: not routed by the gateway and not published to the host |
+| Contract       | [`contracts/grpc/syncwave/playlist/v1/playlist.proto`](../../contracts/grpc/syncwave/playlist/v1/playlist.proto) |
+| Service / call | `syncwave.playlist.v1.PlaylistQueryService` / `GetPlaylist` |
+| Request        | `playlist_id` (a UUID string) |
+| Response       | `playlist_id`, `owner_id`, `name`, and `songs`: a list of `{song_id, position}` in play order (`position` is 0-based) |
+| Auth           | metadata header `x-internal-token`. Local value: `local-playlist-internal-token` (Playlist reads it from `INTERNAL_SERVICE_TOKEN`). Take it from your own environment variable, and never log it |
+| Deadline       | always set one (plan.md §24.10); Sync uses 750 ms for its other dependencies |
+
+| gRPC status        | Meaning | What the caller should do |
+|--------------------|---------|---------------------------|
+| `OK`               | the playlist | use `songs` in the order given |
+| `NOT_FOUND`        | no playlist with that id | report "playlist not found" |
+| `INVALID_ARGUMENT` | `playlist_id` is not a UUID | fix the caller; do not retry |
+| `UNAUTHENTICATED`  | token missing or wrong | fix the configuration; do not retry |
+| `UNAVAILABLE` / `DEADLINE_EXCEEDED` | Playlist is down or slow | treat as temporarily unavailable; do not start playback from an incomplete list |
+
+The songs are only ids. Titles, readiness and audio come from the Catalogue
+and Streaming. The order is the saved order: a shuffle is stored, so two reads
+return the same list until someone changes it.
+
+Python client (generate the bindings from the proto into your own `src/`, as
+Sync does: `python -m grpc_tools.protoc -I ../../contracts/grpc
+--python_out=src --grpc_python_out=src syncwave/playlist/v1/playlist.proto`):
+
+```python
+import grpc
+from syncwave.playlist.v1 import playlist_pb2, playlist_pb2_grpc
+
+async with grpc.aio.insecure_channel("playlist:50051") as channel:
+    stub = playlist_pb2_grpc.PlaylistQueryServiceStub(channel)
+    reply = await stub.GetPlaylist(
+        playlist_pb2.GetPlaylistRequest(playlist_id=playlist_id),
+        metadata=(("x-internal-token", token),),
+        timeout=0.75,
+    )
+    song_ids = [song.song_id for song in reply.songs]  # already in play order
+```
+
+To try it from another container once the stack is up: create a playlist
+through the REST API, then run the client above inside the `jam` or `sync`
+container against `playlist:50051`. Tests that need a Playlist can use a small
+fake gRPC server, as Sync does for Catalogue and Streaming.
 
 ## Ordering rules
 
