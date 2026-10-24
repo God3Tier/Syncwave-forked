@@ -40,11 +40,11 @@ def get_settings() -> Settings:
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "recommendation"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
-        catalogue_mode=_choice("CATALOGUE_MODE", "stub", CATALOGUE_MODES),
+        catalogue_mode=_choice("CATALOGUE_MODE", "http", CATALOGUE_MODES),
         catalogue_url=os.getenv("CATALOGUE_URL", "http://catalogue:8080").rstrip("/"),
         catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
         candidate_limit=int(os.getenv("CANDIDATE_LIMIT", "100")),
-        weather_mode=_choice("WEATHER_MODE", "stub", WEATHER_MODES),
+        weather_mode=_choice("WEATHER_MODE", "open-meteo", WEATHER_MODES),
         weather_url=os.getenv("WEATHER_URL", "https://api.open-meteo.com/v1/forecast"),
         weather_stub_condition=_choice("WEATHER_STUB_CONDITION", "RAIN", CONDITIONS, upper=True),
         weather_timeout_seconds=float(os.getenv("WEATHER_TIMEOUT_SECONDS", "2")),

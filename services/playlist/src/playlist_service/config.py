@@ -43,7 +43,7 @@ def database_url() -> str:
 
 
 def catalogue_mode() -> str:
-    mode = os.getenv("CATALOGUE_MODE", "off").lower()
+    mode = os.getenv("CATALOGUE_MODE", "http").lower()
     if mode not in CATALOGUE_MODES:
         raise ValueError(f"CATALOGUE_MODE must be one of {CATALOGUE_MODES}, not {mode!r}")
     return mode

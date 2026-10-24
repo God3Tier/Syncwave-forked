@@ -7,9 +7,10 @@ the Catalogue for songs that are ready to play and uses the current weather as
 **one supporting signal** to order them. Weather is optional: without it, or
 when the Weather API fails, the service still recommends.
 
-> **Status:** the Weather API is **real** (Open-Meteo, `WEATHER_MODE=open-meteo`);
-> it defaults to a stub so the service runs offline. The Catalogue is still
-> **stubbed**. See [Stubs](#stubs-and-what-is-assumed) for what is real and what is not.
+> **Status:** both dependencies are **real by default**: the Weather API is Open-Meteo
+> (`WEATHER_MODE=open-meteo`) and songs come from the Catalogue Service
+> (`CATALOGUE_MODE=http`). Stubs remain for running on their own. See
+> [Stubs](#stubs-and-what-is-assumed).
 
 ## Interfaces
 
@@ -55,10 +56,10 @@ the weather signal can only be as good as that field.
 
 ## Stubs and what is assumed
 
-| Dependency  | Now                                   | Setting                  | To make it real |
-|-------------|---------------------------------------|--------------------------|-----------------|
-| Catalogue   | 8 fixed demo songs (`StubCatalogue`)  | `CATALOGUE_MODE=stub`    | set `http` and `CATALOGUE_URL` once the Catalogue lists songs |
-| Weather API | the same condition for every location | `WEATHER_MODE=stub`      | already built: set `WEATHER_MODE=open-meteo` (needs internet, no key) |
+| Dependency  | Default (real)                        | Stub, to run on its own        |
+|-------------|---------------------------------------|--------------------------------|
+| Catalogue   | the Catalogue Service (`CATALOGUE_MODE=http`, `CATALOGUE_URL`) | 8 fixed demo songs (`CATALOGUE_MODE=stub`) |
+| Weather API | Open-Meteo (`WEATHER_MODE=open-meteo`, needs internet, no key) | the same condition for every location (`WEATHER_MODE=stub`) |
 
 - The stub songs have fixed ids that **do not exist** in the real Catalogue or
   Streaming Service, so a browser cannot play them.
@@ -92,11 +93,11 @@ See `.env.example` for every variable. Locally, Compose sets them
 
 | Variable                    | Default                  | Meaning |
 |-----------------------------|--------------------------|---------|
-| `CATALOGUE_MODE`            | `stub`                   | `stub` or `http` |
+| `CATALOGUE_MODE`            | `http`                   | `stub` or `http` |
 | `CATALOGUE_URL`             | `http://catalogue:8080`  | the Catalogue Service (`http` mode) |
 | `CATALOGUE_TIMEOUT_SECONDS` | `3`                      | longer calls count as the Catalogue being down |
 | `CANDIDATE_LIMIT`           | `100`                    | songs requested before ranking (at least `limit`) |
-| `WEATHER_MODE`              | `stub`                   | `stub`, `off` or `open-meteo` |
+| `WEATHER_MODE`              | `open-meteo`             | `stub`, `off` or `open-meteo` |
 | `WEATHER_URL`               | `https://api.open-meteo.com/v1/forecast` | the Open-Meteo endpoint (`open-meteo` mode) |
 | `WEATHER_STUB_CONDITION`    | `RAIN`                   | what the stub returns |
 | `WEATHER_TIMEOUT_SECONDS`   | `2`                      | a slower lookup is abandoned |

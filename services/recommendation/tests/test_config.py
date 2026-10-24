@@ -16,8 +16,8 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = get_settings()
 
-    assert settings.catalogue_mode == "stub"
-    assert settings.weather_mode == "stub"
+    assert settings.catalogue_mode == "http"
+    assert settings.weather_mode == "open-meteo"
     assert settings.weather_stub_condition == "RAIN"
     assert settings.catalogue_url == "http://catalogue:8080"
 
