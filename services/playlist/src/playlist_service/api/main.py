@@ -30,8 +30,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
 from starlette.exceptions import HTTPException
 
-from playlist_service.catalogue import HttpCatalogue
-from playlist_service.config import configure_logging, get_settings
+from playlist_service.catalogue import CatalogueClient, HttpCatalogue, NoCatalogue
+from playlist_service.config import Settings, configure_logging, get_settings
 from playlist_service.db import (
     Database,
     PlaylistData,
@@ -165,6 +165,12 @@ def decode_cursor(cursor: str) -> int:
     return offset
 
 
+def build_catalogue(settings: Settings, client: httpx2.AsyncClient) -> CatalogueClient:
+    if settings.catalogue_mode == "http":
+        return HttpCatalogue(settings.catalogue_url, client)
+    return NoCatalogue()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -172,7 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     database = Database(settings.database_url)
     app.state.repository = PlaylistRepository(database.sessions)
     async with httpx2.AsyncClient(timeout=settings.catalogue_timeout_seconds) as client:
-        app.state.catalogue = HttpCatalogue(settings.catalogue_url, client)
+        app.state.catalogue = build_catalogue(settings, client)
         yield
     await database.dispose()
 

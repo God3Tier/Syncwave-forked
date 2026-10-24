@@ -1,7 +1,7 @@
 # Playlist Service (README.md), included from the root docker-compose.yml.
-# The API behind the gateway at /api/playlist. It needs Postgres, and the
-# Catalogue Service only when a song is added (no RabbitMQ, no S3). It does not
-# wait for the Catalogue to start: adding songs is refused until it is up.
+# The API behind the gateway at /api/playlist. It needs Postgres (no RabbitMQ,
+# no S3). With CATALOGUE_MODE=http it also asks the Catalogue Service whenever a
+# song is added, and does not wait for it to start: adds are refused until it is up.
 
 services:
   playlist:
@@ -24,7 +24,9 @@ services:
       DB_NAME: playlist
       DB_USER: playlist
       DB_PASSWORD: playlist
-      # Asked once per added song (GET /songs/{id}) to confirm the song exists.
+      # `off` accepts any song id. Set `http` once the Catalogue Service is in
+      # this stack; each added song is then checked (GET /songs/{id}).
+      CATALOGUE_MODE: ${CATALOGUE_MODE:-off}
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
     depends_on:

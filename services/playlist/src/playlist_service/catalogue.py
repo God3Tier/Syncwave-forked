@@ -21,6 +21,13 @@ class CatalogueClient(Protocol):
         ...
 
 
+class NoCatalogue:
+    """CATALOGUE_MODE=off: every song id is accepted without asking anyone."""
+
+    async def exists(self, song_id: uuid.UUID) -> bool:
+        return True
+
+
 class HttpCatalogue:
     """Calls the Catalogue Service over HTTP.
 

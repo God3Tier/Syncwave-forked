@@ -18,7 +18,9 @@ info:
     - The order is **persisted**. Reading a playlist twice returns the same
       order, and shuffling saves the new order, so the browser's prefetch
       window (plan.md section 5) stays stable until the order is changed.
-    - A `song_id` is checked against the Catalogue when added: a song the
+    - When the service runs with `CATALOGUE_MODE=http` (the default is `off`,
+      which accepts any `song_id`), a `song_id` is checked against the
+      Catalogue when added: a song the
       Catalogue does not have is refused (`SONG_NOT_FOUND`), and so is any add
       while the Catalogue cannot be reached (`CATALOGUE_UNAVAILABLE`). Nothing
       is stored in either case. Songs removed from the Catalogue later are not
