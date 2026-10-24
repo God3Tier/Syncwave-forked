@@ -24,9 +24,9 @@ services:
       DB_NAME: playlist
       DB_USER: playlist
       DB_PASSWORD: playlist
-      # `off` accepts any song id. Set `http` once the Catalogue Service is in
-      # this stack; each added song is then checked (GET /songs/{id}).
-      CATALOGUE_MODE: ${CATALOGUE_MODE:-off}
+      # `http` (default): each added song is checked with the Catalogue Service
+      # (GET /songs/{id}). Set `off` to accept any song id without a Catalogue.
+      CATALOGUE_MODE: ${CATALOGUE_MODE:-http}
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
       # gRPC GetPlaylist for Jam and Sync (contracts/grpc/syncwave/playlist/v1).

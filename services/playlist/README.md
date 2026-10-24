@@ -102,8 +102,8 @@ fake gRPC server, as Sync does for Catalogue and Streaming.
 - A shuffle of two or more songs always changes the order.
 - A reorder must list exactly the songs already in the playlist, once each; it
   can neither add nor drop a song.
-- With `CATALOGUE_MODE=http` a `song_id` is checked against the Catalogue when added (see
-  Failure handling). The default `off` accepts any id.
+- A `song_id` is checked against the Catalogue when added (`CATALOGUE_MODE=http`, the
+  default; see Failure handling). `CATALOGUE_MODE=off` accepts any id.
 
 The rules are plain functions in `src/playlist_service/ordering.py`; the
 database code only saves the result.
@@ -165,8 +165,8 @@ if the API stops matching `contracts/api/playlist.openapi.yaml`.
   check stays up (it only reports that the process is alive). Nothing is
   cached, so there is no stale data to serve. Compose starts the service only
   after Postgres is healthy.
-- **`CATALOGUE_MODE=off` (the default):** the Catalogue is never asked and any
-  song id is accepted. Switch to `http` once the Catalogue Service is in the stack.
+- **`CATALOGUE_MODE=off`:** the Catalogue is never asked and any song id is
+  accepted. Use it to run Playlist on its own, without a Catalogue. The default is `http`.
 - **Adding a song the Catalogue does not have** (`http` mode): refused with 404
   `SONG_NOT_FOUND`; nothing is stored.
 - **The Catalogue is down or too slow when a song is added** (`http` mode): refused with 502

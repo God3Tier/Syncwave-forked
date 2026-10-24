@@ -25,9 +25,9 @@ def settings(mode: str) -> Settings:
     )
 
 
-def test_the_mode_defaults_to_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_mode_defaults_to_http(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CATALOGUE_MODE", raising=False)
-    assert catalogue_mode() == "off"
+    assert catalogue_mode() == "http"
 
 
 @pytest.mark.parametrize("value", ["http", "HTTP", "off"])
