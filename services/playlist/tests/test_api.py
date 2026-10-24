@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from .conftest import OWNER_ID
+from .conftest import OWNER_ID, FakeCatalogue
 
 Create = Callable[..., dict[str, Any]]
 WithSongs = Callable[[int], tuple[str, list[str]]]
@@ -244,6 +244,80 @@ def test_add_past_the_end_is_400(client: TestClient, playlist_with_songs: WithSo
 def test_add_to_unknown_playlist_is_404(client: TestClient) -> None:
     response = client.post(f"/playlists/{uuid.uuid4()}/songs", json={"song_id": str(uuid.uuid4())})
     assert response.status_code == 404
+
+
+# ── adding songs checks the Catalogue ───────────────────────────────────────
+
+
+def test_a_song_the_catalogue_knows_is_added(
+    client: TestClient, create_playlist: Create, catalogue: FakeCatalogue
+) -> None:
+    song = uuid.uuid4()
+    catalogue.known = {song}
+    playlist = create_playlist()
+
+    response = client.post(
+        f"/playlists/{playlist['playlist_id']}/songs", json={"song_id": str(song)}
+    )
+
+    assert response.status_code == 200
+    assert order_of(response.json()) == [str(song)]
+    assert catalogue.asked == [song]
+
+
+def test_a_song_the_catalogue_does_not_know_is_404_and_not_stored(
+    client: TestClient, create_playlist: Create, catalogue: FakeCatalogue
+) -> None:
+    catalogue.known = set()
+    playlist = create_playlist()
+    path = f"/playlists/{playlist['playlist_id']}"
+
+    response = client.post(f"{path}/songs", json={"song_id": str(uuid.uuid4())})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SONG_NOT_FOUND"
+    assert client.get(path).json()["songs"] == []
+
+
+def test_adding_is_refused_when_the_catalogue_is_down_and_nothing_is_stored(
+    client: TestClient, create_playlist: Create, catalogue: FakeCatalogue
+) -> None:
+    catalogue.down = True
+    playlist = create_playlist()
+    path = f"/playlists/{playlist['playlist_id']}"
+
+    response = client.post(f"{path}/songs", json={"song_id": str(uuid.uuid4())})
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "CATALOGUE_UNAVAILABLE"
+    assert client.get(path).json()["songs"] == []
+
+
+def test_everything_except_adding_works_while_the_catalogue_is_down(
+    client: TestClient, playlist_with_songs: WithSongs, catalogue: FakeCatalogue
+) -> None:
+    playlist_id, songs = playlist_with_songs(3)
+    catalogue.down = True
+    path = f"/playlists/{playlist_id}"
+
+    assert client.get(path).status_code == 200
+    assert client.post(f"{path}/shuffle").status_code == 200
+    assert client.put(f"{path}/songs", json={"song_ids": songs[::-1]}).status_code == 200
+    assert client.delete(f"{path}/songs/{songs[0]}").status_code == 200
+    assert client.patch(path, json={"name": "Renamed"}).status_code == 200
+    assert client.delete(path).status_code == 204
+
+
+def test_an_unknown_playlist_is_reported_before_the_catalogue_is_asked(
+    client: TestClient, catalogue: FakeCatalogue
+) -> None:
+    catalogue.down = True
+
+    response = client.post(f"/playlists/{uuid.uuid4()}/songs", json={"song_id": str(uuid.uuid4())})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "PLAYLIST_NOT_FOUND"
+    assert catalogue.asked == []
 
 
 def test_remove_closes_the_gap(client: TestClient, playlist_with_songs: WithSongs) -> None:

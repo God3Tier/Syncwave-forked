@@ -1,4 +1,5 @@
-"""Shared fixtures. The tests use SQLite (aiosqlite) instead of Postgres."""
+"""Shared fixtures. The tests use SQLite (aiosqlite) instead of Postgres, and a
+fake Catalogue so no test needs a network."""
 
 import os
 import tempfile
@@ -13,9 +14,12 @@ from sqlalchemy import Engine, create_engine
 
 from playlist_service.api.main import app
 from playlist_service.db import Base
+from playlist_service.errors import CatalogueUnavailable
 
 # Read by the API's lifespan through get_settings().
 API_DATABASE = Path(tempfile.gettempdir()) / f"syncwave-playlist-api-tests-{os.getpid()}.db"
+# The tests start no gRPC server; tests/test_grpc.py builds its own.
+os.environ["GRPC_PORT"] = "0"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{API_DATABASE.as_posix()}"
 
 OWNER_ID = "5d1f3a7e-2b94-4c60-8e15-a7c3f9b2d041"
@@ -31,9 +35,36 @@ def api_db() -> Iterator[Engine]:
     engine.dispose()
 
 
+class FakeCatalogue:
+    """Knows every song by default; `known` limits it, `down` makes it unreachable."""
+
+    def __init__(self, known: set[uuid.UUID] | None = None, *, down: bool = False) -> None:
+        self.known = known
+        self.down = down
+        self.asked: list[uuid.UUID] = []
+
+    async def exists(self, song_id: uuid.UUID) -> bool:
+        self.asked.append(song_id)
+        if self.down:
+            raise CatalogueUnavailable("the Catalogue is down")
+        return self.known is None or song_id in self.known
+
+
 @pytest.fixture
-def client(api_db: Engine) -> Iterator[TestClient]:
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.fixture
+def catalogue() -> FakeCatalogue:
+    return FakeCatalogue()
+
+
+@pytest.fixture
+def client(api_db: Engine, catalogue: FakeCatalogue) -> Iterator[TestClient]:
     with TestClient(app) as test_client:
+        # Replace the real HTTP client the lifespan built.
+        app.state.catalogue = catalogue
         yield test_client
 
 

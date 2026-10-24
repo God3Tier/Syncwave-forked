@@ -23,13 +23,15 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Self
 
+import httpx2
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
 from starlette.exceptions import HTTPException
 
-from playlist_service.config import configure_logging, get_settings
+from playlist_service.catalogue import CatalogueClient, HttpCatalogue, NoCatalogue
+from playlist_service.config import Settings, configure_logging, get_settings
 from playlist_service.db import (
     Database,
     PlaylistData,
@@ -37,10 +39,12 @@ from playlist_service.db import (
     PlaylistSummaryData,
 )
 from playlist_service.errors import (
+    CatalogueUnavailable,
     InvalidRequest,
     PlaylistError,
     PlaylistNotFound,
     SongAlreadyInPlaylist,
+    SongNotFound,
     SongNotInPlaylist,
 )
 
@@ -50,6 +54,8 @@ STATUS_FOR_ERROR: dict[type[PlaylistError], int] = {
     SongNotInPlaylist: 404,
     SongAlreadyInPlaylist: 409,
     InvalidRequest: 400,
+    SongNotFound: 404,
+    CatalogueUnavailable: 502,
 }
 
 PlaylistName = Annotated[
@@ -159,14 +165,34 @@ def decode_cursor(cursor: str) -> int:
     return offset
 
 
+def build_catalogue(settings: Settings, client: httpx2.AsyncClient) -> CatalogueClient:
+    if settings.catalogue_mode == "http":
+        return HttpCatalogue(settings.catalogue_url, client)
+    return NoCatalogue()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     database = Database(settings.database_url)
     app.state.repository = PlaylistRepository(database.sessions)
-    yield
-    await database.dispose()
+    grpc_server = None
+    if settings.grpc_port > 0:
+        from playlist_service.grpc_service import create_grpc_server
+
+        grpc_server, _ = create_grpc_server(
+            app.state.repository, settings, f"[::]:{settings.grpc_port}"
+        )
+        await grpc_server.start()
+    try:
+        async with httpx2.AsyncClient(timeout=settings.catalogue_timeout_seconds) as client:
+            app.state.catalogue = build_catalogue(settings, client)
+            yield
+    finally:
+        if grpc_server is not None:
+            await grpc_server.stop(grace=2)
+        await database.dispose()
 
 
 app = FastAPI(title="SyncWave Playlist Service", version="1.0.0", lifespan=lifespan)
@@ -266,11 +292,18 @@ async def delete_playlist(playlist_id: uuid.UUID, request: Request) -> Response:
     "/playlists/{playlist_id}/songs",
     responses={
         400: {"model": ErrorBody},
-        404: {"model": ErrorBody},
+        404: {"model": ErrorBody, "description": "No such playlist, or no such song"},
         409: {"model": ErrorBody, "description": "The song is already in the playlist"},
+        502: {"model": ErrorBody, "description": "The Catalogue could not be asked"},
     },
 )
 async def add_song(playlist_id: uuid.UUID, body: AddSongRequest, request: Request) -> Playlist:
+    # Only adding a song needs the Catalogue; every other endpoint works without it.
+    # The playlist is looked up first so an unknown playlist is always PLAYLIST_NOT_FOUND.
+    if await repository(request).get(playlist_id) is None:
+        raise PlaylistNotFound(f"No playlist with id {playlist_id}")
+    if not await request.app.state.catalogue.exists(body.song_id):
+        raise SongNotFound(f"No song with ID {body.song_id} in the Catalogue")
     data = await repository(request).add_song(playlist_id, body.song_id, body.position)
     return Playlist.from_data(data)
 

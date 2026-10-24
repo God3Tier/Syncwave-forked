@@ -1,6 +1,7 @@
 # Playlist Service (README.md), included from the root docker-compose.yml.
-# The API behind the gateway at /api/playlist. It needs only Postgres: no
-# RabbitMQ and no S3.
+# The API behind the gateway at /api/playlist. It needs Postgres (no RabbitMQ,
+# no S3). With CATALOGUE_MODE=http it also asks the Catalogue Service whenever a
+# song is added, and does not wait for it to start: adds are refused until it is up.
 
 services:
   playlist:
@@ -23,6 +24,18 @@ services:
       DB_NAME: playlist
       DB_USER: playlist
       DB_PASSWORD: playlist
+      # `off` accepts any song id. Set `http` once the Catalogue Service is in
+      # this stack; each added song is then checked (GET /songs/{id}).
+      CATALOGUE_MODE: ${CATALOGUE_MODE:-off}
+      CATALOGUE_URL: http://catalogue:8080
+      CATALOGUE_TIMEOUT_SECONDS: "3"
+      # gRPC GetPlaylist for Jam and Sync (contracts/grpc/syncwave/playlist/v1).
+      # Internal only: not routed by the gateway. Callers send this token in the
+      # x-internal-token header. Local development value, never a real secret.
+      GRPC_PORT: "50051"
+      INTERNAL_SERVICE_TOKEN: local-playlist-internal-token
+    expose:
+      - "50051"
     depends_on:
       postgres:
         condition: service_healthy
