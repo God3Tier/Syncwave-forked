@@ -11,6 +11,22 @@
       "type": "object",
       "required": ["audio_reference"],
       "properties": {
+        "title": {
+          "description": "Validated song title for Catalogue registration.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "artist": {
+          "description": "Validated artist name for Catalogue registration.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "duration_ms": {
+          "description": "Optional uploader-supplied duration; Waveform measures audio independently.",
+          "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+        },
         "audio_reference": {
           "description": "S3 object key of the uploaded audio in the audio bucket, e.g. \"audio/<song_id>.mp3\".",
           "type": "string",

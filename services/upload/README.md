@@ -1,0 +1,127 @@
+# Upload Service
+
+**Owner:** Yonghuey. **Stack:** Python 3.14, FastAPI, SQLAlchemy, PostgreSQL,
+boto3, aio-pika. The API stores media and a durable upload receipt. A separate
+publisher process sends committed `SongUploaded` events to RabbitMQ.
+
+## Interfaces and flow
+
+| Interface | Purpose |
+| --- | --- |
+| `POST /uploads` | Multipart `title`, `artist`, `audio`, optional `lyrics` and `duration_ms`; returns `202` with a receipt |
+| `GET /uploads/{song_id}` | Receipt and event delivery status |
+| `GET /health` | Process health |
+| `GET /ready` | Database schema and S3 bucket availability |
+| `SongUploaded` | `syncwave.events` exchange, `song.uploaded` routing key |
+
+The gateway exposes these routes at `/api/upload/...`. The table above and
+examples below describe how to use the API. The standalone API contract is
+[`contracts/api/upload.openapi.yaml`](../../contracts/api/upload.openapi.yaml).
+
+1. Validate title/artist, optional positive duration, file size/type and audio
+   header. Audio is spooled to disk by the multipart parser, then passed to S3
+   as a file object; it is not loaded into one large Python byte string.
+2. Generate UUID v4 `song_id` and `event_id`. Save an `UPLOADING` receipt in
+   the Upload database. Client filenames never become S3 paths.
+3. Store `audio/<song_id>.<extension>` and optional `lyrics/<song_id>.lrc` in
+   `syncwave-audio`. MP3, WAV, FLAC, OGG and M4A are supported. Lyrics must be
+   nonempty UTF-8 LRC files; timestamp validation belongs to Lyrics.
+4. Atomically change the receipt to `PENDING` and save the full event JSON.
+   The receipt itself is the outbox. Return `202` and a `Location` header.
+5. `upload-publisher` reads committed `PENDING` rows, locks one row at a time,
+   publishes a persistent message with publisher confirms, and marks the
+   receipt `PUBLISHED` only after confirmation.
+6. Lyrics and Waveform consume independently. Catalogue registers the song
+   and its initial processing state from the event, then handles processing
+   results. Upload never writes Catalogue's database.
+
+## State and ownership
+
+```text
+UPLOADING -> PENDING -> PUBLISHED
+    |
+    +-----> FAILED  (S3 failure)
+```
+
+`PENDING` means safely stored and waiting for event delivery. `PUBLISHED`
+means the broker confirmed receipt, **not** that Catalogue or a processor has
+finished. `publish_attempts`, `last_error_code` and `published_at` make delivery
+observable. Poll Catalogue separately for canonical `processing_status`,
+`lyrics_status` and `waveform_status`.
+
+The event includes `title`, `artist`, nullable `duration_ms`, `audio_reference`
+and nullable `lyrics_reference`, plus the shared event envelope. These metadata
+fields match the Catalogue implementation on `feature/catalogue-service`.
+That service and its `catalogue.song-uploaded` binding are not on this branch
+yet; Catalogue registration requires integrating that work. Lyrics/Waveform
+bindings already exist here. The metadata fields are additive in the event
+schema, so existing consumers/examples remain compatible. Shared contract
+review by affected owners remains part of the merge process.
+
+## Run and try
+
+From the repository root:
+
+```sh
+docker compose up -d --build upload upload-publisher
+curl http://localhost:8080/api/upload/health
+curl http://localhost:8080/api/upload/ready
+curl -i -X POST http://localhost:8080/api/upload/uploads \
+  -F 'title=Example song' -F 'artist=Example artist' \
+  -F 'audio=@/path/to/song.mp3' -F 'lyrics=@/path/to/song.lrc'
+curl http://localhost:8080/api/upload/uploads/<song_id>
+docker compose logs upload upload-publisher
+```
+
+Start the gateway as well if it is not already running:
+`docker compose up -d gateway`. Omit `lyrics` for instrumentals; omit
+`duration_ms` when unknown. The processor measures duration independently.
+On Windows PowerShell use `curl.exe` and put the command on one line.
+
+See `.env.example` for every variable. Compose sets local credentials. The
+190 MiB audio limit leaves room below the gateway's 200 MiB request limit;
+lyrics default to 256 KiB. Production uses S3's normal endpoint and the ECS
+task role: omit local endpoint/path-style settings and static AWS keys.
+
+## Failures and recovery
+
+- Invalid inputs return the shared error body and do not write media/events.
+- On S3 failure the service best-effort deletes attempted objects, records
+  `FAILED`, and returns `503` with the upload ID. No upload event is queued.
+- On RabbitMQ failure media and the pending event remain durable. Delivery
+  retries indefinitely with exponential backoff capped at 60 seconds. Restart
+  recovery reads the same event and preserves its `event_id`.
+- A crash after broker confirmation but before the database commit can send
+  the event twice. Delivery is at least once; consumers must deduplicate.
+- A crash during ingestion or a database failure after S3 writes can leave
+  `UPLOADING` receipts/orphaned objects. Media is retained after an ambiguous
+  database commit to avoid deleting something a committed event references.
+  Automatic reconciliation/resumable upload is future work; inspect receipts
+  and S3 keys before manually cleaning these objects. No stale receipt is
+  automatically announced as a completed upload.
+- Repeating `POST /uploads` creates a new song. HTTP request idempotency and
+  resuming partially transferred media are not implemented in this first flow.
+- `/ready` checks API dependencies; broker delivery problems are observable
+  through pending receipts and publisher logs. The API can accept uploads
+  while RabbitMQ is unavailable.
+
+## Test and build
+
+```sh
+cd services/upload
+python -m venv .venv
+# Activate the virtual environment, then:
+pip install -r requirements-dev.txt
+ruff check src tests migrations
+ruff format --check src tests migrations
+pytest
+# From the repository root:
+docker compose build upload
+```
+
+Tests use real SQLite transactions with fake S3/broker adapters. They cover
+media and metadata validation, cleanup, persisted delivery/retry and restart,
+event contracts, and migration upgrade/downgrade. Live S3/RabbitMQ/Postgres
+integration still requires Docker. Alembic migrations run before API startup;
+the publisher waits for the API to become healthy. Both processes use the same
+image and the `upload` child pipeline builds/deploys that image.

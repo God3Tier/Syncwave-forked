@@ -67,6 +67,13 @@ consumers could be built before the Upload Service. It contains only what
 the consumers need and is **pending approval by the Upload owner**, who may
 add fields. Lyrics and Waveform ignore payload fields they do not use.
 
+The Upload implementation also publishes `title`, `artist`, and nullable
+`duration_ms` for Catalogue registration. These fields are additive/optional
+in the schema so existing consumer fixtures and manual events still validate.
+Events intended for Catalogue must include the title and artist;
+`tests/integration/publish-song-uploaded.sh` only supplies the media references
+used by Lyrics/Waveform.
+
 Follow-up events copy the `SongUploaded` `event_id` into `correlation_id`.
 `…Processed` can be published more than once for the same song (a
 duplicate `SongUploaded` delivery re-announces the stored result), so

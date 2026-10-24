@@ -1,0 +1,49 @@
+x-upload-environment: &upload-environment
+  SERVICE_NAME: upload
+  PORT: "8080"
+  LOG_LEVEL: INFO
+  AMQP_HOST: rabbitmq
+  AMQP_PORT: "5672"
+  AMQP_USER: syncwave
+  AMQP_PASSWORD: syncwave
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: upload
+  DB_USER: upload
+  DB_PASSWORD: upload
+  S3_ENDPOINT_URL: http://s3:9000
+  S3_FORCE_PATH_STYLE: "true"
+  AWS_ACCESS_KEY_ID: syncwave
+  AWS_SECRET_ACCESS_KEY: syncwave-secret
+  AWS_REGION: us-east-1
+  S3_BUCKET: syncwave-audio
+  UPLOAD_MAX_AUDIO_BYTES: "199229440"
+  UPLOAD_MAX_LYRICS_BYTES: "262144"
+  UPLOAD_PUBLISH_POLL_SECONDS: "2"
+
+services:
+  upload:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    image: ${IMAGE_REGISTRY:-syncwave}/upload:${IMAGE_TAG:-local}
+    environment: *upload-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+
+  upload-publisher:
+    image: ${IMAGE_REGISTRY:-syncwave}/upload:${IMAGE_TAG:-local}
+    command: ["python", "-m", "upload_service.publisher"]
+    environment: *upload-environment
+    healthcheck:
+      disable: true
+    restart: on-failure
+    depends_on:
+      upload:
+        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
