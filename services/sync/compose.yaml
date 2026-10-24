@@ -13,6 +13,7 @@ services:
       CATALOGUE_GRPC_TARGET: ${CATALOGUE_GRPC_TARGET:-catalogue:50051}
       CATALOGUE_INTERNAL_TOKEN: ${CATALOGUE_INTERNAL_TOKEN:-local-catalogue-internal-token}
       STREAMING_GRPC_TARGET: ${STREAMING_GRPC_TARGET:-}
+      STREAMING_HTTP_URL: ${STREAMING_HTTP_URL:-http://streaming:8081}
       STREAMING_INTERNAL_TOKEN: ${STREAMING_INTERNAL_TOKEN:-local-streaming-internal-token}
       LOG_LEVEL: INFO
       INTERNAL_SERVICE_TOKEN: local-jam-to-sync-token
@@ -37,6 +38,8 @@ services:
       postgres:
         condition: service_healthy
       catalogue:
+        condition: service_healthy
+      audio_transmitter:
         condition: service_healthy
     healthcheck:
       test:

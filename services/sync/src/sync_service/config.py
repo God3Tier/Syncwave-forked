@@ -15,6 +15,7 @@ class Settings:
     catalogue_grpc_target: str = ""
     catalogue_internal_token: str = "local-catalogue-internal-token"
     streaming_grpc_target: str = ""
+    streaming_http_url: str = ""
     streaming_internal_token: str = "local-streaming-internal-token"
     start_lead_time_ms: int = 2_000
     prepare_timeout_ms: int = 10_000
@@ -50,6 +51,7 @@ def get_settings() -> Settings:
             "CATALOGUE_INTERNAL_TOKEN", "local-catalogue-internal-token"
         ),
         streaming_grpc_target=os.getenv("STREAMING_GRPC_TARGET", ""),
+        streaming_http_url=os.getenv("STREAMING_HTTP_URL", ""),
         streaming_internal_token=os.getenv(
             "STREAMING_INTERNAL_TOKEN", "local-streaming-internal-token"
         ),

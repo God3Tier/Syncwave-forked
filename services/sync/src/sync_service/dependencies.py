@@ -7,6 +7,7 @@ from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 import grpc
+import httpx
 
 from sync_service.config import Settings
 from sync_service.observability import log_event, metrics
@@ -136,6 +137,51 @@ class GrpcStreamingClient:
 
 
 @dataclass(slots=True)
+class HttpStreamingClient:
+    base_url: str
+    timeout_seconds: float
+    _client: httpx.AsyncClient = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.base_url = self.base_url.rstrip("/")
+        self._client = httpx.AsyncClient(timeout=self.timeout_seconds)
+
+    async def get_stream(self, song_id: UUID) -> StreamSource:
+        try:
+            response = await self._client.get(f"{self.base_url}/tracks/{song_id}/stream-info")
+        except httpx.TimeoutException as error:
+            raise DependencyTimeoutError("streaming timed out") from error
+        except httpx.HTTPError as error:
+            raise StreamUnavailableError("streaming unavailable") from error
+
+        if response.status_code == 404:
+            raise StreamUnavailableError("stream not found")
+        if response.status_code == 409:
+            raise SongNotReadyError("song is not ready for streaming")
+        if response.status_code != 200:
+            raise StreamUnavailableError("streaming unavailable")
+
+        try:
+            payload = response.json()
+            raw_song_id = payload["song_id"]
+            stream_url = payload["stream_url"]
+        except (KeyError, TypeError, ValueError) as error:
+            raise StreamUnavailableError("streaming returned an invalid response") from error
+        if not isinstance(raw_song_id, str) or not isinstance(stream_url, str) or not stream_url:
+            raise StreamUnavailableError("streaming returned an invalid response")
+        try:
+            response_song_id = UUID(raw_song_id)
+        except ValueError as error:
+            raise StreamUnavailableError("streaming returned an invalid response") from error
+        if response_song_id != song_id:
+            raise StreamUnavailableError("streaming returned an invalid response")
+        return StreamSource(song_id=song_id, stream_url=stream_url)
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
+@dataclass(slots=True)
 class FakeCatalogueClient:
     statuses: dict[UUID, SongProcessingStatus | None] = field(default_factory=dict)
     delay_seconds: float = 0
@@ -231,15 +277,16 @@ def create_default_dependencies(settings: Settings) -> PlaybackDependencies:
         if settings.catalogue_grpc_target
         else FakeCatalogueClient()
     )
-    streaming: StreamingClient = (
-        GrpcStreamingClient(
+    if settings.streaming_grpc_target:
+        streaming: StreamingClient = GrpcStreamingClient(
             settings.streaming_grpc_target,
             settings.streaming_internal_token,
             timeout_seconds,
         )
-        if settings.streaming_grpc_target
-        else FakeStreamingClient()
-    )
+    elif settings.streaming_http_url:
+        streaming = HttpStreamingClient(settings.streaming_http_url, timeout_seconds)
+    else:
+        streaming = FakeStreamingClient()
     return PlaybackDependencies(
         catalogue=catalogue,
         streaming=streaming,

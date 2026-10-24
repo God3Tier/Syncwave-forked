@@ -51,11 +51,10 @@ then coordinates clocks, readiness, scheduled playback, and drift correction.
 - Each dependency call has a configurable 750 ms timeout. HTTP and gRPC map
   not-found, not-ready, unavailable, and timeout failures separately, and no
   false `PREPARE` is emitted on failure
-- Optional deadline-bound gRPC clients implement the shared media query
-  contract. Compose uses the real Catalogue at `catalogue:50051` with its
-  own internal token. Set `STREAMING_GRPC_TARGET` when Streaming implements
-  `GetStreamInfo`; leaving a target blank keeps that dependency's
-  deterministic development fake
+- Deadline-bound clients resolve Catalogue over gRPC and Streaming through
+  its HTTP `stream-info` endpoint. Compose uses `catalogue:50051` and
+  `http://streaming:8081`; `STREAMING_GRPC_TARGET` remains available for a
+  future implementation of the shared gRPC media contract
 - The resolved stream URL is persisted with the authoritative session and is
   reused after restart instead of being replaced by a hard-coded route
 - JSON lifecycle logs and transport correlation IDs, without tokens or signed
@@ -153,17 +152,11 @@ Streaming query contract changes.
 
 ## Current cross-service contract findings
 
-The shared Sync/Jam contract and the current `audio_transmitter` use UUID
-strings for `song_id`. Streaming exposes HTTP `/tracks/{track_id}/audio` and
-`/tracks/{track_id}/audio/range`, but does not yet implement
-`StreamingQueryService.GetStreamInfo`.
-
-Sync therefore does not silently call that incompatible HTTP API. The agreed
-boundary is `contracts/grpc/syncwave/media/v1/media.proto`: Streaming must map
-the canonical UUID to its storage object and return the browser-facing URL.
-Compose now calls the real Catalogue gRPC service for canonical processing
-readiness; only Streaming remains a deterministic fake until it implements
-the contract.
+The shared Sync/Jam contract and Streaming use UUID strings for `song_id`.
+Streaming exposes HTTP `/tracks/{track_id}/stream-info` and returns the
+browser-facing URL used in Sync's `PREPARE` message. Audio bytes still travel
+directly from Streaming to each browser. The gRPC media contract is retained
+as the future transport boundary, while Compose uses this HTTP adapter.
 
 ## Persistence
 
@@ -180,7 +173,6 @@ multi-instance scaling boundary are documented in [OBSERVABILITY.md](OBSERVABILI
 
 - Temporary internal HTTP compatibility remains until Jam switches fully to
   the generated gRPC client.
-- Streaming currently uses a deterministic local fake because it does not yet
-  implement the versioned media query contract. Compose uses the real
-  Catalogue gRPC service.
+- Streaming's full-file endpoint buffers the object and does not yet implement
+  HTTP byte-range semantics; `supports_ranges` is therefore false.
 - Mock tokens are local-development values only.

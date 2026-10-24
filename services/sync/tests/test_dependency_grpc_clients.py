@@ -2,12 +2,14 @@ from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 import grpc
+import httpx
 import pytest
 
 from sync_service.config import Settings
 from sync_service.dependencies import (
     GrpcCatalogueClient,
     GrpcStreamingClient,
+    HttpStreamingClient,
     SongNotFoundError,
     SongProcessingStatus,
     StreamUnavailableError,
@@ -71,6 +73,51 @@ async def test_media_grpc_clients_resolve_ready_stream(media_target: str) -> Non
 
     assert song.processing_status is SongProcessingStatus.READY
     assert stream.stream_url == f"/api/streaming/tracks/{song_id}/audio"
+
+
+@pytest.mark.anyio
+async def test_http_streaming_client_resolves_audio_route() -> None:
+    song_id = uuid4()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == f"/tracks/{song_id}/stream-info"
+        return httpx.Response(
+            200,
+            json={
+                "song_id": str(song_id),
+                "stream_url": f"/api/streaming/tracks/{song_id}/audio",
+                "supports_ranges": False,
+            },
+        )
+
+    streaming = HttpStreamingClient("http://streaming:8081/", 1)
+    await streaming._client.aclose()
+    streaming._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        stream = await streaming.get_stream(song_id)
+    finally:
+        await streaming.close()
+
+    assert stream.stream_url == f"/api/streaming/tracks/{song_id}/audio"
+
+
+@pytest.mark.anyio
+async def test_http_streaming_client_rejects_malformed_metadata() -> None:
+    streaming = HttpStreamingClient("http://streaming:8081", 1)
+    await streaming._client.aclose()
+    streaming._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"song_id": None, "stream_url": "/api/streaming/tracks/bad/audio"},
+            )
+        )
+    )
+    try:
+        with pytest.raises(StreamUnavailableError, match="invalid response"):
+            await streaming.get_stream(uuid4())
+    finally:
+        await streaming.close()
 
 
 @pytest.mark.anyio

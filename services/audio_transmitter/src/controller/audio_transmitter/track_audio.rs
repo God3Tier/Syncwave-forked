@@ -1,5 +1,9 @@
-use crate::store::{Storage, audio::AudioStore};
+use crate::{
+    catalogue::{Catalogue, CatalogueError},
+    store::{Storage, audio::AudioStore},
+};
 use actix_web::{HttpResponse, Responder, web};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /*
@@ -7,11 +11,16 @@ use uuid::Uuid;
  */
 pub async fn get_track_audio(
     store: web::Data<AudioStore>,
+    catalogue: web::Data<Arc<dyn Catalogue>>,
     track_id: web::Path<Uuid>,
 ) -> impl Responder {
     let song_id = track_id.into_inner();
-    let audio_reference = format!("audio/{song_id}.mp3");
-    match store.get_track(song_id, &audio_reference).await {
+    let song = match catalogue.get_song(song_id).await {
+        Ok(song) => song,
+        Err(CatalogueError::NotFound) => return HttpResponse::NotFound().finish(),
+        Err(error) => return HttpResponse::BadGateway().body(error.to_string()),
+    };
+    match store.get_track(song_id, &song.audio_reference).await {
         Ok(audio) => HttpResponse::Ok()
             .content_type("application/octet-stream")
             .body(audio),
@@ -22,6 +31,7 @@ pub async fn get_track_audio(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalogue::SongInfo;
     use actix_web::{App, HttpResponse, HttpServer, body::to_bytes, http::StatusCode, test, web};
     use aws_sdk_s3::{
         Client,
@@ -53,6 +63,20 @@ mod tests {
     struct MockS3 {
         calls: AtomicUsize,
         delay: Duration,
+    }
+
+    struct FakeCatalogue;
+
+    #[async_trait::async_trait]
+    impl Catalogue for FakeCatalogue {
+        async fn get_song(&self, song_id: Uuid) -> Result<SongInfo, CatalogueError> {
+            Ok(SongInfo {
+                song_id,
+                audio_reference: format!("audio/{song_id}.mp3"),
+                duration_ms: Some(120_000),
+                processing_status: "READY".into(),
+            })
+        }
     }
 
     async fn mock_s3_object(
@@ -117,6 +141,7 @@ mod tests {
             test::init_service(
                 App::new()
                     .app_data($store)
+                    .app_data(web::Data::new(Arc::new(FakeCatalogue) as Arc<dyn Catalogue>))
                     .route("/tracks/{track_id}/audio", web::get().to(get_track_audio)),
             )
             .await

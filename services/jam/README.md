@@ -64,10 +64,9 @@ Jam calls Playlist only when importing a playlist and calls Sync for
 authorized playback commands. It does not call Catalogue or Streaming;
 Sync owns those playback-readiness checks.
 
-## Current cross-service mismatch
+## Streaming integration
 
-Jam, Playlist, Catalogue, and the current `audio_transmitter` now use canonical
-UUID song IDs. The transmitter still exposes HTTP and does not implement
-`StreamingQueryService.GetStreamInfo`, so Sync keeps only its Streaming
-dependency fake until that contract is implemented. Jam does not bypass Sync
-or call Streaming itself.
+Jam, Playlist, Catalogue, Sync, and Streaming use canonical UUID song IDs.
+On start or skip, Jam calls Sync; Sync validates Catalogue readiness and asks
+Streaming for the browser-facing audio URL. Jam intentionally does not bypass
+Sync or call Streaming itself.

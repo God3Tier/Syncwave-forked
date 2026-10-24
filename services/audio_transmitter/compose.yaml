@@ -1,23 +1,24 @@
-name: audio-testing-audio-sampler
-
 services:
   audio_transmitter:
     build: .
     ports:
       - "8081:8081"
     # Song metadata comes from the Catalogue Service (no database of its own).
-    # By default it is reached through the main stack's gateway on the host, so
-    # start the root `docker compose up` first. Point CATALOGUE_URL elsewhere to
-    # use a different Catalogue.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # The root stack supplies Catalogue and the shared S3-compatible store.
     environment:
-      CATALOGUE_URL: ${CATALOGUE_URL:-http://host.docker.internal:8080/api/catalogue}
+      CATALOGUE_URL: ${CATALOGUE_URL:-http://catalogue:8080}
       CATALOGUE_TIMEOUT_SECONDS: ${CATALOGUE_TIMEOUT_SECONDS:-3}
-      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://s3:9000}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-syncwave}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-syncwave-secret}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_ALLOW_HTTP: "true"
+      S3_BUCKET: ${S3_BUCKET:-syncwave-audio}
+    networks:
+      default:
+        aliases:
+          - streaming
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/cache"]
       interval: 5s
