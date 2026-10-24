@@ -1,12 +1,9 @@
 use crate::{
-    controller::audio_transmitter::errors::MetadataError,
-    db::DbPool,
-    models::song::Song,
-    schema::songs::dsl::songs,
+    catalogue::{Catalogue, CatalogueError},
     store::{Storage, audio::AudioStore},
 };
 use actix_web::{HttpResponse, Responder, web};
-use diesel::prelude::*;
+use std::sync::Arc;
 use uuid::Uuid;
 
 fn normalize_time_range(start: u64, end: u64, runtime: i64) -> Option<(u64, u64)> {
@@ -26,7 +23,7 @@ pub struct AudioTimeRange {
 
 pub async fn get_audio_by_range(
     store: web::Data<AudioStore>,
-    db_pool: web::Data<DbPool>,
+    catalogue: web::Data<Arc<dyn Catalogue>>,
     track_id: web::Path<String>,
     range: web::Query<AudioTimeRange>,
 ) -> impl Responder {
@@ -34,57 +31,49 @@ pub async fn get_audio_by_range(
         Ok(song_id) => song_id,
         Err(_) => return HttpResponse::BadRequest().body("song_id must be a UUID"),
     };
-    let db = db_pool.clone();
-    let total_time = web::block(move || -> Result<Song, MetadataError> {
-        let mut conn = db.get()?;
 
-        let metadata = songs
-            .find(song_id)
-            .select(Song::as_select())
-            .first::<Song>(&mut conn)?;
-        Ok(metadata)
-    })
-    .await;
-
-    match total_time {
-        Ok(Ok(metadata)) => {
-            let range = range.into_inner();
-
-            // The legacy range endpoint accepts seconds; Song.duration_ms is
-            // authoritative and is converted only at this API boundary.
-            let duration_seconds = metadata.duration_ms / 1_000;
-            let pattern = normalize_time_range(range.start, range.end, duration_seconds);
-
-            if pattern.is_none() {
-                return HttpResponse::BadRequest().body(
-                    "range start must not be greater than end: {range.start} <= {range.end}",
-                );
-            }
-
-            let (start, end) = pattern.unwrap();
-
-            match store
-                .into_inner()
-                .get_track_by_timing(
-                    song_id,
-                    &metadata.audio_reference,
-                    start,
-                    end,
-                    duration_seconds,
-                )
-                .await
-            {
-                Ok(bytes) => HttpResponse::Ok()
-                    .content_type("application/octet-stream")
-                    .body(bytes),
-                Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-            }
+    // The Catalogue owns song metadata; this service keeps no copy of it.
+    let song = match catalogue.get_song(song_id).await {
+        Ok(song) => song,
+        Err(CatalogueError::NotFound) => {
+            return HttpResponse::NotFound().body(format!("no song with id {song_id}"));
         }
-        Ok(Err(MetadataError::Connection(e))) => {
-            HttpResponse::InternalServerError().body(e.to_string())
-        }
-        Ok(Err(MetadataError::Query(e))) => HttpResponse::NotFound().body(e.to_string()),
+        // The song may exist; we just could not find out, so this is not a 404.
+        Err(error) => return HttpResponse::BadGateway().body(error.to_string()),
+    };
+    let Some(duration_ms) = song.duration_ms else {
+        return HttpResponse::Conflict().body("the song has no duration yet");
+    };
 
+    let range = range.into_inner();
+
+    // The legacy range endpoint accepts seconds; Song.duration_ms is
+    // authoritative and is converted only at this API boundary.
+    let duration_seconds = duration_ms / 1_000;
+    let pattern = normalize_time_range(range.start, range.end, duration_seconds);
+
+    if pattern.is_none() {
+        return HttpResponse::BadRequest().body(
+            "range start must not be greater than end: {range.start} <= {range.end}",
+        );
+    }
+
+    let (start, end) = pattern.unwrap();
+
+    match store
+        .into_inner()
+        .get_track_by_timing(
+            song_id,
+            &song.audio_reference,
+            start,
+            end,
+            duration_seconds,
+        )
+        .await
+    {
+        Ok(bytes) => HttpResponse::Ok()
+            .content_type("application/octet-stream")
+            .body(bytes),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
@@ -92,31 +81,84 @@ pub async fn get_audio_by_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalogue::SongInfo;
     use actix_web::{App, HttpResponse, HttpServer, body::to_bytes, http::StatusCode, test, web};
     use aws_sdk_s3::{
         Client,
         config::{Credentials, Region},
     };
-    use std::sync::OnceLock;
+    use std::{collections::HashMap, sync::Mutex};
 
-    static TEST_SCHEMA: OnceLock<()> = OnceLock::new();
+    /// A Catalogue with a fixed set of songs: song id -> duration in ms
+    /// (`None` is a song Waveform has not measured yet).
+    struct FakeCatalogue {
+        songs: HashMap<Uuid, Option<i64>>,
+        down: bool,
+        asked: Mutex<Vec<Uuid>>,
+    }
 
-    async fn mock_audio_object() -> HttpResponse {
+    impl FakeCatalogue {
+        fn with(songs: &[(Uuid, Option<i64>)]) -> Self {
+            Self {
+                songs: songs.iter().copied().collect(),
+                down: false,
+                asked: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn down() -> Self {
+            Self {
+                down: true,
+                ..Self::with(&[])
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Catalogue for FakeCatalogue {
+        async fn get_song(&self, song_id: Uuid) -> Result<SongInfo, CatalogueError> {
+            self.asked.lock().unwrap().push(song_id);
+            if self.down {
+                return Err(CatalogueError::Unavailable("the Catalogue is down".into()));
+            }
+            match self.songs.get(&song_id) {
+                Some(duration_ms) => Ok(SongInfo {
+                    song_id,
+                    audio_reference: format!("audio/{song_id}.mp3"),
+                    duration_ms: *duration_ms,
+                    processing_status: "READY".into(),
+                }),
+                None => Err(CatalogueError::NotFound),
+            }
+        }
+    }
+
+    /// Answers every object request with ten bytes and records the paths asked for.
+    async fn mock_audio_object(
+        requested: web::Data<Arc<Mutex<Vec<String>>>>,
+        request: actix_web::HttpRequest,
+    ) -> HttpResponse {
+        requested.lock().unwrap().push(request.path().to_owned());
         HttpResponse::Ok()
             .content_type("application/octet-stream")
             .body("0123456789")
     }
 
-    async fn start_mock_s3() -> String {
+    async fn start_mock_s3() -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        let server =
-            HttpServer::new(|| App::new().default_service(web::route().to(mock_audio_object)))
-                .listen(listener)
-                .unwrap()
-                .run();
+        let requested = Arc::new(Mutex::new(Vec::new()));
+        let data = web::Data::new(requested.clone());
+        let server = HttpServer::new(move || {
+            App::new()
+                .app_data(data.clone())
+                .default_service(web::route().to(mock_audio_object))
+        })
+        .listen(listener)
+        .unwrap()
+        .run();
         actix_web::rt::spawn(server);
-        format!("http://{address}")
+        (format!("http://{address}"), requested)
     }
 
     fn test_s3_client(endpoint: &str) -> Client {
@@ -130,50 +172,18 @@ mod tests {
         Client::from_conf(config)
     }
 
-    fn disposable_db_pool() -> crate::db::DbPool {
-        dotenvy::dotenv().ok();
-        let database_url = std::env::var("TEST_DATABASE_URL")
-            .expect("set TEST_DATABASE_URL to a disposable PostgreSQL database");
-        let pool = crate::db::create_pool(&database_url).expect("database pool should initialize");
-        TEST_SCHEMA.get_or_init(|| {
-            crate::db::initialize_schema(&pool).expect("Song contract table should exist");
-        });
-        pool
-    }
-
-    fn insert_track(pool: &crate::db::DbPool, duration_seconds: i64) -> Uuid {
-        let mut connection = pool.get().expect("database connection should be available");
-        let song_id = Uuid::new_v4();
-        let audio_reference = format!("audio/{song_id}.mp3");
-        diesel::sql_query(
-            "INSERT INTO songs (song_id, title, artist, duration_ms, audio_reference, \
-             lyrics_status, waveform_status, processing_status) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        )
-        .bind::<diesel::sql_types::Uuid, _>(song_id)
-        .bind::<diesel::sql_types::Text, _>("range-test-track")
-        .bind::<diesel::sql_types::Text, _>("range-test-artist")
-        .bind::<diesel::sql_types::BigInt, _>(duration_seconds * 1_000)
-        .bind::<diesel::sql_types::Text, _>(audio_reference)
-        .bind::<diesel::sql_types::Text, _>("PENDING")
-        .bind::<diesel::sql_types::Text, _>("PENDING")
-        .bind::<diesel::sql_types::Text, _>("PROCESSING")
-        .execute(&mut connection)
-        .expect("Song row should be inserted");
-        song_id
-    }
-
     macro_rules! init_range_app {
-        ($pool:expr, $endpoint:expr) => {{
+        ($catalogue:expr, $endpoint:expr) => {{
             let store = web::Data::new(AudioStore::new(
                 10,
                 test_s3_client(&$endpoint),
                 "test-bucket".to_owned(),
             ));
+            let catalogue: Arc<dyn Catalogue> = $catalogue;
             test::init_service(
                 App::new()
                     .app_data(store)
-                    .app_data(web::Data::new($pool))
+                    .app_data(web::Data::new(catalogue))
                     .route(
                         "/tracks/{track_id}/audio/range",
                         web::get().to(get_audio_by_range),
@@ -183,90 +193,113 @@ mod tests {
         }};
     }
 
+    macro_rules! fetch {
+        ($app:expr, $uri:expr) => {
+            test::call_service(&$app, test::TestRequest::get().uri($uri).to_request()).await
+        };
+    }
+
     #[actix_web::test]
     async fn valid_time_range_returns_the_requested_audio_bytes() {
-        let pool = disposable_db_pool();
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool.clone(), endpoint);
-        let track_id = insert_track(&pool, 10);
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!("/tracks/{track_id}/audio/range?start=2&end=5"))
-                .to_request(),
-        )
-        .await;
+        let track_id = Uuid::new_v4();
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=2&end=5"));
+
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(to_bytes(response.into_body()).await.unwrap(), b"234"[..]);
     }
 
     #[actix_web::test]
+    async fn the_audio_is_fetched_with_the_key_the_catalogue_gave() {
+        let track_id = Uuid::new_v4();
+        let (endpoint, requested) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+
+        fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
+
+        let paths = requested.lock().unwrap().clone();
+        assert!(
+            paths.iter().any(|path| path.ends_with(&format!("audio/{track_id}.mp3"))),
+            "{paths:?}"
+        );
+    }
+
+    #[actix_web::test]
     async fn malformed_time_query_is_rejected() {
-        let pool = disposable_db_pool();
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool, endpoint);
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[])), endpoint);
 
         for query in ["start=abc&end=5", "start=2", "start=-1&end=5"] {
-            let response = test::call_service(
-                &app,
-                test::TestRequest::get()
-                    .uri(&format!("/tracks/not-a-uuid/audio/range?{query}"))
-                    .to_request(),
-            )
-            .await;
+            let response = fetch!(app, &format!("/tracks/not-a-uuid/audio/range?{query}"));
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
         }
     }
 
     #[actix_web::test]
+    async fn a_track_id_that_is_not_a_uuid_never_reaches_the_catalogue() {
+        let (endpoint, _) = start_mock_s3().await;
+        let catalogue = Arc::new(FakeCatalogue::with(&[]));
+        let app = init_range_app!(catalogue.clone(), endpoint);
+
+        let response = fetch!(app, "/tracks/not-a-uuid/audio/range?start=1&end=2");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(catalogue.asked.lock().unwrap().is_empty());
+    }
+
+    #[actix_web::test]
     async fn missing_track_metadata_returns_not_found() {
-        let pool = disposable_db_pool();
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool, endpoint);
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!(
-                    "/tracks/{}/audio/range?start=2&end=5",
-                    Uuid::new_v4()
-                ))
-                .to_request(),
-        )
-        .await;
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[])), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4()));
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[actix_web::test]
+    async fn an_unavailable_catalogue_is_a_bad_gateway_not_a_not_found() {
+        let (endpoint, requested) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::down()), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4()));
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert!(requested.lock().unwrap().is_empty(), "no audio is fetched without metadata");
+    }
+
+    #[actix_web::test]
+    async fn a_song_without_a_duration_yet_returns_conflict() {
+        let track_id = Uuid::new_v4();
+        let (endpoint, requested) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, None)])), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(requested.lock().unwrap().is_empty());
+    }
+
+    #[actix_web::test]
     async fn empty_time_range_returns_bad_request() {
-        let pool = disposable_db_pool();
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool.clone(), endpoint);
-        let track_id = insert_track(&pool, 10);
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!("/tracks/{track_id}/audio/range?start=5&end=5"))
-                .to_request(),
-        )
-        .await;
+        let track_id = Uuid::new_v4();
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=5&end=5"));
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[actix_web::test]
     async fn end_after_track_runtime_returns_the_whole_song() {
-        let pool = disposable_db_pool();
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool.clone(), endpoint);
-        let track_id = insert_track(&pool, 10);
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!("/tracks/{track_id}/audio/range?start=0&end=11"))
-                .to_request(),
-        )
-        .await;
+        let track_id = Uuid::new_v4();
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=11"));
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -277,36 +310,22 @@ mod tests {
 
     #[actix_web::test]
     async fn zero_runtime_is_rejected_by_the_controller() {
-        let pool = disposable_db_pool();
-        let track_id = insert_track(&pool, 0);
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool, endpoint);
+        let track_id = Uuid::new_v4();
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(0))])), endpoint);
 
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!("/tracks/{track_id}/audio/range?start=0&end=1"))
-                .to_request(),
-        )
-        .await;
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[actix_web::test]
     async fn start_after_end_is_rejected_by_the_controller() {
-        let pool = disposable_db_pool();
-        let track_id = insert_track(&pool, 10);
-        let endpoint = start_mock_s3().await;
-        let app = init_range_app!(pool, endpoint);
+        let track_id = Uuid::new_v4();
+        let (endpoint, _) = start_mock_s3().await;
+        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
 
-        let response = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri(&format!("/tracks/{track_id}/audio/range?start=5&end=2"))
-                .to_request(),
-        )
-        .await;
+        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=5&end=2"));
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }

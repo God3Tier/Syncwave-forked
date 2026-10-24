@@ -1,31 +1,19 @@
 name: audio-testing-audio-sampler
 
 services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-audio_transmitter}
-      POSTGRES_USER: ${POSTGRES_USER:-audio_transmitter}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-audio_transmitter_dev_password}
-    ports:
-      - "${POSTGRES_PORT:-5433}:5432"
-    volumes:
-      - audio_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   audio_transmitter:
     build: .
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
       - "8081:8081"
+    # Song metadata comes from the Catalogue Service (no database of its own).
+    # By default it is reached through the main stack's gateway on the host, so
+    # start the root `docker compose up` first. Point CATALOGUE_URL elsewhere to
+    # use a different Catalogue.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-audio_transmitter}:${POSTGRES_PASSWORD:-audio_transmitter_dev_password}@db:5432/${POSTGRES_DB:-audio_transmitter}
+      CATALOGUE_URL: ${CATALOGUE_URL:-http://host.docker.internal:8080/api/catalogue}
+      CATALOGUE_TIMEOUT_SECONDS: ${CATALOGUE_TIMEOUT_SECONDS:-3}
       AWS_REGION: ${AWS_REGION:-ap-southeast-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
@@ -37,33 +25,15 @@ services:
       retries: 10
       start_period: 10s
 
-  test-db:
-    image: postgres:17-alpine
-    profiles: ["test"]
-    environment:
-      POSTGRES_DB: audio_testing_test
-      POSTGRES_USER: audio_testing_test
-      POSTGRES_PASSWORD: audio_testing_test
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 2s
-      timeout: 3s
-      retries: 15
-
+  # The tests need no database or running Catalogue: both are faked in the tests.
   test-audio:
     build:
       context: .
       target: builder
     profiles: ["test"]
-    depends_on:
-      test-db:
-        condition: service_healthy
-    environment:
-      TEST_DATABASE_URL: postgres://audio_testing_test:audio_testing_test@test-db:5432/audio_testing_test
     volumes:
       - audio_cargo_target:/app/target
     command: ["cargo", "test", "--locked"]
 
 volumes:
-  audio_db_data:
   audio_cargo_target:
