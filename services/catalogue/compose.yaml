@@ -1,0 +1,69 @@
+# Catalogue Service (README.md), included from the root docker-compose.yml.
+# One image runs as two containers: the HTTP/gRPC API behind the gateway, and
+# the AMQP worker, which has no port.
+
+x-catalogue-environment: &catalogue-environment
+  SERVICE_NAME: catalogue
+  PORT: "8080"
+  LOG_LEVEL: INFO
+  # RabbitMQ (topology: contracts/events/README.md). Separate variables, never
+  # a URL with the password inside: in production the password is injected on
+  # its own from AWS Secrets Manager.
+  AMQP_HOST: rabbitmq
+  AMQP_PORT: "5672"
+  AMQP_USER: syncwave
+  AMQP_PASSWORD: syncwave
+  AMQP_PREFETCH: "10"
+  # Postgres: this service's own database (infrastructure/postgres/init.sql)
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: catalogue
+  DB_USER: catalogue
+  DB_PASSWORD: catalogue
+  # Internal gRPC callers (Jam/Sync) authenticate with this token.
+  INTERNAL_SERVICE_TOKEN: local-catalogue-internal-token
+  # gRPC query service (CatalogueQueryService) listens on this internal port.
+  GRPC_PORT: "50051"
+
+services:
+  catalogue:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/catalogue:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/catalogue:${IMAGE_TAG:-local}
+    environment: *catalogue-environment
+    expose:
+      - "50051"
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+  catalogue-worker:
+    image: ${IMAGE_REGISTRY:-syncwave}/catalogue:${IMAGE_TAG:-local}
+    command: ["python", "-m", "catalogue_service.worker"]
+    environment: *catalogue-environment
+    healthcheck:
+      disable: true
+    restart: on-failure
+    depends_on:
+      catalogue:
+        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
