@@ -1,18 +1,17 @@
 use crate::store::{Storage, audio::AudioStore};
 use actix_web::{HttpResponse, Responder, web};
+use uuid::Uuid;
 
 /*
  * I'm not actually sure I want to ever use this endpoint. It only makes sense if we have a download feature
  */
 pub async fn get_track_audio(
     store: web::Data<AudioStore>,
-    track_id: web::Path<i32>,
+    track_id: web::Path<Uuid>,
 ) -> impl Responder {
-    if track_id.clone() <= 0 {
-        return HttpResponse::BadRequest().body("ID has to be positive");
-    }
-
-    match store.get_track(track_id.into_inner()).await {
+    let song_id = track_id.into_inner();
+    let audio_reference = format!("audio/{song_id}.mp3");
+    match store.get_track(song_id, &audio_reference).await {
         Ok(audio) => HttpResponse::Ok()
             .content_type("application/octet-stream")
             .body(audio),
@@ -33,6 +32,10 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use std::time::Duration;
+
+    const TRACK_ID: &str = "00000000-0000-4000-8000-000000000042";
+    const MISSING_ID: &str = "00000000-0000-4000-8000-000000000007";
+    const OTHER_TRACK_ID: &str = "00000000-0000-4000-8000-000000000044";
 
     macro_rules! assert_expected_eq {
         ($actual:expr, $expected:expr $(,)?) => {{
@@ -62,12 +65,16 @@ mod tests {
         }
 
         match request.path() {
-            "/test-bucket/7" => HttpResponse::NotFound()
-                .content_type("application/xml")
-                .body("<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>"),
-            "/test-bucket/42" => HttpResponse::Ok()
-                .content_type("application/octet-stream")
-                .body("audio-data"),
+            path if path.ends_with("/audio/00000000-0000-4000-8000-000000000007.mp3") => {
+                HttpResponse::NotFound()
+                    .content_type("application/xml")
+                    .body("<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>")
+            }
+            path if path.ends_with("/audio/00000000-0000-4000-8000-000000000042.mp3") => {
+                HttpResponse::Ok()
+                    .content_type("application/octet-stream")
+                    .body("audio-data")
+            }
             _ => HttpResponse::Ok()
                 .content_type("application/octet-stream")
                 .body("0123456789"),
@@ -129,7 +136,7 @@ mod tests {
         let response = test::call_service(
             &app,
             test::TestRequest::get()
-                .uri("/tracks/42/audio")
+                .uri(&format!("/tracks/{TRACK_ID}/audio"))
                 .to_request(),
         )
         .await;
@@ -152,7 +159,9 @@ mod tests {
 
         let response = test::call_service(
             &app,
-            test::TestRequest::get().uri("/tracks/7/audio").to_request(),
+            test::TestRequest::get()
+                .uri(&format!("/tracks/{MISSING_ID}/audio"))
+                .to_request(),
         )
         .await;
         assert_expected_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -213,7 +222,7 @@ mod tests {
         let response = test::call_service(
             &app,
             test::TestRequest::get()
-                .uri("/tracks/44/audio")
+                .uri(&format!("/tracks/{OTHER_TRACK_ID}/audio"))
                 .to_request(),
         )
         .await;
@@ -238,7 +247,7 @@ mod tests {
         let response = test::call_service(
             &app,
             test::TestRequest::get()
-                .uri("/tracks/42/audio")
+                .uri(&format!("/tracks/{TRACK_ID}/audio"))
                 .to_request(),
         )
         .await;
