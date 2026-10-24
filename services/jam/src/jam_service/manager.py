@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from fastapi import WebSocket
 
 from jam_service.models import JamResponse, JamState, QueueItem, ReadinessDecision
+from jam_service.playlist_client import PlaylistClient
 from jam_service.repository import JamRepository, PersistedJam
 from jam_service.sync_client import Command, ReadinessStatus, SyncClient
 
@@ -33,9 +34,16 @@ class Jam:
 
 
 class JamManager:
-    def __init__(self, repository: JamRepository, sync: SyncClient, member_token: str) -> None:
+    def __init__(
+        self,
+        repository: JamRepository,
+        sync: SyncClient,
+        playlist: PlaylistClient,
+        member_token: str,
+    ) -> None:
         self._repository = repository
         self._sync = sync
+        self._playlist = playlist
         self._member_token = member_token
         self._jams: dict[UUID, Jam] = {}
         self._connections: dict[UUID, dict[WebSocket, UUID]] = {}
@@ -55,6 +63,7 @@ class JamManager:
 
     async def close(self) -> None:
         await self._sync.close()
+        await self._playlist.close()
         await self._repository.close()
 
     def get(self, jam_id: UUID, include_token: bool = False) -> JamResponse:
@@ -70,9 +79,23 @@ class JamManager:
             member_token=self._member_token if include_token else None,
         )
 
-    async def create(self, owner_id: UUID) -> JamResponse:
+    async def create(self, owner_id: UUID, playlist_id: UUID | None = None) -> JamResponse:
+        song_ids = await self._playlist.get_song_ids(playlist_id) if playlist_id else []
         async with self._lock:
-            jam = Jam(jam_id=uuid4(), owner_id=owner_id, participant_ids=[owner_id])
+            jam = Jam(
+                jam_id=uuid4(),
+                owner_id=owner_id,
+                participant_ids=[owner_id],
+                queue=[
+                    QueueItem(
+                        queue_item_id=uuid4(),
+                        song_id=song_id,
+                        added_by=owner_id,
+                        position=position,
+                    )
+                    for position, song_id in enumerate(song_ids)
+                ],
+            )
             self._jams[jam.jam_id] = jam
             await self._save(jam)
         return self.get(jam.jam_id, include_token=True)
