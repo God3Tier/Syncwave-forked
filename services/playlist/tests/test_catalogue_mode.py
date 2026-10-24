@@ -20,6 +20,8 @@ def settings(mode: str) -> Settings:
         catalogue_mode=mode,
         catalogue_url="http://catalogue:8080",
         catalogue_timeout_seconds=3.0,
+        grpc_port=0,
+        internal_service_token="",
     )
 
 

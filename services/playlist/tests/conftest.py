@@ -18,6 +18,8 @@ from playlist_service.errors import CatalogueUnavailable
 
 # Read by the API's lifespan through get_settings().
 API_DATABASE = Path(tempfile.gettempdir()) / f"syncwave-playlist-api-tests-{os.getpid()}.db"
+# The tests start no gRPC server; tests/test_grpc.py builds its own.
+os.environ["GRPC_PORT"] = "0"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{API_DATABASE.as_posix()}"
 
 OWNER_ID = "5d1f3a7e-2b94-4c60-8e15-a7c3f9b2d041"

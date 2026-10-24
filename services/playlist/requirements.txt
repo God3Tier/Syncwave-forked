@@ -5,3 +5,5 @@ SQLAlchemy[asyncio]==2.1.5
 asyncpg==0.32.0
 alembic==1.20.0
 httpx2==2.13.1
+grpcio==1.75.1
+protobuf==6.32.1

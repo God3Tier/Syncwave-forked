@@ -14,12 +14,17 @@ Titles, artists and audio belong to the Catalogue and Streaming services
 | REST             | [`contracts/api/playlist.openapi.yaml`](../../contracts/api/playlist.openapi.yaml) | via gateway at `/api/playlist/...` |
 | Events published | none                                                                               | |
 | Events consumed  | none                                                                               | |
-| gRPC             | none                                                                               | the Jam Service keeps its own queue, so nothing calls Playlist over gRPC (yet) |
+| gRPC (served)    | [`contracts/grpc/syncwave/playlist/v1/playlist.proto`](../../contracts/grpc/syncwave/playlist/v1/playlist.proto) | `GetPlaylist`, read-only, on internal port 50051; callers send `x-internal-token`. Jam and Sync read playlists from here |
 | Calls (HTTP)     | Catalogue `GET /songs/{song_id}`, only when a song is added and `CATALOGUE_MODE=http` | refuses the add if the song is unknown or the Catalogue is down |
 
 ```text
 browser ──> gateway /api/playlist/playlists/... ──> playlist ──> Postgres (playlist database)
+Jam / Sync ──────── gRPC GetPlaylist (port 50051, internal) ──┘
 ```
+
+Jam and Sync use this service as the one source of playlists: the order they
+play is the order stored here. Only the REST API changes a playlist; gRPC only
+reads.
 
 | Endpoint                                       | What                                                |
 |------------------------------------------------|-----------------------------------------------------|

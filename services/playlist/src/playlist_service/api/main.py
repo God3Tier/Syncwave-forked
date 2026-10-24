@@ -177,10 +177,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
     database = Database(settings.database_url)
     app.state.repository = PlaylistRepository(database.sessions)
-    async with httpx2.AsyncClient(timeout=settings.catalogue_timeout_seconds) as client:
-        app.state.catalogue = build_catalogue(settings, client)
-        yield
-    await database.dispose()
+    grpc_server = None
+    if settings.grpc_port > 0:
+        from playlist_service.grpc_service import create_grpc_server
+
+        grpc_server, _ = create_grpc_server(
+            app.state.repository, settings, f"[::]:{settings.grpc_port}"
+        )
+        await grpc_server.start()
+    try:
+        async with httpx2.AsyncClient(timeout=settings.catalogue_timeout_seconds) as client:
+            app.state.catalogue = build_catalogue(settings, client)
+            yield
+    finally:
+        if grpc_server is not None:
+            await grpc_server.stop(grace=2)
+        await database.dispose()
 
 
 app = FastAPI(title="SyncWave Playlist Service", version="1.0.0", lifespan=lifespan)

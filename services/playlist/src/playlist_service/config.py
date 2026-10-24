@@ -20,6 +20,8 @@ class Settings:
     catalogue_mode: str
     catalogue_url: str
     catalogue_timeout_seconds: float
+    grpc_port: int  # 0 turns the gRPC server off
+    internal_service_token: str
 
 
 def database_url() -> str:
@@ -56,6 +58,8 @@ def get_settings() -> Settings:
         catalogue_mode=catalogue_mode(),
         catalogue_url=os.getenv("CATALOGUE_URL", "http://catalogue:8080"),
         catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
+        grpc_port=int(os.getenv("GRPC_PORT", "50051")),
+        internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
     )
 
 
