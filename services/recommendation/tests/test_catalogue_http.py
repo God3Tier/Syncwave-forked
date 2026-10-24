@@ -51,6 +51,24 @@ async def test_parses_the_songs() -> None:
     assert songs[1].mood is None  # mood is optional
 
 
+async def test_a_song_with_no_duration_yet_is_skipped_not_an_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={
+                "items": [
+                    {"song_id": SONG_ID, "title": "A", "artist": "B", "duration_ms": None},
+                    {"song_id": str(uuid.uuid4()), "title": "C", "artist": "D", "duration_ms": 5},
+                ],
+                "next_cursor": None,
+            },
+        )
+
+    songs = await catalogue_with(handler).list_ready_songs(10)
+
+    assert [song.title for song in songs] == ["C"]
+
+
 async def test_asks_only_for_ready_songs_with_the_limit() -> None:
     seen: list[httpx2.Request] = []
 
