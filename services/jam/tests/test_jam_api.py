@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from jam_service.main import sync_client
+from jam_service.main import playlist_client, sync_client
 from jam_service.models import JamState
 from jam_service.sync_client import SyncSnapshot
 
@@ -17,6 +17,34 @@ def test_health_and_authentication(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok", "service": "jam"}
     assert client.get("/ready").status_code == 200
     assert TestClient(client.app).post("/jams", json={"owner_id": str(uuid4())}).status_code == 401
+
+
+def test_create_jam_imports_playlist_in_saved_order(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    playlist_id = uuid4()
+    song_ids = [uuid4(), uuid4(), uuid4()]
+    playlist_client.playlists[playlist_id] = song_ids
+
+    response = client.post(
+        "/jams",
+        json={"owner_id": owner_id, "playlist_id": str(playlist_id)},
+    )
+
+    assert response.status_code == 201
+    queue = response.json()["queue"]
+    assert [item["song_id"] for item in queue] == [str(song_id) for song_id in song_ids]
+    assert [item["position"] for item in queue] == [0, 1, 2]
+    assert {item["added_by"] for item in queue} == {owner_id}
+
+
+def test_create_jam_reports_missing_playlist(client: TestClient) -> None:
+    response = client.post(
+        "/jams",
+        json={"owner_id": str(uuid4()), "playlist_id": str(uuid4())},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "playlist not found"}
 
 
 def test_members_can_join_and_queue_but_only_owner_controls(client: TestClient) -> None:

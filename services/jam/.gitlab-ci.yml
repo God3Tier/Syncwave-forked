@@ -23,6 +23,7 @@ contracts:
       --proto-root ../../contracts/grpc
       --output src
       syncwave/sync/v1/sync.proto
+      syncwave/playlist/v1/playlist.proto
 
 test:
   extends: .test

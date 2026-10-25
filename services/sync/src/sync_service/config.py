@@ -13,7 +13,10 @@ class Settings:
     grpc_port: int = 50_051
     dependency_timeout_ms: int = 750
     catalogue_grpc_target: str = ""
+    catalogue_internal_token: str = "local-catalogue-internal-token"
     streaming_grpc_target: str = ""
+    streaming_http_url: str = ""
+    streaming_internal_token: str = "local-streaming-internal-token"
     start_lead_time_ms: int = 2_000
     prepare_timeout_ms: int = 10_000
     clock_sample_max_age_ms: int = 30_000
@@ -44,7 +47,14 @@ def get_settings() -> Settings:
         grpc_port=int(os.getenv("GRPC_PORT", "50051")),
         dependency_timeout_ms=int(os.getenv("DEPENDENCY_TIMEOUT_MS", "750")),
         catalogue_grpc_target=os.getenv("CATALOGUE_GRPC_TARGET", ""),
+        catalogue_internal_token=os.getenv(
+            "CATALOGUE_INTERNAL_TOKEN", "local-catalogue-internal-token"
+        ),
         streaming_grpc_target=os.getenv("STREAMING_GRPC_TARGET", ""),
+        streaming_http_url=os.getenv("STREAMING_HTTP_URL", ""),
+        streaming_internal_token=os.getenv(
+            "STREAMING_INTERNAL_TOKEN", "local-streaming-internal-token"
+        ),
         start_lead_time_ms=int(os.getenv("START_LEAD_TIME_MS", "2000")),
         prepare_timeout_ms=int(os.getenv("PREPARE_TIMEOUT_MS", "10000")),
         clock_sample_max_age_ms=int(os.getenv("CLOCK_SAMPLE_MAX_AGE_MS", "30000")),

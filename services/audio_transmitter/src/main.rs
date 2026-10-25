@@ -23,8 +23,9 @@ async fn main() -> std::io::Result<()> {
         .filter(|seconds| *seconds > 0.0)
         .unwrap_or(3.0);
     let catalogue: Arc<dyn Catalogue> = Arc::new(
-        HttpCatalogue::new(&catalogue_url, Duration::from_secs_f64(catalogue_timeout))
-            .map_err(|error| io::Error::other(format!("failed to build the Catalogue client: {error}")))?,
+        HttpCatalogue::new(&catalogue_url, Duration::from_secs_f64(catalogue_timeout)).map_err(
+            |error| io::Error::other(format!("failed to build the Catalogue client: {error}")),
+        )?,
     );
     let catalogue = web::Data::new(catalogue);
 
@@ -38,7 +39,7 @@ async fn main() -> std::io::Result<()> {
         .load()
         .await;
     let s3_client = Client::new(&config);
-    let bucket_name = "TEMP".to_string();
+    let bucket_name = env::var("S3_BUCKET").unwrap_or_else(|_| "syncwave-audio".to_owned());
 
     // TODO: Set the cache to be configurable
     let store = web::Data::new(AudioStore::new(10_000, s3_client, bucket_name));
