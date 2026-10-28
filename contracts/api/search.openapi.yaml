@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Search Service
+  version: 0.1.0
+  description: |
+    Searchable index of songs that are fully processed and ready to play.
+    The index is maintained asynchronously: Catalogue publishes `SongReady`
+    (`contracts/events/`) when a song becomes fully processable, and Search
+    indexes it. Browsers call this service through the gateway, e.g.
+    `GET http://localhost:8080/api/search/search?q=...`. The paths below are
+    the service's own paths, without the `/api/search` prefix.
+servers:
+  - url: http://search:8080
+    description: Inside Docker Compose (the gateway adds the /api/search prefix)
+security: []
+tags:
+  - name: search
+    description: Song search
+  - name: operations
+    description: Health checks
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: searchHealth
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /search:
+    get:
+      tags: [search]
+      operationId: searchSongs
+      summary: Search indexed songs by title or artist
+      description: |
+        Returns songs whose title or artist contains `q` (case-insensitive
+        substring match). Omit `q` (or pass an empty value) to list every
+        indexed song. Only fully processed (`READY`) songs are indexed, so
+        partially processed or failed songs never appear. Results are ordered
+        by indexing time (newest first); page with `limit` and `next_cursor`.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: Case-insensitive substring matched against title and artist.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Page size.
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            maxLength: 512
+          description: Opaque paging token from a previous response's `next_cursor`.
+      responses:
+        "200":
+          description: A page of matching songs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchList"
+        "400":
+          description: Invalid `limit` or `cursor`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    SearchResult:
+      type: object
+      required: [song_id, title, artist]
+      properties:
+        song_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        artist:
+          type: string
+    SearchList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque paging token; null when there are no more pages.
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [INVALID_CURSOR]
+        message:
+          type: string
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
