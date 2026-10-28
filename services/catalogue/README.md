@@ -148,9 +148,8 @@ delivery ends in exactly one of:
 
 ## Deliberate limitations of this slice
 
-- No `contracts/api/catalogue.openapi.yaml` exists yet; write it before any
-  consumer builds against the REST API, following
-  [`contracts/api/README.md`](../../contracts/api/README.md).
+- REST contract: [`contracts/api/catalogue.openapi.yaml`](../../contracts/api/catalogue.openapi.yaml)
+  (linted by CI).
 - The proposed gRPC contract
   (`contracts/grpc/syncwave/catalogue/v1/catalogue.proto`) does not exist yet;
   Sync currently uses a deterministic local fake for Catalogue queries until

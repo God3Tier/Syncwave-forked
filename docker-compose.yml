@@ -17,6 +17,7 @@ name: syncwave
 include:
   - services/sync/compose.yaml
   - services/catalogue/compose.yaml
+  - services/search/compose.yaml
   - services/audio_transmitter/compose.yaml
   - services/jam/compose.yaml
   - services/waveform/compose.yaml
