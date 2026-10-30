@@ -79,20 +79,23 @@ Failed processing produces a clear status and has a documented retry path.
 
 ## 3. Connect the frontend and settle playback orchestration
 
+The agreed implementation details and first-release boundaries are in
+[FRONTEND_PLAN.md](FRONTEND_PLAN.md), including the browser-owned nine-slot
+buffer, laptop/mobile layouts, Nielsen heuristics, and Playwright coverage.
+Upload and full Search follow once their backend services are ready.
+
 - [ ] Add or integrate the production frontend and its Compose service. The
   gateway currently forwards `/` to a frontend hostname that is absent.
 - [ ] Connect discovery, upload status, playlists, and playback to gateway APIs.
 - [ ] Connect Jam room membership, queue updates, owner controls, and the Sync
   WebSocket protocol, including clock sampling, buffering, readiness, scheduled
   playback, drift correction, reconnects, and readiness-timeout decisions.
-- [ ] Confirm the role of `song_request_orchestrator` alongside Jam/Sync.
-  It currently has a standalone Compose file and is absent from the root stack.
-  If it remains part of individual playlist playback, connect its upstreams,
-  gateway route, image pipeline, and configuration. Its standalone host ports
-  overlap the root gateway/PostgreSQL defaults and need adjustment.
-- [ ] Verify seeking and buffering with real audio formats. Streaming currently
-  buffers whole objects and reports `supports_ranges=false`; decide whether
-  browser playback requires HTTP byte ranges before implementing them.
+- [ ] Implement browser-owned nine-slot buffering using Streaming's planned
+  manifest and independently decodable chunk endpoints. The separate
+  `song_request_orchestrator` remains standalone, outside this frontend path.
+- [ ] Verify seeking and chunk-boundary playback with real audio formats.
+  Streaming currently buffers whole objects and reports `supports_ranges=false`;
+  the proportional byte-slicing endpoint must not be used for the new buffer.
 
 Acceptance: the three documented user journeys work through the production UI,
 including actionable errors when a dependency or processing stage fails.

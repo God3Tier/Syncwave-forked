@@ -7,6 +7,8 @@ choreography) and **Create & Synchronise a Jam** (orchestration).
 See [plan.md](plan.md) for the architecture and service ownership.
 See [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) for verified integration status,
 remaining work, and acceptance criteria.
+See [FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the agreed laptop/mobile UI,
+nine-slot audio buffer, usability requirements, and Playwright test plan.
 
 ## Run it locally
 
