@@ -20,6 +20,8 @@ sh tests/integration/smoke.sh
 ```
 
 `smoke.sh` checks the gateway, S3, the RabbitMQ topology, and
-`GET /api/<name>/health` for every folder in `services/`.
+`GET /api/<name>/health` for the seven Python APIs in the root Compose stack,
+and `GET /api/streaming/cache` for the audio transmitter. Standalone service
+folders are not treated as deployed services.
 Add scenario-level integration checks here as services gain behaviour,
 e.g. "publish `SongUploaded`, expect `lyrics_status=READY` in Catalogue".

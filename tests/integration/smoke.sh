@@ -32,12 +32,12 @@ check "rabbitmq: events exchange"   "http://syncwave:syncwave@$HOST:15672/api/ex
 check "rabbitmq: lyrics queue"      "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/lyrics.song-uploaded"
 check "rabbitmq: waveform queue"    "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/waveform.song-uploaded"
 
-# Every service that exists must answer /health through the gateway.
-for dir in services/*/; do
-  name=$(basename "$dir")
-  [ "$name" = "_template" ] && continue
+# Check the APIs included in the root Compose stack. Standalone service
+# folders are not necessarily deployed, and Streaming uses /cache for health.
+for name in catalogue lyrics waveform playlist recommendation jam sync; do
   check "service: $name" "http://$HOST:8080/api/$name/health"
 done
+check "service: streaming" "http://$HOST:8080/api/streaming/cache"
 if [ -d frontend ]; then
   check "frontend" "http://$HOST:8080/"
 fi

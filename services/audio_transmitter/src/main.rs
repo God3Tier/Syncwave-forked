@@ -38,7 +38,12 @@ async fn main() -> std::io::Result<()> {
         )
         .load()
         .await;
-    let s3_client = Client::new(&config);
+    // Path-style URLs also work with the local S3-compatible store's Docker hostname.
+    let s3_client = Client::from_conf(
+        aws_sdk_s3::config::Builder::from(&config)
+            .force_path_style(true)
+            .build(),
+    );
     let bucket_name = env::var("S3_BUCKET").unwrap_or_else(|_| "syncwave-audio".to_owned());
 
     // TODO: Set the cache to be configurable
