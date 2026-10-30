@@ -5,6 +5,8 @@ A browser-based social music streaming platform built as microservices
 are **Discover & Listen**, **Upload & Process** (event-driven
 choreography) and **Create & Synchronise a Jam** (orchestration).
 See [plan.md](plan.md) for the architecture and service ownership.
+See [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) for verified integration status,
+remaining work, and acceptance criteria.
 
 ## Run it locally
 
