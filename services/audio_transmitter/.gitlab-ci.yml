@@ -3,8 +3,15 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "parent_pipeline"'
     - when: never
 
-stages:
-  - test
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: audio_transmitter
+  SERVICE_DIR: services/audio_transmitter
+
+build:
+  extends: .build-image
 
 test:audio-sampler:
   stage: test

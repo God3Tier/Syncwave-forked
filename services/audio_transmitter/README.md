@@ -48,6 +48,12 @@ the network alias `streaming`, connects it to the shared S3-compatible store,
 and routes it through the gateway. The alias keeps the public service name
 clear without breaking existing internal callers.
 
+The image name is `${IMAGE_REGISTRY:-syncwave}/audio_transmitter:${IMAGE_TAG:-local}`.
+The service pipeline runs the Rust tests, then uses `ci/service.yml` to build
+and publish a content-tagged image. Branch pipelines for `dev`, `staging`, and
+`main` also promote the corresponding image tag. Staging can therefore use
+the root stack's `--no-build --pull always` command with the registry variables.
+
 ## Test
 
 ```sh

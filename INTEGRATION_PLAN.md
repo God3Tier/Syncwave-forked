@@ -28,19 +28,31 @@ The other services' complete unit suites were not rerun during this check.
 
 ## 1. Make startup and CI reliable
 
-- [ ] Diagnose RabbitMQ's first-start cookie ownership issue. The new local
-  volume contained a root-owned `.erlang.cookie` that RabbitMQ could not read.
-  A one-time ownership repair restored startup; make clean startup reliable
-  without manual repair or deleting existing data.
-- [ ] Resolve `docker compose up --wait` failing with
-  `catalogue-worker has no healthcheck configured`. Check all three workers,
-  which currently disable health checks, and define how startup verifies that
-  consumers are connected and able to process events.
-- [ ] Publish Streaming's container image through its service pipeline and
+- [x] Verify RabbitMQ startup with fresh volumes and restart with retained
+  data. Isolated checks using `rabbitmq:4.3-management-alpine`, including the
+  Compose diagnostics health check, started successfully with a cookie owned
+  by `rabbitmq` and required no permission repair. The earlier root-owned
+  cookie failure did not recur; its cause remains unconfirmed. Capture the
+  volume ownership and health-check timing if it returns, before adding a
+  workaround. These checks did not delete or reset the main stack's data.
+- [x] Resolve `docker compose up --wait` failing with
+  `catalogue-worker has no healthcheck configured`. All three workers now
+  use a shared Compose probe that checks RabbitMQ for this container's named
+  connection and consumers on every required queue. Existing-volume startup,
+  a negative check against another worker's queue, smoke checks, and processing
+  a fresh generated song to `READY` passed. Clean-volume RabbitMQ startup
+  was checked separately using isolated broker containers and volumes.
+- [x] Wire Streaming's container image into the shared publishing pipeline and
   configure its Compose `image` consistently with `IMAGE_REGISTRY` and
-  `IMAGE_TAG`. Its pipeline currently runs tests only; staging uses
-  `--no-build --pull always` and cannot rely on a locally built image.
-- [ ] Run the complete staging integration job against registry images.
+  `IMAGE_TAG`. The pipeline now runs the shared build after the Rust tests,
+  and Compose uses the matching registry image name. Local YAML/Compose checks
+  and a simulated registry build/tag check passed; actual publishing remains
+  to be verified by GitLab CI.
+- [ ] Verify Streaming's image is published by GitLab CI, then run the complete
+  staging integration job against registry images. Live CI verification is
+  intentionally pending: the saved Git credential received HTTP 403 from the
+  API, and the automation browser was signed out. Local configuration and
+  simulated publishing checks do not prove a successful registry push.
 
 Acceptance: a fresh environment and a restart with existing volumes both
 complete the documented startup command, pass smoke checks, and process a
