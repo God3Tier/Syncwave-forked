@@ -91,6 +91,16 @@ async def test_an_error_status_is_unavailable(status: int) -> None:
         await weather_with(lambda request: httpx2.Response(status)).current(1.0, 1.0)
 
 
+async def test_an_error_status_message_has_the_status_and_no_coordinates() -> None:
+    with pytest.raises(WeatherUnavailable) as raised:
+        await weather_with(lambda request: httpx2.Response(503)).current(1.35, 103.82)
+
+    message = str(raised.value)
+    assert message == "Open-Meteo answered HTTP 503"
+    assert "1.35" not in message
+    assert "\n" not in message
+
+
 async def test_a_network_error_is_unavailable() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ConnectError("connection refused", request=request)

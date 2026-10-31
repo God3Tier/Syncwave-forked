@@ -76,6 +76,38 @@ async def test_a_slow_weather_provider_is_abandoned() -> None:
     assert len(result.items) == 2
 
 
+async def test_an_expected_weather_failure_logs_one_line_without_a_stack_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await run(FakeWeather(error=WeatherUnavailable("Open-Meteo failed: ConnectError()")))
+
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    assert "Open-Meteo failed: ConnectError()" in record.getMessage()
+    assert record.exc_info is None
+
+
+async def test_a_slow_weather_provider_logs_the_timeout_without_a_stack_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await run(FakeWeather(delay=5), weather_timeout=0.05)
+
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    assert "no answer within 0.05s" in record.getMessage()
+    assert record.exc_info is None
+
+
+async def test_a_bug_in_the_weather_provider_keeps_its_stack_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await run(FakeWeather(error=RuntimeError("unexpected response shape")))
+
+    [record] = caplog.records
+    assert record.levelname == "ERROR"
+    assert record.exc_info is not None
+
+
 async def test_weather_that_matches_no_song_is_not_reported_as_used() -> None:
     result = await run(FakeWeather(Weather("OTHER", 20.0)))
 
