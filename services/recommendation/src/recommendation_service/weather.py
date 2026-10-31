@@ -83,6 +83,12 @@ class OpenMeteoWeather:
             )
             response.raise_for_status()
             return _parse_open_meteo(response.json())
+        except httpx2.HTTPStatusError as error:
+            # Say only the status: the default text repeats the URL, which holds
+            # the user's coordinates, and spans several lines.
+            raise WeatherUnavailable(
+                f"Open-Meteo answered HTTP {error.response.status_code}"
+            ) from error
         except (httpx2.HTTPError, ValueError, KeyError, TypeError) as error:
             # ValueError covers bad JSON and non-numeric values, KeyError/TypeError a
             # body of the wrong shape.
