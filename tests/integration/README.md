@@ -23,3 +23,15 @@ sh tests/integration/smoke.sh
 `GET /api/<name>/health` for every folder in `services/`.
 Add scenario-level integration checks here as services gain behaviour,
 e.g. "publish `SongUploaded`, expect `lyrics_status=READY` in Catalogue".
+
+## Playlist, Recommendation and Jam
+
+```sh
+sh tests/integration/playlist-recommendation-flow.sh
+```
+
+Needs at least 3 `READY` songs in the Catalogue. It creates a playlist through
+the gateway (add, duplicate, unknown song, shuffle, reorder), creates a Jam from
+that playlist and checks Jam's queue has the same order (Jam -> Playlist gRPC),
+calls Recommendation with and without a location, then deletes the playlist.
+It is not run by CI yet.
