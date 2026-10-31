@@ -113,6 +113,7 @@ class CatalogueHandler:
             event.lyrics_reference,
             event.duration_ms,
             event.event_id,
+            mood=event.mood,
         )
         logger.info(
             "song created: song_id=%s title=%r artist=%r event_id=%s",

@@ -53,6 +53,7 @@ class Song(BaseModel):
     song_id: uuid.UUID
     title: str
     artist: str
+    mood: str | None = Field(default=None, description="optional mood label")
     duration_ms: int | None = Field(default=None, description="null until Waveform has measured it")
     audio_reference: str
     lyrics_status: StageStatus
@@ -70,6 +71,7 @@ class Song(BaseModel):
             song_id=record.song_id,
             title=record.title,
             artist=record.artist,
+            mood=record.mood,
             duration_ms=record.duration_ms,
             audio_reference=record.audio_reference,
             lyrics_status=StageStatus(record.lyrics_status),

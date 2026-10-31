@@ -26,6 +26,13 @@
           "type": "string",
           "minLength": 1
         },
+        "mood": {
+          "description": "Optional mood label for the song.",
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
         "lyrics_reference": {
           "description": "S3 object key of the uploaded timestamped lyrics (LRC format) in the same bucket, e.g. \"lyrics/<song_id>.lrc\". Absent or null when the song has no lyrics (instrumental).",
           "anyOf": [
