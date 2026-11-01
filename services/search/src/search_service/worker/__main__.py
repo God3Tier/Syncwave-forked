@@ -16,6 +16,7 @@ from search_service.shared.catalogue_client import CatalogueClient
 from search_service.shared.db import Database, SearchRepository
 from search_service.shared.events import DLX_EXCHANGE, QUEUE_SONG_READY, DeadLetterPublisher
 from search_service.worker.handler import SearchHandler
+from search_service.worker.rebuild import rebuild_index
 
 logger = logging.getLogger("search_service.worker")
 
@@ -41,6 +42,18 @@ async def connect(settings: Settings) -> AbstractRobustConnection:
     raise AssertionError("unreachable")
 
 
+async def rebuild_at_startup(catalogue: CatalogueClient, repository: SearchRepository) -> None:
+    """Catches up on songs that became READY while this worker was not running."""
+    try:
+        count = await rebuild_index(catalogue, repository)
+    except Exception as exc:
+        # Not fatal: SongReady events still index new songs. Restarting the
+        # worker, or running search_service.worker.rebuild, tries again.
+        logger.warning("startup rebuild of the search index failed: %s", exc)
+    else:
+        logger.info("startup rebuild indexed %d ready song(s)", count)
+
+
 async def run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -61,15 +74,14 @@ async def run() -> None:
         dlx = await channel.get_exchange(DLX_EXCHANGE)
         publisher = DeadLetterPublisher(dlx)
         catalogue_client = CatalogueClient(settings.catalogue_url)
-        handler = SearchHandler(
-            SearchRepository(database.sessions),
-            publisher,
-            catalogue_client,
-        )
+        repository = SearchRepository(database.sessions)
+        handler = SearchHandler(repository, publisher, catalogue_client)
         queue = await channel.get_queue(QUEUE_SONG_READY)
         await queue.consume(lambda message: handler(message, QUEUE_SONG_READY))
         logger.info("consuming %s with prefetch %d", QUEUE_SONG_READY, settings.amqp_prefetch)
+        rebuild = asyncio.create_task(rebuild_at_startup(catalogue_client, repository))
         await stop.wait()
+        rebuild.cancel()
         logger.info("stopping; unacknowledged messages return to the queue")
     finally:
         await connection.close()

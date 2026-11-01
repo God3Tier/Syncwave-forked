@@ -27,6 +27,18 @@ artist    string
 
 Matching is case-insensitive substring on title or artist.
 
+### Rebuilding the index
+
+Catalogue is the canonical source. When the worker starts, it pages through
+Catalogue's `GET /songs?processing_status=READY` and indexes every song, so
+songs that became ready while Search was down (or before it existed) are
+searchable. Re-indexing is idempotent and keeps each song's `indexed_at`. A
+failed startup rebuild is logged, not fatal. To rebuild by hand:
+
+```sh
+docker compose exec search-worker python -m search_service.worker.rebuild
+```
+
 ## Data owned
 
 Table `search_index` in this service's own `search` database:
@@ -36,7 +48,7 @@ Table `search_index` in this service's own `search` database:
 | song_id    | primary key, UUID            |
 | title      | song title                   |
 | artist     | artist name                  |
-| indexed_at | when the row was indexed     |
+| indexed_at | when the row was first indexed |
 
 ## Configuration
 

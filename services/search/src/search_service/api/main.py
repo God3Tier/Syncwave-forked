@@ -1,4 +1,4 @@
-"""HTTP API (contracts/api/search.openapi.yaml — to be written).
+"""HTTP API (contracts/api/search.openapi.yaml).
 
     GET /health
     GET /search?q=...&limit=&cursor=
@@ -8,12 +8,9 @@ Served by uvicorn from the image's default command; the gateway exposes it at
 /api/search/.
 """
 
-import base64
-import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -22,7 +19,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
 from search_service.config import configure_logging, get_settings
-from search_service.shared.db import Database, SearchRepository
+from search_service.shared.db import Database, SearchRepository, decode_cursor
 
 
 class ApiError(Exception):
@@ -51,19 +48,6 @@ class SearchResult(BaseModel):
 class SearchList(BaseModel):
     items: list[SearchResult]
     next_cursor: str | None = None
-
-
-def _encode_cursor(indexed_at: datetime, song_id: uuid.UUID) -> str:
-    payload = json.dumps({"indexed_at": indexed_at.isoformat(), "song_id": str(song_id)}).encode()
-    return base64.urlsafe_b64encode(payload).decode()
-
-
-def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
-    try:
-        payload = json.loads(base64.urlsafe_b64decode(cursor.encode()))
-        return datetime.fromisoformat(payload["indexed_at"]), uuid.UUID(payload["song_id"])
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ApiError(400, "INVALID_CURSOR", "cursor is not a valid paging token") from exc
 
 
 @asynccontextmanager
@@ -131,7 +115,10 @@ async def search(
     if cursor is not None:
         if len(cursor) > MAX_CURSOR_LENGTH:
             raise ApiError(400, "INVALID_CURSOR", "cursor is too long")
-        _decode_cursor(cursor)
+        try:
+            decode_cursor(cursor)
+        except ValueError as exc:
+            raise ApiError(400, "INVALID_CURSOR", "cursor is not a valid paging token") from exc
 
     repository: SearchRepository = request.app.state.repository
     rows, next_cursor = await repository.search(q, limit, cursor)

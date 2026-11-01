@@ -5,7 +5,8 @@ import json
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, Uuid
+from sqlalchemy import DateTime, String, Uuid, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -37,9 +38,9 @@ class SearchRepository:
         self._sessions = sessions
 
     async def upsert(self, song_id: uuid.UUID, title: str, artist: str) -> SearchRecord:
-        """Insert or update the indexed row for a song. Idempotent."""
-        from sqlalchemy.exc import IntegrityError
-
+        """Insert or update the indexed row for a song. Idempotent: re-indexing
+        keeps indexed_at, so a duplicate SongReady or a rebuild does not move the
+        song to the top of the results."""
         now = datetime.now(UTC)
         try:
             async with self._sessions.begin() as session:
@@ -55,7 +56,6 @@ class SearchRepository:
                 else:
                     record.title = title
                     record.artist = artist
-                    record.indexed_at = now
                 await session.flush()
                 return record
         except IntegrityError:
@@ -65,7 +65,6 @@ class SearchRepository:
                     raise
                 record.title = title
                 record.artist = artist
-                record.indexed_at = now
                 return record
 
     async def get(self, song_id: uuid.UUID) -> SearchRecord | None:
@@ -78,8 +77,6 @@ class SearchRepository:
         limit: int,
         cursor: str | None,
     ) -> tuple[list[SearchRecord], str | None]:
-        from sqlalchemy import select
-
         stmt = select(SearchRecord)
         if query:
             cleaned = query.strip()
@@ -90,9 +87,8 @@ class SearchRepository:
                     SearchRecord.title.ilike(lowered, escape="\\")
                     | SearchRecord.artist.ilike(lowered, escape="\\")
                 )
-        # cursor
         if cursor is not None:
-            cursor_indexed_at, cursor_song_id = _decode_cursor(cursor)
+            cursor_indexed_at, cursor_song_id = decode_cursor(cursor)
             stmt = stmt.where(
                 (SearchRecord.indexed_at < cursor_indexed_at)
                 | (
@@ -109,17 +105,17 @@ class SearchRepository:
         rows = list(rows[:limit])
         next_cursor: str | None = None
         if has_more and rows:
-            next_cursor = _encode_cursor(rows[-1].indexed_at, rows[-1].song_id)
+            next_cursor = encode_cursor(rows[-1].indexed_at, rows[-1].song_id)
         return rows, next_cursor
 
 
-def _encode_cursor(indexed_at: datetime, song_id: uuid.UUID) -> str:
+def encode_cursor(indexed_at: datetime, song_id: uuid.UUID) -> str:
     payload = json.dumps({"indexed_at": indexed_at.isoformat(), "song_id": str(song_id)}).encode()
     return base64.urlsafe_b64encode(payload).decode()
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
-
+def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    """Raises ValueError for a token encode_cursor did not produce."""
     try:
         payload = json.loads(base64.urlsafe_b64decode(cursor.encode()))
         return datetime.fromisoformat(payload["indexed_at"]), uuid.UUID(payload["song_id"])
