@@ -3,7 +3,15 @@ use crate::store::errors::StoreError;
 use aws_sdk_s3::Client;
 use bytes::Bytes;
 use moka::future::Cache;
+use serde::Serialize;
 use uuid::Uuid;
+
+/// One cached song, without its audio bytes.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct CachedTrack {
+    pub song_id: Uuid,
+    pub bytes: usize,
+}
 
 pub struct AudioStore {
     audio_stash: Cache<Uuid, Bytes>,
@@ -20,8 +28,16 @@ impl AudioStore {
         }
     }
 
-    pub fn cache_state(&self) -> String {
-        format!("{:?}", self.audio_stash)
+    /// The cached song IDs and their sizes. Never the audio itself: this is
+    /// reachable through the gateway.
+    pub fn cache_state(&self) -> Vec<CachedTrack> {
+        self.audio_stash
+            .iter()
+            .map(|(song_id, audio)| CachedTrack {
+                song_id: *song_id,
+                bytes: audio.len(),
+            })
+            .collect()
     }
 }
 
@@ -64,5 +80,28 @@ impl Storage for AudioStore {
         let end_bit = std::cmp::min(end_time, total_time as u64) * ratio as u64;
 
         Ok(audio.slice(start_bit as usize..end_bit as usize))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_s3::config::{Credentials, Region};
+
+    #[actix_web::test]
+    async fn cache_state_lists_ids_and_sizes_without_audio() {
+        let config = aws_sdk_s3::Config::builder()
+            .behavior_version_latest()
+            .region(Region::new("us-east-1"))
+            .credentials_provider(Credentials::new("test", "test", None, None, "test"))
+            .build();
+        let store = AudioStore::new(10, Client::from_conf(config), "bucket".into());
+        let song_id = Uuid::new_v4();
+        store
+            .audio_stash
+            .insert(song_id, Bytes::from_static(b"ID3 audio"))
+            .await;
+
+        assert_eq!(store.cache_state(), vec![CachedTrack { song_id, bytes: 9 }]);
     }
 }

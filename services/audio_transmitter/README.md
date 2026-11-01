@@ -1,8 +1,11 @@
 # Audio Sampler (audio_transmitter)
 
-The streaming HTTP service listens on port `8081` and exposes `GET /cache`,
-`GET /tracks/{track_id}/stream-info`, `GET /tracks/{track_id}/audio`, and
-`GET /tracks/{track_id}/audio/range`.
+The streaming HTTP service listens on port `8081` and exposes `GET /health`,
+`GET /cache`, `GET /tracks/{track_id}/stream-info`, `GET /tracks/{track_id}/audio`,
+and `GET /tracks/{track_id}/audio/range`.
+
+`GET /cache` lists the cached songs as `[{"song_id": "...", "bytes": 123}]`; it
+never returns the audio itself.
 
 It has **no database of its own**. Song metadata (the S3 key and the duration)
 comes from the Catalogue Service, which owns it, through `GET /songs/{song_id}`.

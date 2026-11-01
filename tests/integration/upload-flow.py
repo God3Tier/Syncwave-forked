@@ -155,7 +155,7 @@ def run(api: Api, timeout: float, report: Json) -> None:
         "/api/catalogue/health",
         "/api/lyrics/health",
         "/api/waveform/health",
-        "/api/streaming/cache",
+        "/api/streaming/health",
     ):
         api.request(path)
         print(f"PASS {path}", flush=True)
