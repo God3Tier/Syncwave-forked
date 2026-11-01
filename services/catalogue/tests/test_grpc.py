@@ -175,7 +175,9 @@ async def test_duration_ms_zero_when_unknown() -> None:
     assert response.duration_ms == 0
 
 
-def test_create_grpc_server_binds() -> None:
-    FakeRepository([])
+# Async so it runs in pytest-asyncio's event loop: a grpc.aio server needs one,
+# and a synchronous test only finds one if an earlier test happened to leave it.
+@pytest.mark.asyncio
+async def test_create_grpc_server_binds() -> None:
     server, port = create_grpc_server(FakeRepository([]), settings(), "[::]:0")
     assert port > 0
