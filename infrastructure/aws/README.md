@@ -60,7 +60,9 @@ Copy `services/lyrics/`, then:
    `.gitlab-ci.yml`, and keep the `ecs_services` and `api_url` outputs (the
    runbook reads them).
 4. Add the folder name to `SERVICES` in RUNBOOK.md §2.3 and §8 (and to
-   `DB_SERVICES` if the stack has a `module.db`).
+   `DB_SERVICES` if the stack has a `module.db`). If it reads another
+   stack's outputs, also add it to the `grep` lists in §2.3 step d and §8,
+   which decide what runs in parallel.
 
 ### Services that call each other
 
@@ -90,7 +92,7 @@ Services reach each other inside the VPC by name, as they do in Compose:
   to `grpc_target`. The caller's stack reads both through
   `terraform_remote_state` with `defaults`, so a missing stack gives an empty
   target and the caller's built-in fake (Sync, Jam). Apply the called service
-  first (the order of `SERVICES` in RUNBOOK.md §2.3).
+  first and destroy it last (RUNBOOK.md §2.3 "Why this order").
 
 ## Architecture
 
