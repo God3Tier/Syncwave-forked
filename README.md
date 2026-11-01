@@ -27,7 +27,13 @@ docker compose up -d --build --wait
 | S3 console (RustFS)        | <http://localhost:9001/rustfs/console/>      | `syncwave` / `syncwave-secret` |
 | Postgres                   | `localhost:5432`                             | `postgres` / `postgres`; per service `<name>` / `<name>` |
 
-Check that everything is wired up: `sh tests/integration/smoke.sh`.
+Check that everything is wired up, then run Scenario 2 end to end (upload,
+parallel processing, Catalogue, Streaming) without the browser:
+
+```sh
+sh tests/integration/smoke.sh
+python tests/integration/upload-flow.py   # Python 3.10+; adds one test song per run
+```
 
 The stack starts with one demo song already loaded: "Daisy Bell", a
 public-domain 1894 recording with synced lyrics (see
@@ -39,13 +45,14 @@ seconds after `--wait` returns.
 All three run in the browser at <http://localhost:8080>.
 
 1. **Discover & Listen.** Discover lists recommendations and recently
-   added songs. Open "Daisy Bell" and press Play: the waveform playhead
-   moves and the current lyric line is highlighted. "Match my weather"
-   uses your browser location for the weather signal.
+   added songs; Search finds songs by title or artist. Open "Daisy Bell"
+   and press Play: the waveform playhead moves and the current lyric line
+   is highlighted. "Match my weather" uses your browser location for the
+   weather signal, and puts songs whose mood suits the weather first.
 2. **Upload & Process.** On Upload, add a title, an artist, an audio file
-   and optionally an `.lrc` file. The processing panel shows Lyrics and
-   Waveform working in parallel until the song is READY. This needs the
-   Upload Service; without it, the page says so.
+   and optionally an `.lrc` file and a mood. The processing panel shows
+   Lyrics and Waveform working in parallel until the song is READY; it then
+   appears in Search and Discover.
 3. **Create & Synchronise a Jam.** Create a playlist and choose "Start Jam
    with this playlist", or use the Jam page. Open the invite link in a
    second tab with `?user=new` added, to join as another listener, or on
@@ -77,8 +84,12 @@ docker-compose.yml  local environment: infrastructure + `include:` of every serv
 ## Local conventions
 
 - Every service listens on **8080** inside its container (**50051** for
-  gRPC) and answers `GET /health`. Only the gateway is published on the
-  host. `/api/<service>/<path>` reaches `<service>:8080/<path>`.
+  gRPC) and answers `GET /health`. `/api/<service>/<path>` reaches
+  `<service>:8080/<path>`. The exception is Streaming
+  (`services/audio_transmitter`): it listens on **8081** and the gateway
+  routes it as `/api/streaming/...`.
+- The gateway is the only service published on the host, apart from
+  Streaming on 8081 and the infrastructure consoles in the table above.
 - Infrastructure hostnames inside Compose: `rabbitmq:5672`,
   `postgres:5432`, `s3:9000`.
 - Each service has its **own** Postgres database and cannot connect to
@@ -90,8 +101,11 @@ docker-compose.yml  local environment: infrastructure + `include:` of every serv
 ## Workflow
 
 ```text
-feature/* or feat/*  --MR-->  dev  --MR-->  staging  --MR-->  main
+feature/*, feat/*, fix/* or chore/*  --MR-->  dev  --MR-->  staging  --MR-->  main
 ```
+
+Branch prefixes: `feature/` or `feat/` for new behaviour, `fix/` for bug
+fixes, `chore/` for tooling, docs and follow-ups.
 
 - `dev` is the default branch; nobody pushes to `dev`, `staging` or
   `main` directly.
@@ -101,7 +115,8 @@ feature/* or feat/*  --MR-->  dev  --MR-->  staging  --MR-->  main
 - **dev:** the same checks again, plus container scanning of the
   (reused) images.
 - **staging:** the full stack starts inside CI from the already-built
-  images, then the smoke and end-to-end tests run against it.
+  images, then the smoke test and the Scenario 2 flow (`upload-flow.py`)
+  run against it.
 - **main:** each changed service is deployed to production (Amazon ECS).
 
 CI minutes are shared by every CS302 team: open a draft MR to get
