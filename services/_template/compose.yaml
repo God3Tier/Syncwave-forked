@@ -41,9 +41,6 @@ services:
       AWS_SECRET_ACCESS_KEY: syncwave-secret
       AWS_REGION: us-east-1
       S3_BUCKET: syncwave-audio
-    env_file:
-      - path: ../../.env      # optional third-party secrets, e.g. WEATHER_API_KEY
-        required: false
     depends_on:
       rabbitmq-init:
         condition: service_completed_successfully

@@ -1,10 +1,17 @@
+# Child pipeline for the Streaming Service (see ci/service.yml). The root
+# .gitlab-ci.yml starts it when this folder or ci/ changes.
+
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "parent_pipeline"'
     - when: never
 
-stages:
-  - test
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: audio_transmitter   # = folder name = image name; the ECS service is "streaming"
+  SERVICE_DIR: services/audio_transmitter
 
 test:audio-sampler:
   stage: test
@@ -28,3 +35,11 @@ test:audio-sampler:
       - services/audio_transmitter/audio-test.log
       - services/audio_transmitter/compose-ps.txt
       - services/audio_transmitter/compose-logs.txt
+
+build:
+  extends: .build-image
+
+deploy:
+  extends: .deploy-ecs
+  variables:
+    ECS_SERVICES: streaming   # the name Sync and the ALB use; target groups allow no underscores

@@ -1,0 +1,44 @@
+# Child pipeline for the song request orchestrator (see ci/service.yml). The
+# root .gitlab-ci.yml starts it when this folder or ci/ changes.
+
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: song_request_orchestrator   # = folder name = image name; the ECS service is "orchestrator"
+  SERVICE_DIR: services/song_request_orchestrator
+
+.rust:
+  image: rust:1.94-bookworm
+  variables:
+    CARGO_HOME: $CI_PROJECT_DIR/.cargo
+    CARGO_TARGET_DIR: $CI_PROJECT_DIR/.cargo-target
+  cache:
+    key: cargo-$SERVICE
+    paths:
+      - .cargo/registry
+      - .cargo-target
+  before_script:
+    # Diesel links against libpq
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends libpq-dev > /dev/null
+    - rustup component add rustfmt clippy
+    - cd "$SERVICE_DIR"
+
+lint:
+  extends: [.lint, .rust]
+  script:
+    - cargo fmt --check
+    - cargo clippy --locked --all-targets
+
+test:
+  extends: [.test, .rust]
+  script:
+    - cargo test --locked
+
+build:
+  extends: .build-image
+
+deploy:
+  extends: .deploy-ecs
+  variables:
+    ECS_SERVICES: orchestrator   # target group names allow only letters, digits and hyphens

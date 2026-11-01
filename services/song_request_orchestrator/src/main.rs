@@ -6,16 +6,14 @@ mod security;
 mod webhook;
 
 use actix_web::{App, HttpServer, web};
-use std::{env, io, sync::Arc};
+use std::{io, sync::Arc};
 
 use security::{CognitoAuth, CognitoClient, CognitoConfig};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://orchestrator:orchestrator_dev_password@localhost:5432/orchestrator".to_owned()
-    });
+    let database_url = db::database_url();
     let pool = db::create_pool(&database_url)
         .map_err(|error| io::Error::other(format!("failed to create database pool: {error}")))?;
     let pool = web::Data::new(pool);

@@ -96,14 +96,27 @@ variable "assign_public_ip" {
 }
 
 variable "http_route" {
-  description = "Routes <path_prefix>/* on the shared ALB listener to this service's port 8080, with the prefix stripped (like infrastructure/gateway/nginx.conf). Null for workers."
+  description = "Routes <path_prefix>/* on the shared ALB listener to this service's port, with the prefix stripped (like infrastructure/gateway/nginx.conf). rewrite = false keeps the path as it is; with path_prefix = \"\" that makes the catch-all /* (the frontend). Null for workers."
   type = object({
     listener_arn = string
     vpc_id       = string
     path_prefix  = string
     priority     = number
+    rewrite      = optional(bool, true)
   })
   default = null
+}
+
+variable "port" {
+  description = "Container port the ALB routes to and health-checks (GET /health). The Streaming Service listens on 8081."
+  type        = number
+  default     = 8080
+}
+
+variable "wait_for_steady_state" {
+  description = "Make terraform apply wait until the service's tasks are running and healthy, e.g. so a worker is created only after its API has migrated the database."
+  type        = bool
+  default     = false
 }
 
 variable "extra_ports" {

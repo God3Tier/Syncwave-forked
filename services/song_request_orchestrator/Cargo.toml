@@ -3,6 +3,11 @@ name = "song_request_orchestrator"
 version = "0.1.0"
 edition = "2024"
 
+# The Dockerfile copies target/release/orchestrator
+[[bin]]
+name = "orchestrator"
+path = "src/main.rs"
+
 [dependencies]
 actix-web = "4"
 base64 = "0.23"

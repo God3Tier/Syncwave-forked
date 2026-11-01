@@ -109,6 +109,15 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_services" {
   to_port                      = 8080
 }
 
+# /api/streaming: the Streaming Service (audio_transmitter) listens on 8081
+resource "aws_vpc_security_group_egress_rule" "alb_to_streaming" {
+  security_group_id            = aws_security_group.alb.id
+  referenced_security_group_id = aws_security_group.services.id
+  ip_protocol                  = "tcp"
+  from_port                    = 8081
+  to_port                      = 8081
+}
+
 # Every application task (and the db-init tasks) uses this group
 resource "aws_security_group" "services" {
   name        = "syncwave-services"
@@ -122,6 +131,15 @@ resource "aws_vpc_security_group_ingress_rule" "services_from_alb" {
   ip_protocol                  = "tcp"
   from_port                    = 8080
   to_port                      = 8080
+}
+
+resource "aws_vpc_security_group_ingress_rule" "streaming_from_alb" {
+  security_group_id            = aws_security_group.services.id
+  referenced_security_group_id = aws_security_group.alb.id
+  description                  = "ALB to the Streaming Service"
+  ip_protocol                  = "tcp"
+  from_port                    = 8081
+  to_port                      = 8081
 }
 
 # Service-to-service calls, as in Compose: HTTP on 8080 (Playlist and

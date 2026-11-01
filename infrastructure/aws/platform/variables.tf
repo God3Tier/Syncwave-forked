@@ -23,8 +23,9 @@ variable "certificate_arn" {
 # --- Postgres -------------------------------------------------------------
 
 variable "db_instance_class" {
-  type    = string
-  default = "db.t4g.micro"
+  description = "small (2 GB) rather than micro: nine services' connection pools would use up a micro's connection limit. Use db.t4g.micro when only a few service stacks are brought up."
+  type        = string
+  default     = "db.t4g.small"
 }
 
 variable "db_engine_version" {

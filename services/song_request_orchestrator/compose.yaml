@@ -1,31 +1,23 @@
-name: audio-testing-orchestrator
-
 services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-orchestrator}
-      POSTGRES_USER: ${POSTGRES_USER:-orchestrator}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orchestrator_dev_password}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - orchestrator_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
+  # Song request orchestrator: gets a song's audio, lyrics and waveform points
+  # from Streaming, Lyrics and Waveform in one call. The root stack supplies
+  # Postgres and the services it calls; the gateway routes /api/orchestrator/*.
   orchestrator:
     build: .
-    depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
+    image: ${IMAGE_REGISTRY:-syncwave}/song_request_orchestrator:${IMAGE_TAG:-local}
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-orchestrator}:${POSTGRES_PASSWORD:-orchestrator_dev_password}@db:5432/${POSTGRES_DB:-orchestrator}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: orchestrator
+      DB_USER: orchestrator
+      DB_PASSWORD: orchestrator
+      PLAYLIST_SERVICE_URL: http://playlist:8080
+      AUDIO_SERVICE_URL: http://streaming:8081
+      LYRICS_SERVICE_URL: http://lyrics:8080
+      WAVEFORM_SERVICE_URL: http://waveform:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
       interval: 5s
@@ -33,6 +25,7 @@ services:
       retries: 10
       start_period: 5s
 
+  # The tests need no database: `make test` runs them in the builder stage.
   test-orchestrator:
     build:
       context: .
@@ -43,5 +36,4 @@ services:
     command: ["cargo", "test", "--locked"]
 
 volumes:
-  orchestrator_db_data:
   orchestrator_cargo_target:

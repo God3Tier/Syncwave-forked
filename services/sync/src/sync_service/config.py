@@ -2,6 +2,26 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+from sqlalchemy.engine import URL
+
+
+def database_url() -> str:
+    """DATABASE_URL if set (Compose and the tests), otherwise built from DB_*.
+
+    The DB_* variables are kept separate so that in production the password
+    can be injected on its own from AWS Secrets Manager.
+    """
+    if url := os.getenv("DATABASE_URL"):
+        return url
+    return URL.create(
+        "postgresql+asyncpg",
+        username=os.getenv("DB_USER", "sync"),
+        password=os.getenv("DB_PASSWORD", "sync"),
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "sync"),
+    ).render_as_string(hide_password=False)
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -40,10 +60,7 @@ def get_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", "local-jam-to-sync-token"),
         mock_sync_token=os.getenv("MOCK_SYNC_TOKEN", "local-sync-participant-token"),
-        database_url=os.getenv(
-            "DATABASE_URL",
-            "postgresql+asyncpg://sync:sync@localhost:5432/sync",
-        ),
+        database_url=database_url(),
         grpc_port=int(os.getenv("GRPC_PORT", "50051")),
         dependency_timeout_ms=int(os.getenv("DEPENDENCY_TIMEOUT_MS", "750")),
         catalogue_grpc_target=os.getenv("CATALOGUE_GRPC_TARGET", ""),

@@ -36,10 +36,6 @@ locals {
     WEATHER_TIMEOUT_SECONDS   = tostring(var.weather_timeout_seconds)
   }
 
-  secrets = var.weather_api_key_secret_arn == null ? {} : {
-    WEATHER_API_KEY = var.weather_api_key_secret_arn
-  }
-
   task_network = {
     cluster_arn        = local.platform.cluster_arn
     execution_role_arn = local.platform.execution_role_arn
@@ -91,7 +87,6 @@ module "api" {
   memory        = var.api_memory
   desired_count = var.api_desired_count
   environment   = local.environment
-  secrets       = local.secrets
 
   cluster_arn        = local.task_network.cluster_arn
   execution_role_arn = local.task_network.execution_role_arn

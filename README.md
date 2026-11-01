@@ -13,7 +13,6 @@ See [plan.md](plan.md) for the architecture and service ownership.
 account, no local Java/Node/Python.
 
 ```sh
-cp .env.example .env              # optional: real third-party API keys
 docker compose up -d --build --wait
 ```
 

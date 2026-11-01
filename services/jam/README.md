@@ -53,7 +53,10 @@ python -m venv .venv
 .venv/Scripts/ruff format --check src tests
 ```
 
-Jam uses its own PostgreSQL database and Alembic migration. Generated Sync and
+Jam uses its own PostgreSQL database and Alembic migration. The connection
+comes from `DATABASE_URL` if it is set (Compose, the tests), otherwise from
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` (AWS, where the
+password comes from Secrets Manager). Generated Sync and
 Playlist bindings live under `src/syncwave/{sync,playlist}/v1`; regenerate
 them from the corresponding files under `contracts/grpc/syncwave/` whenever a
 contract changes.

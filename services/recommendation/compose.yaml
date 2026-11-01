@@ -27,6 +27,3 @@ services:
       WEATHER_MODE: ${WEATHER_MODE:-open-meteo}
       WEATHER_STUB_CONDITION: RAIN
       WEATHER_TIMEOUT_SECONDS: "2"
-    env_file:
-      - path: ../../.env      # optional third-party secrets: WEATHER_API_KEY
-        required: false

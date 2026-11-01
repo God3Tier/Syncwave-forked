@@ -8,9 +8,8 @@ sessions: each session creates everything and destroys it again at the end.
 
 > **Status: proposal.** `platform/` is shared by every service and needs
 > the team's agreement before it is applied (RabbitMQ and Postgres choices
-> below, the S3 key layout with Upload). `services/lyrics` and
-> `services/waveform` were the first two service stacks; `services/playlist`
-> and `services/recommendation` follow the same pattern.
+> below, the S3 key layout with Upload). Every service has a stack: the
+> owners should review theirs (environment, sizing, what it may call).
 
 ## Layout: one shared stack, one stack per service
 
@@ -21,12 +20,25 @@ infrastructure/aws/
 ├── modules/
 │   ├── ecs-service/      one ECS service + task definition + logs + task role + optional ALB route
 │   └── service-database/ one service's database/role on the shared RDS + its password secret
-└── services/
-    ├── lyrics/           ECR repo, database, API (lyrics) and worker (lyrics-worker)
-    ├── waveform/         ECR repo, database, API (waveform) and worker (waveform-worker)
-    ├── playlist/         ECR repo, database, API + gRPC (playlist), internal token for Jam
-    └── recommendation/   ECR repo, API (recommendation); no database, no worker
+└── services/             one folder per service = its image name; ECS service names in brackets
+    ├── catalogue/        database, API + gRPC (catalogue), worker (catalogue-worker), internal token for Sync
+    ├── search/           database, API (search), worker (search-worker)
+    ├── upload/           database, API (upload, writes S3), outbox publisher (upload-publisher)
+    ├── audio_transmitter/  the Streaming Service (streaming) on 8081, reads S3; no database
+    ├── lyrics/           database, API (lyrics), worker (lyrics-worker)
+    ├── waveform/         database, API (waveform), worker (waveform-worker)
+    ├── playlist/         database, API + gRPC (playlist), internal token for Jam
+    ├── recommendation/   API (recommendation); no database, no worker
+    ├── sync/             database, HTTP/WebSocket + gRPC (sync), internal token for Jam
+    ├── jam/              database, API + WebSocket (jam)
+    ├── song_request_orchestrator/  database, API (orchestrator)
+    └── frontend/         the web UI (frontend), the ALB's catch-all /*
 ```
+
+Each service stack also has its ECR repository. Owners: Catalogue and
+Search Orvin, Upload Yonghuey, Streaming and the orchestrator Joseph, Lyrics
+and Waveform Jiawen, Playlist and Recommendation Hayyun, Jam and Sync Azeez
+(`plan.md` §2).
 
 - **platform** holds what every service needs and no single service owns.
   It changes rarely. Its outputs (`platform/outputs.tf`) are the contract the
@@ -54,34 +66,47 @@ Copy `services/lyrics/`, then:
 
 Services reach each other inside the VPC by name, as they do in Compose:
 
+| Caller | Calls | Address (private DNS) | Token |
+|---|---|---|---|
+| search-worker, playlist, recommendation, streaming | Catalogue (HTTP) | `http://catalogue.syncwave.internal:8080` | none |
+| sync | Catalogue (gRPC) | `catalogue.syncwave.internal:50051` | `syncwave/catalogue/internal-token` |
+| sync | Streaming (HTTP) | `http://streaming.syncwave.internal:8081` | none |
+| jam | Sync (gRPC) | `sync.syncwave.internal:50051` | `syncwave/sync/internal-token` |
+| jam | Playlist (gRPC) | `playlist.syncwave.internal:50051` | `syncwave/playlist/internal-token` |
+| orchestrator | Playlist, Streaming, Lyrics, Waveform (HTTP) | `playlist`/`lyrics`/`waveform` `:8080`, `streaming:8081` | none |
+
 - **Names:** pass `service_discovery = { namespace_id = local.platform.service_discovery_namespace_id, name = "<service>" }`
   to `modules/ecs-service` and the service is reachable as
-  `<service>.syncwave.internal`. Playlist does this for Jam's gRPC call.
-  Callers build the name from `local.platform.service_discovery_namespace`,
-  for example `http://catalogue.syncwave.internal:8080`. That name exists only
-  once a Catalogue stack registers it; until then Playlist and Recommendation
-  run with `catalogue_mode=off` / `stub` (RUNBOOK.md §2.3, "While the
-  Catalogue stack does not exist").
-- **Ports:** `extra_ports` publishes ports besides 8080 (Playlist: `[50051]`).
-  The `services` security group lets tasks in the group reach 8080, 8081
-  (Streaming) and 50051 (gRPC) on each other; only the ALB reaches 8080 from outside.
+  `<service>.syncwave.internal`. Callers build the name from
+  `local.platform.service_discovery_namespace`. A name exists only while its
+  stack is up; RUNBOOK.md §2.3 ("Leaving a service out") lists each caller's
+  fallback.
+- **Ports:** `extra_ports` publishes ports besides the routed one (gRPC:
+  `[50051]`), and `port` changes the routed one (Streaming: 8081). The
+  `services` security group lets tasks in the group reach 8080, 8081 and
+  50051 on each other; the ALB reaches 8080 and 8081.
 - **Tokens shared between services:** the stack of the service being *called*
-  creates the secret and outputs its ARN (Playlist: `internal_token_secret_arn`);
-  the caller's stack reads it through `terraform_remote_state`. Apply the
-  called service first.
+  creates the secret and outputs its ARN as `internal_token_secret_arn`, next
+  to `grpc_target`. The caller's stack reads both through
+  `terraform_remote_state` with `defaults`, so a missing stack gives an empty
+  target and the caller's built-in fake (Sync, Jam). Apply the called service
+  first (the order of `SERVICES` in RUNBOOK.md §2.3).
 
 ## Architecture
 
 ```
-internet ──> ALB :80 (/api/<service>/* rules, prefix rewritten away)
-               │
+internet ──> ALB :80   /api/<service>/*  -> that service, prefix rewritten away
+               │       /api/* (anything else) -> 404 UNKNOWN_SERVICE
+               │       /*                -> frontend
                ▼   public subnets, tasks with public IPs, no NAT gateway
-         ┌───────────────────────────────────────────────┐
-         │ lyrics   waveform   (more services...)        │  SG "services": 8080 from ALB;
-         │ playlist recommendation                       │  8080, 8081, 50051 between services
-         │ lyrics-worker   waveform-worker               │
-         │ rabbitmq (rabbitmq.syncwave.internal:5672)    │  SG "rabbitmq": 5672 from services
-         └───────────────────────────────────────────────┘
+         ┌────────────────────────────────────────────────────────────┐
+         │ frontend                                                   │  SG "services": 8080 and 8081
+         │ catalogue  search  upload  streaming(:8081)  lyrics        │  from the ALB; 8080, 8081 and
+         │ waveform  playlist  recommendation  jam  sync  orchestrator│  50051 between services
+         │ catalogue-worker  search-worker  upload-publisher          │
+         │ lyrics-worker  waveform-worker                             │
+         │ rabbitmq (rabbitmq.syncwave.internal:5672)                 │  SG "rabbitmq": 5672 from services
+         └────────────────────────────────────────────────────────────┘
                │                          │
                ▼  private subnets         ▼  S3 gateway endpoint
          RDS Postgres 17 (db per service)   S3 syncwave-audio-<account>
@@ -92,10 +117,15 @@ internet ──> ALB :80 (/api/<service>/* rules, prefix rewritten away)
 | Routing | ALB listener rule per service, `url-rewrite` transform strips `/api/<service>` | Same contract as `infrastructure/gateway/nginx.conf`; the FastAPI routes have no prefix. Unknown paths return the same `UNKNOWN_SERVICE` 404. Idle timeout 1h (WebSockets). |
 | Network | Public subnets for tasks, **no NAT gateway** | A NAT gateway costs more than everything else here. Tasks only accept traffic from the ALB; RDS has no internet route at all. |
 | RabbitMQ | **One container on ECS** (Cloud Map DNS) | Cheapest. Plain AMQP inside the VPC needs no client changes (Amazon MQ requires TLS). There is no volume, so a restart loses queued messages; the topology is reloaded from `infrastructure/rabbitmq/definitions.json` by an init container. |
-| Postgres | **One `db.t4g.micro` RDS instance**, one database and login role per service | Keeps the database-per-service rule of `infrastructure/postgres/init.sql` at the price of one small instance. The master password is managed by RDS in Secrets Manager. |
-| Secrets | Secrets Manager `syncwave/<service>/db`, `syncwave/rabbitmq` | Injected as `DB_PASSWORD` / `AMQP_PASSWORD`; never in Terraform variables, images or Git. |
-| S3 access | Per-task IAM roles, read-only on a key prefix | The APIs get no S3 access; the lyrics worker reads `lyrics/*`; the waveform worker reads `audio/*`. |
-| Workers | `FARGATE_SPOT` | About 70% cheaper. An interrupted message is redelivered, and the consumers are idempotent. |
+| Postgres | **One `db.t4g.small` RDS instance**, one database and login role per service | Keeps the database-per-service rule of `infrastructure/postgres/init.sql` at the price of one small instance. A micro's connection limit is too low for nine services' pools (`-var db_instance_class=db.t4g.micro` is fine for a few). The master password is managed by RDS in Secrets Manager. |
+| Secrets | Secrets Manager `syncwave/<service>/db`, `syncwave/rabbitmq`, `syncwave/<service>/internal-token` | Injected as `DB_PASSWORD` / `AMQP_PASSWORD` / the tokens; never in Terraform variables, images or Git. Every service takes `DB_*` with the password on its own (Jam, Sync and the orchestrator were changed to accept it as well as `DATABASE_URL`). |
+| S3 access | Per-task IAM roles, limited to a key prefix | Upload's API writes `audio/*` and `lyrics/*`; Streaming and the waveform worker read `audio/*`; the lyrics worker reads `lyrics/*`. Every other task has no S3 access. |
+| Workers | `FARGATE_SPOT` | About 70% cheaper. An interrupted message is redelivered (or, for Upload's publisher, picked up again from the outbox), and the consumers are idempotent. |
+| Worker start | Each worker waits for its API (`wait_for_steady_state`) | The API runs the migrations; a worker started first on an empty database would dead-letter its first messages. |
+| Jam, Sync, orchestrator | **Exactly one task each** (`desired_count` 0 or 1), on-demand Fargate | They keep WebSockets, timing state and playback sessions in memory. A second task would split the participants; Spot would drop every connection on an interruption. |
+| Streaming | Routed on **8081** (the module's `port`) | The service binds 8081 (`services/audio_transmitter/src/main.rs`), as behind the local gateway. |
+| Frontend | ALB catch-all `/*` (priority 1000), behind a `/api/*` 404 rule (900) | Same split as the gateway's `location /`; unknown APIs still get `UNKNOWN_SERVICE` instead of the SPA's `index.html`. |
+| Sync's `/internal/*` HTTP routes | 404 on the ALB (priority 99) | They are guarded only by the internal token and Jam uses gRPC, so nothing outside the VPC needs them. |
 
 ## Who owns what: Terraform vs the CI deploy job
 
@@ -119,9 +149,9 @@ What the deploy job expects, all created here:
 
 | Thing | Convention |
 |---|---|
-| ECR repository | `syncwave/<service>` |
+| ECR repository | `syncwave/<SERVICE>`, the folder and image name |
 | ECS cluster | `syncwave` (CI variable `ECS_CLUSTER`) |
-| ECS service | `<service>`, plus `<service>-worker` for the AMQP consumer |
+| ECS service | `ECS_SERVICES` in the service's `.gitlab-ci.yml`, or `<SERVICE>` when unset. Must match the stack's `ecs_services` output. Names with `_` need `ECS_SERVICES` (target group names allow only hyphens): `audio_transmitter` deploys `streaming`, `song_request_orchestrator` deploys `orchestrator` |
 | Task definition family | `syncwave-<ecs service>`, a single container per task |
 | Health check | container listens on 8080, `GET /health` returns 200 |
 
@@ -132,16 +162,20 @@ here in the same merge request as the stack.
 
 | Priority | Service | Path |
 |---|---|---|
-| 10 | catalogue | `/api/catalogue/*` (reserved) |
-| 20 | search | `/api/search/*` (reserved) |
-| 30 | streaming | `/api/streaming/*` (reserved; listens on 8081 locally) |
-| 40 | upload | `/api/upload/*` (reserved) |
-| **50** | **lyrics** | `/api/lyrics/*` |
-| **60** | **waveform** | `/api/waveform/*` |
-| **70** | **playlist** | `/api/playlist/*` |
-| **80** | **recommendation** | `/api/recommendation/*` |
-| 90 | jam | `/api/jam/*` (reserved) |
-| 100 | sync | `/api/sync/*` (reserved) |
+| 10 | catalogue | `/api/catalogue/*` |
+| 20 | search | `/api/search/*` |
+| 30 | streaming | `/api/streaming/*` (port 8081) |
+| 40 | upload | `/api/upload/*` |
+| 50 | lyrics | `/api/lyrics/*` |
+| 60 | waveform | `/api/waveform/*` |
+| 70 | playlist | `/api/playlist/*` |
+| 80 | recommendation | `/api/recommendation/*` |
+| 90 | jam | `/api/jam/*` |
+| 99 | sync (block) | `/api/sync/internal/*` → 404 |
+| 100 | sync | `/api/sync/*` |
+| 110 | orchestrator | `/api/orchestrator/*` |
+| 900 | platform | any other `/api/*` → 404 `UNKNOWN_SERVICE` |
+| 1000 | frontend | `/*`, no rewrite; must stay the last rule |
 
 ## GitLab CI/CD variables (Settings > CI/CD > Variables; protected)
 
@@ -151,7 +185,6 @@ here in the same merge request as the stack.
 | `AWS_REGION` | `ap-southeast-1` |
 | `ECR_REGISTRY` | `terraform -chdir=platform output -raw ecr_registry` |
 | `ECS_CLUSTER` | `syncwave` |
-| `WEATHER_API_KEY` | masked; injected into the Recommendation task as a secret |
 
 GitLab authenticates with OIDC, so no AWS keys are stored in GitLab.
 `platform/gitlab.tf` creates the provider and the `syncwave-gitlab-deploy`
@@ -166,18 +199,20 @@ Rough on-demand prices in ap-southeast-1, with everything running. Check the
 
 | Item | ≈ per month |
 |---|---|
-| ALB | $18 + traffic |
-| RDS db.t4g.micro + 20 GB gp3 | $20 |
+| ALB | $20 + traffic |
+| RDS db.t4g.small + 20 GB gp3 | $40 |
 | RabbitMQ task (0.5 vCPU, 1 GB) | $22 |
-| Lyrics API + worker, Waveform API (0.25 vCPU, 0.5 GB each; worker on Spot) | $25 |
-| Waveform worker (1 vCPU, 2 GB, Spot) | $15 |
-| Playlist API + Recommendation API (0.25 vCPU, 0.5 GB each) | $20 |
-| Public IPv4 addresses (one per task + the ALB's) | $32 |
-| Secrets, logs, ECR, S3 | < $5 |
-| **Total** | **≈ $155** (about $5 a day) |
+| 9 small on-demand tasks (0.25 vCPU, 0.5 GB): catalogue, search, lyrics, waveform, playlist, recommendation, jam, sync, frontend | $101 |
+| Upload API, Streaming, orchestrator (0.25–0.5 vCPU, 1 GB) | $58 |
+| 4 small workers on Spot (catalogue, search, lyrics, upload-publisher) | $14 |
+| Waveform worker (1 vCPU, 2 GB, Spot) | $14 |
+| Public IPv4 addresses (18 tasks + the ALB's 2) | $73 |
+| Secrets (~15), logs, ECR, S3 | $10 |
+| **Total** | **≈ $350** (about $11.50 a day) |
 
-That is about **$0.21 per hour while it is up**, billed by the hour or less,
+That is about **$0.48 per hour while it is up**, billed by the hour or less,
 and nothing between sessions because everything is destroyed (RUNBOOK.md §8).
-A three-hour session costs well under a dollar. The brief's budget is
+A three-hour session costs about $1.50; bringing up only the stacks a session
+needs (RUNBOOK.md §2.3) costs less. The brief's budget is
 reimbursed only if it was requested in Week 7. A local Kubernetes cluster is
 also an accepted production environment if the budget is not available.
