@@ -24,7 +24,7 @@ Contents:
 [1 Prerequisites](#1-prerequisites) ·
 [2 Bring it up](#2-bring-it-up-every-session) ·
 [3 Smoke test](#3-smoke-test) ·
-[4 End-to-end test](#4-end-to-end-test-lyrics-and-waveform) ·
+[4 End-to-end test](#4-end-to-end-test) ·
 [5 Deploy and roll back](#5-deploy-and-roll-back) ·
 [6 Change configuration](#6-change-configuration) ·
 [7 Debug](#7-debug) ·
@@ -205,8 +205,10 @@ it, in turn, so run them in the same terminal.
 - **Bringing up only some:** set `SERVICES` to just those for this session.
 
 ```sh
-SERVICES="lyrics waveform playlist recommendation"   # add new services here (and in §8)
-DB_SERVICES="lyrics waveform playlist"               # the ones with a database (recommendation has none)
+# In apply order (see below). Add new services here (and in §8).
+SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
+# The ones with a database (audio_transmitter, recommendation and frontend have none)
+DB_SERVICES="catalogue search upload lyrics waveform playlist sync jam song_request_orchestrator"
 
 cd infrastructure/aws                  # from the repo root
 for SVC in $SERVICES; do
@@ -215,10 +217,24 @@ done
 cd -
 ```
 
-`DB_SERVICES` is the part of `SERVICES` whose stack has a `module.db`. A
-service without a database (Recommendation) is left out of it; steps a) and b)
-use it. A service that Jam, Sync or the Catalogue stack call by name
-(Playlist) must be applied before the stacks that read its outputs.
+`DB_SERVICES` is the part of `SERVICES` whose stack has a `module.db`; steps
+a) and b) use it. The names are the folders under `services/`, which are also
+the image names. Two folders run an ECS service with another name:
+`audio_transmitter` runs `streaming`, and `song_request_orchestrator` runs
+`orchestrator`.
+
+**Why this order.** Some stacks read other stacks' outputs (a gRPC address and
+the token to send), so the stack being called goes first:
+
+| Stack | Reads the outputs of | If that stack isn't up |
+|---|---|---|
+| sync | catalogue | Sync uses its built-in fake catalogue (every song READY) |
+| jam | sync, playlist | Jam uses its built-in fake for the missing one |
+
+The others only call services by their private DNS name
+(`catalogue.syncwave.internal`, `streaming.syncwave.internal`, ...), which
+works in any order once everything is up. The frontend goes last because its
+`/*` rule only makes sense once the `/api` routes exist.
 
 **a) Image repositories and databases first.** The tasks can't start without either.
 
@@ -269,7 +285,10 @@ cd -
 
 Use the `:main` image instead of `:dev` once a service has been merged to
 `main`. You should see each manifest being pushed. No rebuild happens; this
-copies the images that CI already tested.
+copies the images that CI already tested. A `not found` error means CI has
+not built that image on `dev` yet (`audio_transmitter` and
+`song_request_orchestrator` got their build jobs late); leave that service out
+of `SERVICES` for this session.
 
 **d) Everything else** (ECS services, task roles, ALB routes):
 
@@ -291,27 +310,24 @@ cd -
 their tasks, and the loop then prints that service's API URL. If it times out
 after 10 minutes, go to [7 Debug](#7-debug).
 
-**While the Catalogue stack does not exist.** Playlist and Recommendation call
-the Catalogue Service at `http://catalogue.syncwave.internal:8080`, a name only
-the Catalogue's own stack registers (there is no `services/catalogue/` yet). If
-nothing answers on that name, Recommendation returns 502 and Playlist refuses to
-add songs. Until the Catalogue is deployed, apply those two with their fallback
-modes instead of step d) as written:
+**Leaving a service out.** Services call each other by private DNS name, and
+a name exists only while that service's stack is up. If you bring up only
+some stacks, apply the callers with their fallbacks instead of step d) as
+written:
 
-```sh
-cd infrastructure/aws                  # from the repo root
-terraform -chdir=services/playlist       apply -var catalogue_mode=off    # accepts any song id
-terraform -chdir=services/recommendation apply -var catalogue_mode=stub   # ranks the built-in demo songs
-cd -
-```
+| Left out | Apply this instead | Effect |
+|---|---|---|
+| catalogue | `terraform -chdir=services/playlist apply -var catalogue_mode=off` | Playlist accepts any song id |
+| catalogue | `terraform -chdir=services/recommendation apply -var catalogue_mode=stub` | Recommendation ranks its built-in demo songs |
+| audio_transmitter | `terraform -chdir=services/sync apply -var streaming_enabled=false` | Sync uses its built-in fake Streaming Service |
+| catalogue, sync or playlist | nothing | Sync and Jam notice from the missing state and use their fakes |
 
-`off` and `stub` change only the `CATALOGUE_MODE` environment variable
-(`services/playlist/README.md`, `services/recommendation/README.md`); nothing
-else differs. The change is a new task definition revision, so it goes live
-with the next CI deploy, or immediately with [6 Change configuration](#6-change-configuration).
-Once the Catalogue is deployed, apply both again **without** the `-var` (the
-default is `http`) and roll them out the same way. Nothing else needs to
-change, because the Catalogue stack takes over the same private DNS name.
+Search, Streaming and the orchestrator have no fallback: their calls to a
+missing service fail (Search's startup rebuild only logs the error). Each
+`-var` changes only an environment variable, so it is a new task definition
+revision: it goes live with the next CI deploy, or immediately with
+[6 Change configuration](#6-change-configuration). To use the real service
+again, bring its stack up and apply the caller again **without** the `-var`.
 
 ### 2.4 CI deploys during the session (optional)
 
@@ -345,25 +361,77 @@ The values are the same every session, so the last three can stay set.
 ```sh
 cd infrastructure/aws                  # from the repo root
 ALB=$(terraform -chdir=platform output -raw base_url)
-curl -s $ALB/api/lyrics/health; echo        # {"status":"ok"}
-curl -s $ALB/api/waveform/health; echo      # {"status":"ok"}
-curl -s $ALB/api/playlist/health; echo      # {"status":"ok"}
-curl -s $ALB/api/recommendation/health; echo   # {"status":"ok"}
-curl -s $ALB/api/nope/x; echo               # {"error":{"code":"UNKNOWN_SERVICE",...}}
+for P in catalogue search upload streaming lyrics waveform playlist recommendation jam sync orchestrator; do
+  printf '%-15s %s\n' $P "$(curl -s $ALB/api/$P/health)"     # {"status":"ok"} (the orchestrator says OK)
+done
+curl -s $ALB/ | grep -o '<title>.*</title>'                # the frontend's index.html
+curl -s $ALB/api/nope/x; echo                              # {"error":{"code":"UNKNOWN_SERVICE",...}}
+curl -s $ALB/api/sync/internal/v1/sessions/x; echo         # 404: Sync's internal routes are not public
 
 aws ecs describe-services --cluster syncwave \
-  --services lyrics lyrics-worker waveform waveform-worker playlist recommendation rabbitmq \
+  --services catalogue catalogue-worker search search-worker upload upload-publisher streaming \
+             lyrics lyrics-worker waveform waveform-worker playlist recommendation \
   --query 'services[].{service:serviceName,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
   --output table                            # running = desired, rollout COMPLETED
+aws ecs describe-services --cluster syncwave --services sync jam orchestrator frontend rabbitmq \
+  --query 'services[].{service:serviceName,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
+  --output table                            # (describe-services takes at most 10 names)
 
-MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 1h | grep consuming     # consuming lyrics.song-uploaded with prefetch 10
-MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 1h | grep consuming   # consuming waveform.song-uploaded with prefetch 2
+for W in catalogue-worker search-worker lyrics-worker waveform-worker; do
+  MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/$W --since 1h | grep consuming   # consuming <queue> with prefetch N
+done
 cd -
 ```
 
+A service that isn't in this session's `SERVICES` returns the
+`UNKNOWN_SERVICE` 404 and shows up as `MISSING` in the tables.
+
 ---
 
-## 4. End-to-end test (lyrics and waveform)
+## 4. End-to-end test
+
+### 4.1 Through the Upload Service (everything up)
+
+`tests/integration/upload-flow.py` is the test CI runs on `staging`. Pointed
+at the ALB, it uploads a generated song with lyrics through
+`/api/upload/uploads`, waits until the Catalogue reports it `READY` (so
+RabbitMQ and the Lyrics, Waveform and Catalogue workers all did their part),
+checks the timed lyrics and the waveform, and streams the audio back through
+`/api/streaming`. It needs only Python's standard library.
+
+```sh
+cd infrastructure/aws                  # from the repo root
+ALB=$(terraform -chdir=platform output -raw base_url)
+python ../../tests/integration/upload-flow.py --base-url $ALB
+cd -
+```
+
+You should see a `PASS` line per step, then a JSON report with
+`"result": "PASS"`, the `song_id` and the `title` (`upload-flow-<run id>`).
+Search indexes the song once the Catalogue publishes `SongReady`:
+
+```sh
+SONG_ID=<the song_id from the report>
+curl -s "$ALB/api/search/search?q=upload-flow" | head -c 300; echo        # the song is listed
+```
+
+Then the song request orchestrator, which returns audio, lyrics and waveform
+together for a playlist. Put the song in a playlist first:
+
+```sh
+OWNER=$(python -c "import uuid; print(uuid.uuid4())")
+PLAYLIST_ID=$(curl -s -X POST $ALB/api/playlist/playlists -H 'Content-Type: application/json' \
+  -d "{\"owner_id\":\"$OWNER\",\"name\":\"e2e\"}" | python -c "import json,sys; print(json.load(sys.stdin)['playlist_id'])")
+curl -s -X POST $ALB/api/playlist/playlists/$PLAYLIST_ID/songs -H 'Content-Type: application/json' \
+  -d "{\"song_id\":\"$SONG_ID\"}" > /dev/null
+curl -s -X POST $ALB/api/orchestrator/playlists/$PLAYLIST_ID/play -H "X-Client-ID: $OWNER" | head -c 300; echo
+```
+
+The last command returns JSON for the first song with its lyrics, waveform
+points and a base64 audio chunk. Then open `$ALB/` in a browser to try the
+three scenarios in the UI (upload, play with lyrics, a Jam in two windows).
+
+### 4.2 Without the Upload Service (lyrics and waveform only)
 
 This follows the same steps as "Try it without the Upload Service" in
 `services/waveform/README.md`. The RabbitMQ management API isn't exposed in
@@ -457,9 +525,10 @@ MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 10m
 ```
 
 `SongUploaded` is also routed to `catalogue.song-uploaded`, and the results
-to `catalogue.processing-results`. Until Catalogue is deployed, those
-messages pile up there, which is harmless. To clear them, see the RabbitMQ
-commands in [7 Debug](#7-debug).
+to `catalogue.processing-results`. If the Catalogue stack is up, it records
+the song as if Upload had sent it; if not, those messages pile up there,
+which is harmless. To clear them, see the RabbitMQ commands in
+[7 Debug](#7-debug).
 
 ---
 
@@ -476,21 +545,25 @@ You need the GitLab registry login from §1 and the ECR login from step 2.3c
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-SVC=lyrics; TAG=<tag>
+SVC=lyrics; TAG=<tag>                  # SVC is the folder under services/
 ECR=$(terraform -chdir=platform output -raw ecr_registry)
 docker buildx imagetools create --tag $ECR/syncwave/$SVC:$TAG \
   registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:$TAG
 terraform -chdir=services/$SVC apply -var image_tag=$TAG            # registers revisions with that image
-for s in $SVC $SVC-worker; do
+ECS=$(terraform -chdir=services/$SVC output -json ecs_services | tr '[]",' '    ')   # e.g. lyrics lyrics-worker
+for s in $ECS; do
   aws ecs update-service --cluster syncwave --service $s --task-definition syncwave-$s \
     --query 'service.taskDefinition' --output text
 done
-aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
+aws ecs wait services-stable --cluster syncwave --services $ECS
 cd -
 ```
 
 `--task-definition syncwave-<name>` without a revision number means the
-latest revision.
+latest revision. The ECS service names come from the stack because they
+don't always match the folder: `audio_transmitter` runs `streaming`,
+`song_request_orchestrator` runs `orchestrator`, `upload` runs `upload` and
+`upload-publisher`.
 
 **Roll back** to an earlier revision:
 
@@ -519,16 +592,17 @@ that is running now, then roll out:
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-SVC=lyrics
-# The image tag the service is running now
+SVC=lyrics                             # the folder under services/
+ECS=$(terraform -chdir=services/$SVC output -json ecs_services | tr '[]",' '    ')   # e.g. lyrics lyrics-worker
+# The image tag the stack's first ECS service is running now
 TAG=$(aws ecs describe-task-definition --query 'taskDefinition.containerDefinitions[0].image' --output text \
-  --task-definition "$(aws ecs describe-services --cluster syncwave --services $SVC --query 'services[0].taskDefinition' --output text)" \
+  --task-definition "$(aws ecs describe-services --cluster syncwave --services $(echo $ECS | cut -d' ' -f1) --query 'services[0].taskDefinition' --output text)" \
   | sed 's/.*://'); echo $TAG
 terraform -chdir=services/$SVC apply -var image_tag=$TAG             # plus your -var changes
-for s in $SVC $SVC-worker; do
+for s in $ECS; do
   aws ecs update-service --cluster syncwave --service $s --task-definition syncwave-$s --query 'service.taskDefinition' --output text
 done
-aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
+aws ecs wait services-stable --cluster syncwave --services $ECS
 cd -
 ```
 
@@ -592,20 +666,28 @@ Every worker queue should show `consumers 1`. Messages in
 | Waveform worker logs `DECODE_TIMEOUT` | The song is too long for the CPU. Raise `worker_cpu` (§6). |
 | `execute-command` fails with `TargetNotConnectedException` | The task was started before ECS Exec was enabled. Restart it with `--force-new-deployment`. |
 | `aws logs tail` says the log group `C:/Program Files/Git/ecs/...` doesn't exist | You left out `MSYS_NO_PATHCONV=1` in Git Bash. |
+| Jam plays without Sync, or can't load a playlist | `terraform -chdir=services/jam output dependencies` says `fake` for it: the Sync or Playlist stack wasn't up when Jam was applied. Apply Jam again, then roll it out (§6). Same for Sync and the Catalogue: `terraform -chdir=services/sync output catalogue_mode`. |
+| Every Jam or Sync WebSocket drops at once | Expected when `jam` or `sync` restarts or deploys: each runs as exactly one task and keeps its state in memory. The browser reconnects. |
+| Playlist, Recommendation, Search or Streaming log connection errors to `catalogue.syncwave.internal` | The Catalogue stack isn't up. Bring it up, or use the fallbacks in §2.3 ("Leaving a service out"). |
+| The orchestrator returns 502 for a playlist | One of the services it calls (`playlist`, `streaming`, `lyrics`, `waveform`) isn't up, or the song isn't processed yet. Its log names the failing call. |
+| `/api/<service>/...` returns the frontend's HTML | The platform's `/api/*` 404 rule (priority 900) is missing: apply `platform/` again. |
 
 ---
 
 ## 8. Tear it down (end of every session)
 
-Destroy in this order: the services read the platform's outputs, and every
-stack keeps its state in the bootstrap bucket. The ECR repositories, the
-audio bucket and the state bucket are deleted together with their contents.
+Destroy in this order: the services in reverse apply order (a stack that
+reads another's outputs goes first), then the platform, whose outputs they
+all read, then the bootstrap bucket, which holds every stack's state. The ECR
+repositories, the audio bucket and the state bucket are deleted together with
+their contents.
 
 ```sh
-SERVICES="lyrics waveform playlist recommendation"   # the same list as §2.3
+# The same list as §2.3, in apply order; the loop runs it backwards
+SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
 
 cd infrastructure/aws                  # from the repo root
-for SVC in $SERVICES; do
+for SVC in $(echo $SERVICES | tr ' ' '\n' | tac); do
   terraform -chdir=services/$SVC destroy                 # type "yes" for each
 done
 terraform -chdir=platform destroy                        # ~10 minutes, mostly RDS
