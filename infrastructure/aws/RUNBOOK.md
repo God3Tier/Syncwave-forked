@@ -197,7 +197,8 @@ line can take a minute or two after the task starts.
 
 `SERVICES` lists the service stacks to bring up: folder names under
 `services/`, separated by spaces. Each step below runs for every service in
-it, in turn, so run them in the same terminal.
+it, mostly in parallel, so run them in the same terminal: they share
+`SERVICES` and the `each` helper.
 
 - **Adding your service:** once its stack is in `services/<name>/` (see
   "Adding another service's stack" in README.md), add `<name>` here and in
@@ -211,11 +212,27 @@ SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist rec
 DB_SERVICES="catalogue search upload lyrics waveform playlist sync jam song_request_orchestrator"
 
 cd infrastructure/aws                  # from the repo root
-for SVC in $SERVICES; do
-  terraform -chdir=services/$SVC init -backend-config=../../backend.hcl
-done
+. ./parallel.sh                        # defines each (below)
+each 'terraform -chdir=services/$SVC init -backend-config=../../backend.hcl' $SERVICES
 cd -
 ```
+
+`each '<command>' <services>` runs the command for every listed service at
+the same time, with `$SVC` set to that service. Each one's output goes to
+`logs/<service>.log`, replaced on every run. It waits for all of them, then
+prints `All N succeeded` or `Failed: <services>`. For a failure, read its log,
+fix the problem and rerun the same `each` with just that service.
+
+- **No "yes" prompts.** A background job can't answer one, so applies and
+  destroys run with `-auto-approve`. To see a stack's changes first, run
+  `terraform -chdir=services/<name> plan`.
+- **`Error acquiring the state lock` in a log** means another run of that
+  stack is still going, maybe in another terminal; let it finish. Only a run
+  that was killed (a crash, a shutdown) leaves a stale lock behind; clear it
+  with `terraform -chdir=services/<name> force-unlock <ID>`, using the ID from
+  the error.
+- **If you set `TF_PLUGIN_CACHE_DIR`,** run the `init`s one at a time instead:
+  the plugin cache isn't safe for concurrent `init`s.
 
 `DB_SERVICES` is the part of `SERVICES` whose stack has a `module.db`; steps
 a) and b) use it. The names are the folders under `services/`, which are also
@@ -234,36 +251,39 @@ the token to send), so the stack being called goes first:
 The others only call services by their private DNS name
 (`catalogue.syncwave.internal`, `streaming.syncwave.internal`, ...), which
 works in any order once everything is up. The frontend goes last because its
-`/*` rule only makes sense once the `/api` routes exist.
+`/*` rule only makes sense once the `/api` routes exist. So step d applies all
+the other stacks at once, then sync, jam and frontend one after another, and
+§8 destroys them in the reverse order. A new stack that reads another stack's
+outputs goes in this table and in the `grep` lists of step d and §8.
 
 **a) Image repositories and databases first.** The tasks can't start without either.
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-for SVC in $SERVICES; do
-  terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this
-done
-for SVC in $DB_SERVICES; do
-  terraform -chdir=services/$SVC apply -target=module.db
-done
+each 'terraform -chdir=services/$SVC apply -auto-approve -target=aws_ecr_repository.this' $SERVICES
+each 'terraform -chdir=services/$SVC apply -auto-approve -target=module.db' $DB_SERVICES
 cd -
 ```
 
-Terraform warns that `-target` is for exceptional use; this is one. Type
-`yes` once for each apply.
+Terraform warns in the logs that `-target` is for exceptional use; this is one.
 
 **b) Create each service's database and login role.**
 
 ```sh
 cd infrastructure/aws                  # from the repo root
+# Start every db-init task first, then wait for all of them together
+TASKS=""
 for SVC in $DB_SERVICES; do
   CMD=$(terraform -chdir=services/$SVC output -raw db_init_command 2>/dev/null)
   if [ -z "$CMD" ]; then
     echo "$SVC: no db_init_command output; rerun step a for it (terraform -chdir=services/$SVC apply -target=module.db)"
     continue
   fi
-  TASK=$(eval "$CMD")
-  aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
+  TASKS="$TASKS $SVC=$(eval "$CMD")"
+done
+aws ecs wait tasks-stopped --cluster syncwave --tasks $(for T in $TASKS; do echo ${T#*=}; done)
+for T in $TASKS; do
+  SVC=${T%%=*} TASK=${T#*=}
   echo "$SVC db-init exit code: $(aws ecs describe-tasks --cluster syncwave --tasks $TASK \
     --query 'tasks[0].containers[0].exitCode' --output text)"
   # Named after the database, which isn't always the folder (song_request_orchestrator -> orchestrator)
@@ -273,7 +293,8 @@ cd -
 ```
 
 For each service you should see exit code `0` and `database <service> is
-ready` in the log. It is safe to run again.
+ready` in the log. The tasks run at the same time; each touches only its own
+role and database. It is safe to run again.
 
 A service that prints `no db_init_command output` has its database resources
 but no saved outputs: its `-target=module.db` apply in step a stopped before
@@ -287,16 +308,14 @@ they start empty. This needs the GitLab registry login from §1.
 cd infrastructure/aws                  # from the repo root
 ECR=$(terraform -chdir=platform output -raw ecr_registry)
 aws ecr get-login-password | docker login --username AWS --password-stdin $ECR   # valid 12 hours
-for SVC in $SERVICES; do
-  docker buildx imagetools create --tag $ECR/syncwave/$SVC:main \
-    registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:dev
-done
+each 'docker buildx imagetools create --tag $ECR/syncwave/$SVC:main registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:dev' $SERVICES
 cd -
 ```
 
 Use the `:main` image instead of `:dev` once a service has been merged to
-`main`. You should see each manifest being pushed. No rebuild happens; this
-copies the images that CI already tested. A `not found` error means CI has
+`main`. Each service's log shows its manifest being pushed. No rebuild
+happens; this copies the images that CI already tested. A `not found` error
+in a log means CI has
 not built that image on `dev` yet (`audio_transmitter` and
 `song_request_orchestrator` got their build jobs late); leave that service out
 of `SERVICES` for this session.
@@ -305,9 +324,11 @@ of `SERVICES` for this session.
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-for SVC in $SERVICES; do
-  terraform -chdir=services/$SVC apply                   # type "yes" for each
-done
+# The stacks that read no other stack's outputs at once, then the rest in order
+FIRST=$(echo $SERVICES | tr ' ' '\n' | grep -vxE 'sync|jam|frontend')
+LATER=$(echo $SERVICES | tr ' ' '\n' | grep -xE 'sync|jam|frontend')
+each 'terraform -chdir=services/$SVC apply -auto-approve' $FIRST &&
+  for SVC in $LATER; do each 'terraform -chdir=services/$SVC apply -auto-approve' $SVC || break; done
 for SVC in $SERVICES; do
   # ecs_services lists the stack's ECS services, e.g. ["lyrics","lyrics-worker"]
   aws ecs wait services-stable --cluster syncwave \
@@ -317,6 +338,9 @@ done
 cd -
 ```
 
+The applies stop at the first `each` that reports a failure, so a stack is
+never applied before one it reads. Fix that stack and run the block again;
+stacks already applied have nothing left to change.
 `wait services-stable` returns silently once a stack's ECS services all run
 their tasks, and the loop then prints that service's API URL. If it times out
 after 10 minutes, go to [7 Debug](#7-debug).
@@ -626,42 +650,65 @@ Every worker queue should show `consumers 1`. Messages in
 
 ## 8. Tear it down (end of every session)
 
-Destroy in this order: the services in reverse apply order (a stack that
-reads another's outputs goes first), then the platform, whose outputs they
-all read, then the bootstrap bucket, which holds every stack's state. The ECR
-repositories, the audio bucket and the state bucket are deleted together with
-their contents.
+Destroy in this order: the services (a stack that reads another's outputs
+goes before it; see "Why this order" in §2.3), then the platform, whose
+outputs they all read, then the bootstrap bucket, which holds every stack's
+state. The ECR repositories, the audio bucket and the state bucket are
+deleted together with their contents.
+
+The services go in three rounds, each destroying its stacks at once with
+`each` (§2.3): first every stack no other stack reads, then sync and playlist
+(read by jam), then catalogue (read by sync).
 
 ```sh
-# The same list as §2.3, in apply order; the loop runs it backwards
+# The same list as §2.3
 SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
 
 cd infrastructure/aws                  # from the repo root
-for SVC in $(echo $SERVICES | tr ' ' '\n' | tac); do
-  terraform -chdir=services/$SVC destroy                 # type "yes" for each
-done
-terraform -chdir=platform destroy                        # ~15 minutes, mostly RDS and CloudFront
-terraform -chdir=bootstrap destroy                       # last
+. ./parallel.sh                        # defines each (§2.3)
+each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -vxE 'sync|playlist|catalogue') &&
+  each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -xE 'sync|playlist') &&
+  each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -x catalogue)
+terraform -chdir=platform destroy                        # type "yes"; ~15 minutes, mostly RDS and CloudFront
+terraform -chdir=bootstrap destroy                       # last; type "yes"
 cd -
 ```
 
-Each one should end with `Destroy complete!`. If a destroy fails, fix the
-error and run it again before moving on. **Never destroy bootstrap while
+Each round should end with `All N succeeded`, and the `&&` stops at the first
+one that doesn't. Read the failed stack's log in `logs/`, fix the error and
+run the rounds again (stacks already gone have nothing to destroy) before
+moving on to the platform. **Never destroy bootstrap while
 another stack still has resources**: their state is deleted with the bucket,
 Terraform loses track of them, and they keep being billed until deleted by
 hand.
 
-Check that nothing is left:
+Check that nothing billable is left, by asking each service directly:
+
+```sh
+aws ecs describe-clusters --clusters syncwave --query 'clusters[].[status,runningTasksCount]' --output text
+aws cloudfront list-distributions --query 'DistributionList.Items[].[Id,Comment]' --output text
+aws rds describe-db-instances --query 'DBInstances[].DBInstanceIdentifier' --output text
+aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName' --output text
+```
+
+The first line should print `INACTIVE 0` or nothing; the other three should
+print nothing that belongs to SyncWave. CloudFront is global, so it never
+shows up in the regional sweep below.
+
+Then sweep for anything else tagged with the project:
 
 ```sh
 aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=syncwave \
   --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v ':task-definition/'
 ```
 
-You should see no output. Task definition revisions are hidden by the
-`grep`: they stay behind on purpose (`skip_destroy`) and cost nothing. A
-resource deleted in the last few minutes can still be listed; run it again
-later before deleting anything by hand.
+Task definition revisions are hidden by the `grep`: they stay behind on
+purpose (`skip_destroy`) and cost nothing. This listing is slow to forget:
+ECS services, tasks and security group rules can stay in it for hours after
+they are deleted. Before deleting anything you see by hand, check that it
+still exists, e.g. `aws ecs list-services --cluster syncwave` or
+`aws ec2 describe-security-group-rules --security-group-rule-ids <sgr-id>`
+(a `NotFound` error means it is gone).
 
 If you set `AWS_ROLE_ARN` in GitLab (§2.4), delete it now, so that `main`
 pipelines stop trying to deploy.
