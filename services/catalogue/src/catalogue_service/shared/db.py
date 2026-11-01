@@ -53,6 +53,7 @@ class SongRecord(Base):
     artist: Mapped[str] = mapped_column(String(256))
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_reference: Mapped[str] = mapped_column(String(1024))
+    mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lyrics_reference: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     lyrics_status: Mapped[str] = mapped_column(String(16))
     waveform_status: Mapped[str] = mapped_column(String(16))
@@ -104,6 +105,7 @@ class CatalogueRepository:
         lyrics_reference: str | None,
         duration_ms: int | None,
         event_id: str,
+        mood: str | None = None,
     ) -> tuple[SongRecord, bool]:
         """Inserts a new song. Returns (record, created). If a song with this
         song_id already exists (duplicate upload event), returns it unchanged
@@ -121,6 +123,7 @@ class CatalogueRepository:
                 artist=artist,
                 duration_ms=duration_ms,
                 audio_reference=audio_reference,
+                mood=mood,
                 lyrics_reference=lyrics_reference,
                 lyrics_status=lyrics_status,
                 waveform_status=waveform_status,

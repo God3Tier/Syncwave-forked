@@ -53,6 +53,7 @@ def test_get_song(client: TestClient, api_db: Engine) -> None:
         "song_id": str(song_id),
         "title": "Demo",
         "artist": "Artist",
+        "mood": None,
         "duration_ms": 213000,
         "audio_reference": f"audio/{song_id}.mp3",
         "lyrics_status": "READY",

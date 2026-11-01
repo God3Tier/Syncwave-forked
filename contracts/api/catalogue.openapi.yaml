@@ -117,6 +117,9 @@ components:
           type: string
         artist:
           type: string
+        mood:
+          type: [string, "null"]
+          description: Optional mood label for the song.
         duration_ms:
           type: [integer, "null"]
           minimum: 0
