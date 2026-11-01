@@ -7,6 +7,22 @@ export interface UploadInput {
   audio: File;
   lyrics?: File | null;
   durationMs?: number | null;
+  mood?: Mood | null;
+}
+
+/** The moods Recommendation matches to the weather (services/recommendation/README.md). */
+export const MOODS = ['calm', 'mellow', 'upbeat', 'energetic'] as const;
+export type Mood = (typeof MOODS)[number];
+
+export function uploadForm(input: UploadInput): FormData {
+  const form = new FormData();
+  form.set('title', input.title);
+  form.set('artist', input.artist);
+  form.set('audio', input.audio);
+  if (input.lyrics) form.set('lyrics', input.lyrics);
+  if (input.durationMs) form.set('duration_ms', String(input.durationMs));
+  if (input.mood) form.set('mood', input.mood);
+  return form;
 }
 
 /**
@@ -14,12 +30,7 @@ export interface UploadInput {
  * fetch because fetch cannot report upload progress.
  */
 export function uploadSong(input: UploadInput, onProgress: (fraction: number) => void): Promise<UploadReceipt> {
-  const form = new FormData();
-  form.set('title', input.title);
-  form.set('artist', input.artist);
-  form.set('audio', input.audio);
-  if (input.lyrics) form.set('lyrics', input.lyrics);
-  if (input.durationMs) form.set('duration_ms', String(input.durationMs));
+  const form = uploadForm(input);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

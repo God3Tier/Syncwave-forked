@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { Link } from 'react-router';
 import { getSong } from '../api/catalogue';
 import { ApiError } from '../api/http';
-import { getUpload, uploadSong } from '../api/upload';
+import { getUpload, MOODS, type Mood, uploadSong } from '../api/upload';
 import type { Song, StageStatus, UploadReceipt } from '../api/types';
 import { Page } from '../components/Layout';
 import { Button, Card, Icon, Notice, StatusChip } from '../components/ui';
@@ -73,6 +73,7 @@ export function Upload() {
   const [audio, setAudio] = useState<File | null>(null);
   const [lyrics, setLyrics] = useState<File | null>(null);
   const [duration, setDuration] = useState('');
+  const [mood, setMood] = useState<Mood | ''>('');
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<unknown>();
   const [receipt, setReceipt] = useState<UploadReceipt | null>(null);
@@ -86,7 +87,7 @@ export function Upload() {
     setProgress(0);
     try {
       const result = await uploadSong(
-        { title: title.trim(), artist: artist.trim(), audio, lyrics, durationMs: duration ? Number(duration) : null },
+        { title: title.trim(), artist: artist.trim(), audio, lyrics, durationMs: duration ? Number(duration) : null, mood: mood || null },
         setProgress,
       );
       setReceipt(result);
@@ -97,6 +98,7 @@ export function Upload() {
       setAudio(null);
       setLyrics(null);
       setDuration('');
+      setMood('');
     } catch (cause) {
       setError(cause);
     } finally {
@@ -125,10 +127,24 @@ export function Upload() {
             </div>
             <FileDrop label="Drop an audio file or browse" hint="MP3, WAV, FLAC or OGG · up to 200 MB" accept="audio/*,.mp3,.wav,.flac,.ogg" file={audio} onFile={setAudio} required />
             <FileDrop label="Lyrics (optional)" hint=".lrc timestamped lyrics" accept=".lrc,text/plain" file={lyrics} onFile={setLyrics} />
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-on-surface-variant">Duration in ms (optional)</span>
-              <input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass} placeholder="Measured automatically if blank" />
-            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-on-surface-variant">Mood (optional)</span>
+                <select value={mood} onChange={(e) => setMood(e.target.value as Mood | '')} className={inputClass}>
+                  <option value="">No mood</option>
+                  {MOODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m[0].toUpperCase() + m.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-on-surface-variant">Duration in ms (optional)</span>
+                <input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass} placeholder="Measured automatically if blank" />
+              </label>
+            </div>
+            <p className="-mt-2 text-xs text-on-surface-variant">Recommendations put songs whose mood suits the listener's weather first.</p>
             <Button type="submit" variant="primary" icon="upload" disabled={!audio || progress !== null} className="w-full py-3">
               {progress !== null ? `Uploading… ${Math.round(progress * 100)}%` : 'Upload & process'}
             </Button>
@@ -139,7 +155,7 @@ export function Upload() {
             )}
             {error !== undefined && (
               <Notice tone="error">
-                {uploadUnavailable ? 'The Upload service is not deployed in this stack yet, so songs cannot be uploaded from the browser.' : errorMessage(error)}
+                {uploadUnavailable ? 'The Upload service is not reachable right now, so songs cannot be uploaded. Try again shortly.' : errorMessage(error)}
               </Notice>
             )}
             {receipt && <Notice>Uploaded “{receipt.title}”. Processing has started.</Notice>}

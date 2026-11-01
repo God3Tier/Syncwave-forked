@@ -101,9 +101,11 @@ after confirming it belongs to the test environment.
 
 ## Playlist, Recommendation and Jam
 
-All need at least 4 `READY` songs in the Catalogue (the demo songs are enough).
-None of them is run by CI: a fresh CI stack has no `READY` songs, so adding them
-to the `integration` job would fail the `staging` pipeline for everyone.
+All need at least 4 `READY` songs in the Catalogue. A fresh stack has only the
+seeded demo song, so first add three more, e.g. by running `upload-flow.py`
+three times (each run leaves one `READY` song behind). None of them is run by
+CI: they would need the same setup there, so adding them to the `integration`
+job as they are would fail the `staging` pipeline for everyone.
 
 | Script | What it checks | Disruptive? |
 |--------|----------------|-------------|

@@ -8,7 +8,11 @@ function stamp(ms: number): string {
   return `${String(minutes).padStart(2, '0')}:${(total - minutes * 60).toFixed(2).padStart(5, '0')}`;
 }
 
-/** Synced lyrics: past lines dimmed, the current one large with a violet accent. */
+/**
+ * Synced lyrics: past lines dimmed, the current one highlighted with a violet
+ * accent. Every line keeps the same font and size, so the list never reflows
+ * as the current line moves.
+ */
 export function LyricsView({ lines, positionMs, onSeek }: { lines: LyricLine[]; positionMs: number; onSeek?: (ms: number) => void }) {
   const active = activeLineIndex(lines, positionMs);
   const listRef = useRef<HTMLOListElement>(null);
@@ -28,9 +32,9 @@ export function LyricsView({ lines, positionMs, onSeek }: { lines: LyricLine[]; 
               type="button"
               onClick={() => onSeek?.(line.time_ms)}
               aria-current={state === 'current' ? 'true' : undefined}
-              className={`flex w-full items-baseline gap-4 rounded-lg border-l-2 px-3 py-1.5 text-left transition-all ${
+              className={`flex w-full items-baseline gap-4 rounded-lg border-l-2 px-3 py-1.5 text-left transition-colors ${
                 state === 'current'
-                  ? 'border-primary bg-primary/5 font-headline text-xl font-semibold text-on-surface md:text-2xl'
+                  ? 'border-primary bg-primary/10 text-on-surface'
                   : state === 'past'
                     ? 'border-transparent text-on-surface-variant/50 hover:text-on-surface-variant'
                     : 'border-transparent text-on-surface-variant hover:text-on-surface'
