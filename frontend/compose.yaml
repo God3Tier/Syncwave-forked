@@ -1,0 +1,12 @@
+# SyncWave web UI, included from the root docker-compose.yml. The gateway
+# routes / to frontend:8080 (infrastructure/gateway/nginx.conf), so the UI is
+# at http://localhost:8080. It has no dependencies of its own: pages degrade
+# gracefully while a service is still starting.
+
+services:
+  frontend:
+    build:
+      context: .
+    # Locally the image is built as syncwave/frontend:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/frontend:${IMAGE_TAG:-local}
