@@ -95,7 +95,10 @@ Services reach each other inside the VPC by name, as they do in Compose:
 ## Architecture
 
 ```
-internet ──> ALB :80   /api/<service>/*  -> that service, prefix rewritten away
+internet ──> CloudFront https://<id>.cloudfront.net (no caching; WebSockets pass through)
+               │ HTTP
+               ▼
+             ALB :80   /api/<service>/*  -> that service, prefix rewritten away
                │       /api/* (anything else) -> 404 UNKNOWN_SERVICE
                │       /*                -> frontend
                ▼   public subnets, tasks with public IPs, no NAT gateway
@@ -115,6 +118,7 @@ internet ──> ALB :80   /api/<service>/*  -> that service, prefix rewritten a
 | Decision | Choice | Why |
 |---|---|---|
 | Routing | ALB listener rule per service, `url-rewrite` transform strips `/api/<service>` | Same contract as `infrastructure/gateway/nginx.conf`; the FastAPI routes have no prefix. Unknown paths return the same `UNKNOWN_SERVICE` 404. Idle timeout 1h (WebSockets). |
+| HTTPS | **CloudFront** in front of the ALB, default `*.cloudfront.net` certificate, caching off | No domain or certificate to buy or validate. Browsers allow location and the clipboard only on HTTPS pages. All headers, cookies and query strings are forwarded, so the APIs and WebSockets behave as on the ALB. With a domain, `-var certificate_arn=… -var cloudfront_enabled=false` puts HTTPS on the ALB instead. |
 | Network | Public subnets for tasks, **no NAT gateway** | A NAT gateway costs more than everything else here. Tasks only accept traffic from the ALB; RDS has no internet route at all. |
 | RabbitMQ | **One container on ECS** (Cloud Map DNS) | Cheapest. Plain AMQP inside the VPC needs no client changes (Amazon MQ requires TLS). There is no volume, so a restart loses queued messages; the topology is reloaded from `infrastructure/rabbitmq/definitions.json` by an init container. |
 | Postgres | **One `db.t4g.small` RDS instance**, one database and login role per service | Keeps the database-per-service rule of `infrastructure/postgres/init.sql` at the price of one small instance. A micro's connection limit is too low for nine services' pools (`-var db_instance_class=db.t4g.micro` is fine for a few). The master password is managed by RDS in Secrets Manager. |
@@ -200,6 +204,7 @@ Rough on-demand prices in ap-southeast-1, with everything running. Check the
 | Item | ≈ per month |
 |---|---|
 | ALB | $20 + traffic |
+| CloudFront | $0 at this traffic (always free: 1 TB out and 10 million requests a month) |
 | RDS db.t4g.small + 20 GB gp3 | $40 |
 | RabbitMQ task (0.5 vCPU, 1 GB) | $22 |
 | 9 small on-demand tasks (0.25 vCPU, 0.5 GB): catalogue, search, lyrics, waveform, playlist, recommendation, jam, sync, frontend | $101 |

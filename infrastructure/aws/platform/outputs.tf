@@ -57,7 +57,13 @@ output "alb_listener_arn" {
 }
 
 output "base_url" {
-  value = "${local.https ? "https" : "http"}://${aws_lb.this.dns_name}"
+  description = "Where the site and APIs are: CloudFront's https:// address when it is on, otherwise the ALB."
+  value       = var.cloudfront_enabled ? "https://${aws_cloudfront_distribution.this[0].domain_name}" : local.alb_url
+}
+
+output "alb_url" {
+  description = "The ALB itself, bypassing CloudFront."
+  value       = local.alb_url
 }
 
 output "audio_bucket_name" {
