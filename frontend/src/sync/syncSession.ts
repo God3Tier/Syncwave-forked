@@ -7,6 +7,7 @@
 // services/sync/src/sync_service/demo.py, with the real stream instead of a
 // test tone.
 
+import { uuid } from '../uuid';
 import { config } from '../config';
 import { estimate, pushSample, toSample, delayUntil, type ClockSample } from './clock';
 import {
@@ -164,7 +165,7 @@ export class SyncSession {
   }
 
   private ping(): void {
-    this.send('TIME_PING', { sample_id: crypto.randomUUID(), client_sent_ms: Date.now() });
+    this.send('TIME_PING', { sample_id: uuid(), client_sent_ms: Date.now() });
   }
 
   private later(fn: () => void, delayMs: number): void {

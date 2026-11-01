@@ -1,3 +1,4 @@
+import { uuid } from '../uuid';
 import { config } from '../config';
 import { request } from './http';
 import type { Jam, Readiness } from './types';
@@ -78,7 +79,7 @@ export function playback(
 ): Promise<Jam> {
   return call(jamId, `${id(jamId)}/playback/${action}`, {
     method: 'POST',
-    json: { actor_id: actorId, request_id: crypto.randomUUID(), ...extra },
+    json: { actor_id: actorId, request_id: uuid(), ...extra },
   });
 }
 
@@ -89,7 +90,7 @@ export function getReadiness(jamId: string, actorId: string, signal?: AbortSigna
 export function decideReadiness(jamId: string, actorId: string, decision: 'CONTINUE' | 'WAIT' | 'CANCEL'): Promise<Jam> {
   return call(jamId, `${id(jamId)}/playback/readiness-decision`, {
     method: 'POST',
-    json: { actor_id: actorId, request_id: crypto.randomUUID(), decision },
+    json: { actor_id: actorId, request_id: uuid(), decision },
   });
 }
 
