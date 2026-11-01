@@ -175,6 +175,16 @@ audio_transmitter:
     - exists: [services/audio_transmitter/.gitlab-ci.yml]
       changes: [services/audio_transmitter/**/*, ci/**/*]
 
+song_request_orchestrator:
+  extends: .service-trigger
+  variables:
+    CONTRACT_PATHS: ""
+  trigger:
+    include: services/song_request_orchestrator/.gitlab-ci.yml
+  rules:
+    - exists: [services/song_request_orchestrator/.gitlab-ci.yml]
+      changes: [services/song_request_orchestrator/**/*, ci/**/*]
+
 jam:
   extends: .service-trigger
   variables:

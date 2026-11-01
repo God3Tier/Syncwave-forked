@@ -1,8 +1,8 @@
 # Child pipeline for the web UI (see ci/service.yml). The root .gitlab-ci.yml
 # starts it when this folder, contracts/websocket or ci/ changes.
 #
-# No deploy job yet: production needs an ECS service for the frontend and an
-# ALB default rule for / (infrastructure/aws/), which do not exist yet.
+# In production the ALB serves it from its catch-all /* rule
+# (infrastructure/aws/services/frontend).
 
 include:
   - local: ci/service.yml
@@ -39,3 +39,6 @@ test:
 
 build:
   extends: .build-image
+
+deploy:
+  extends: .deploy-ecs
