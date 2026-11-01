@@ -1,0 +1,278 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Upload Service
+  description: Accept audio and optional LRC lyrics, store media in S3, and queue
+    SongUploaded for asynchronous delivery. Poll upload receipts for delivery status;
+    Catalogue owns song processing readiness.
+  version: 0.1.0
+servers:
+- url: /api/upload
+  description: Through the gateway
+paths:
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Health Health Get
+      tags:
+      - operations
+  /ready:
+    get:
+      summary: Ready
+      operationId: ready_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Ready Ready Get
+        '503':
+          description: Database schema or S3 bucket unavailable (NOT_READY)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      tags:
+      - operations
+  /uploads:
+    post:
+      summary: Create Upload
+      description: Store media and queue its event. A 202 response does not mean processing
+        is complete.
+      operationId: create_upload_uploads_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_create_upload_uploads_post'
+        required: true
+      responses:
+        '202':
+          description: Media stored and event queued; processing continues asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+          headers:
+            Location:
+              description: Gateway path for polling this upload receipt
+              schema:
+                type: string
+        '400':
+          description: Invalid metadata, empty file or invalid lyrics encoding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '413':
+          description: File exceeds the configured size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '415':
+          description: Unsupported file type or invalid audio header
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: S3 or database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      tags:
+      - upload
+  /uploads/{song_id}:
+    get:
+      summary: Get Upload
+      description: Read upload/event delivery state; Catalogue owns lyrics/waveform
+        readiness.
+      operationId: get_upload_uploads__song_id__get
+      parameters:
+      - name: song_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Song Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        '400':
+          description: Invalid song UUID (INVALID_REQUEST)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: Upload receipt not found (UPLOAD_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: Database unavailable (DATABASE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+      tags:
+      - upload
+components:
+  schemas:
+    Body_create_upload_uploads_post:
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Title
+        artist:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Artist
+        audio:
+          type: string
+          contentMediaType: application/octet-stream
+          title: Audio
+        lyrics:
+          anyOf:
+          - type: string
+            contentMediaType: application/octet-stream
+          - type: 'null'
+          title: Lyrics
+        duration_ms:
+          anyOf:
+          - type: integer
+            maximum: 2147483647.0
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Duration Ms
+      type: object
+      required:
+      - title
+      - artist
+      - audio
+      title: Body_create_upload_uploads_post
+    Receipt:
+      properties:
+        song_id:
+          type: string
+          format: uuid
+          title: Song Id
+        event_id:
+          type: string
+          format: uuid
+          title: Event Id
+        status:
+          $ref: '#/components/schemas/Status'
+        title:
+          type: string
+          title: Title
+        artist:
+          type: string
+          title: Artist
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        audio_reference:
+          type: string
+          title: Audio Reference
+        lyrics_reference:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lyrics Reference
+        publish_attempts:
+          type: integer
+          title: Publish Attempts
+        last_error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Error Code
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        published_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Published At
+      type: object
+      required:
+      - song_id
+      - event_id
+      - status
+      - title
+      - artist
+      - duration_ms
+      - audio_reference
+      - lyrics_reference
+      - publish_attempts
+      - last_error_code
+      - created_at
+      - updated_at
+      - published_at
+      title: Receipt
+    Status:
+      type: string
+      enum:
+      - UPLOADING
+      - PENDING
+      - PUBLISHED
+      - FAILED
+      title: Status
+      description: 'UPLOADING: ingestion in progress; PENDING: media stored and event
+        queued; PUBLISHED: broker confirmed event delivery; FAILED: media storage
+        failed. PUBLISHED does not mean song processing is complete.'
+    ErrorBody:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+security: []
+tags:
+- name: upload
+  description: Media uploads and delivery receipts
+- name: operations
+  description: Health and readiness checks
