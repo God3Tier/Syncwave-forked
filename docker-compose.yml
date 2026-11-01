@@ -23,6 +23,7 @@ include:
   - services/recommendation/compose.yaml
   - services/lyrics/compose.yaml
   - services/playlist/compose.yaml
+  - frontend/compose.yaml
 
 services:
   # Single browser-facing entry point: http://localhost:8080
@@ -37,6 +38,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     volumes:
@@ -137,6 +140,23 @@ services:
       --aws-sigv4 aws:amz:us-east-1:s3
       --user syncwave:syncwave-secret
       http://s3:9000/syncwave-audio
+    restart: "no"
+
+  # Loads a public-domain demo song so the UI has something to play
+  # (infrastructure/seed/README.md). It publishes SongUploaded like the Upload
+  # Service would; the consumers process it whenever they are up. Re-running
+  # it is harmless, and it never fails the stack.
+  seed:
+    image: curlimages/curl:8.22.0
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./infrastructure/seed:/seed:ro
+      - ./tests/integration/publish-song-uploaded.sh:/scripts/publish-song-uploaded.sh:ro
+    entrypoint: ["sh", "/seed/seed.sh"]
     restart: "no"
 
 volumes:
