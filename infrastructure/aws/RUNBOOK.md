@@ -401,8 +401,6 @@ A service that isn't in this session's `SERVICES` returns the
 
 ## 4. End-to-end test
 
-### 4.1 Through the Upload Service (everything up)
-
 `tests/integration/upload-flow.py` is the test CI runs on `staging`. Pointed
 at the ALB, it uploads a generated song with lyrics through
 `/api/upload/uploads`, waits until the Catalogue reports it `READY` (so
@@ -419,6 +417,9 @@ cd -
 
 You should see a `PASS` line per step, then a JSON report with
 `"result": "PASS"`, the `song_id` and the `title` (`upload-flow-<run id>`).
+If it stops with `FAIL`, the message names the step that timed out; the logs
+of the worker behind it say why (`MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker`,
+`waveform-worker`, `catalogue-worker` or `upload-publisher`; see [7 Debug](#7-debug)).
 Search indexes the song once the Catalogue publishes `SongReady`:
 
 ```sh
@@ -441,105 +442,6 @@ curl -s -X POST $ALB/api/orchestrator/playlists/$PLAYLIST_ID/play -H "X-Client-I
 The last command returns JSON for the first song with its lyrics, waveform
 points and a base64 audio chunk. Then open `$ALB/` in a browser to try the
 three scenarios in the UI (upload, play with lyrics, a Jam in two windows).
-
-### 4.2 Without the Upload Service (lyrics and waveform only)
-
-This follows the same steps as "Try it without the Upload Service" in
-`services/waveform/README.md`. The RabbitMQ management API isn't exposed in
-AWS, so the event is published from inside a worker container.
-
-**On your machine:** upload a song and its lyrics as the Upload Service
-would. No sample files are needed: Python generates a 3-second tone that
-fades out (the same one as the waveform README), and `printf` writes three
-lines of lyrics. Both are piped straight to S3 (`aws s3 cp -` reads stdin),
-so nothing is written to disk.
-
-```sh
-cd infrastructure/aws                  # from the repo root
-ALB=$(terraform -chdir=platform output -raw base_url)
-BUCKET=$(terraform -chdir=platform output -raw audio_bucket_name)
-SONG_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $SONG_ID
-
-python -c "
-import io, math, struct, sys, wave
-buf = io.BytesIO()
-with wave.open(buf, 'wb') as f:
-    f.setnchannels(1); f.setsampwidth(2); f.setframerate(44100)
-    f.writeframes(b''.join(struct.pack('<h', int(30000 * (1 - i / 132300) * math.sin(i / 20))) for i in range(132300)))
-sys.stdout.buffer.write(buf.getvalue())
-" | aws s3 cp - s3://$BUCKET/audio/$SONG_ID.wav
-
-printf '[ti:Demo]\n[00:00.50]Hello\n[00:01.50]from\n[00:02.50]SyncWave\n' \
-  | aws s3 cp - s3://$BUCKET/lyrics/$SONG_ID.lrc
-
-aws s3 ls s3://$BUCKET/ --recursive | grep $SONG_ID      # both objects, about 258 KB and 60 bytes
-cd -
-
-WORKER=$(aws ecs list-tasks --cluster syncwave --service-name lyrics-worker --query 'taskArns[0]' --output text)
-aws ecs execute-command --cluster syncwave --task $WORKER --container lyrics-worker --interactive --command sh
-```
-
-**In the container shell that opens:** paste the following, with your song
-ID on the first line.
-
-```sh
-SONG_ID=<paste the id printed above>
-python - "$SONG_ID" <<'PY'
-import asyncio, json, os, sys, uuid
-from datetime import datetime, timezone
-import aio_pika
-
-async def main(song_id):
-    event_id = str(uuid.uuid4())
-    event = {
-        "event_id": event_id, "event_type": "SongUploaded", "version": 1, "song_id": song_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "producer": "upload", "correlation_id": event_id,
-        "payload": {"audio_reference": f"audio/{song_id}.wav", "lyrics_reference": f"lyrics/{song_id}.lrc",
-                    "title": "Demo", "artist": "SyncWave Artist"},
-    }
-    connection = await aio_pika.connect(host=os.environ["AMQP_HOST"], port=int(os.environ["AMQP_PORT"]),
-                                        login=os.environ["AMQP_USER"], password=os.environ["AMQP_PASSWORD"])
-    async with connection:
-        channel = await connection.channel(publisher_confirms=True)
-        exchange = await channel.get_exchange("syncwave.events")
-        message = aio_pika.Message(json.dumps(event).encode(), content_type="application/json",
-                                   delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                                   message_id=event_id, type="SongUploaded")
-        await exchange.publish(message, routing_key="song.uploaded")
-    print("published SongUploaded", event_id, "for song", song_id)
-
-asyncio.run(main(sys.argv[1]))
-PY
-exit
-```
-
-You should see `published SongUploaded <event id> for song <song id>`.
-
-**Back on your machine**, in the same terminal, after a few seconds (waveform
-takes longer than lyrics):
-
-```sh
-curl -s $ALB/api/lyrics/songs/$SONG_ID/lyrics | head -c 400; echo
-curl -s "$ALB/api/waveform/songs/$SONG_ID/waveform?points=10"; echo
-curl -s $ALB/api/waveform/songs/$SONG_ID/waveform/bands | head -c 200; echo
-```
-
-Lyrics come back with `"status": "READY"` and three timed `lines` (Hello,
-from, SyncWave); the waveform comes back as 10 peaks that get smaller as the
-tone fades. If you get another status or a 404 at first,
-processing is still running. To watch it happen:
-
-```sh
-MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 10m
-MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 10m
-```
-
-`SongUploaded` is also routed to `catalogue.song-uploaded`, and the results
-to `catalogue.processing-results`. If the Catalogue stack is up, it records
-the song as if Upload had sent it; if not, those messages pile up there,
-which is harmless. To clear them, see the RabbitMQ commands in
-[7 Debug](#7-debug).
 
 ---
 
