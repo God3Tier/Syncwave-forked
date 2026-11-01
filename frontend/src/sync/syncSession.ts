@@ -7,6 +7,7 @@
 // services/sync/src/sync_service/demo.py, with the real stream instead of a
 // test tone.
 
+import { gatewayPath } from '../api/http';
 import { uuid } from '../uuid';
 import { config } from '../config';
 import { estimate, pushSample, toSample, delayUntil, type ClockSample } from './clock';
@@ -269,7 +270,14 @@ export class SyncSession {
     this.update({ phase: 'PREPARING', generation: payload.generation, songId: payload.song_id, bufferedMs: 0, startErrorMs: null, error: null });
     let buffer = this.buffers.get(payload.song_id);
     if (!buffer) {
-      const response = await fetch(payload.stream_url);
+      let streamPath: string;
+      try {
+        streamPath = gatewayPath(payload.stream_url);
+      } catch {
+        this.update({ error: { code: 'STREAM_UNAVAILABLE', message: 'The stream URL is not a SyncWave API path' } });
+        return;
+      }
+      const response = await fetch(streamPath);
       if (!response.ok) {
         this.update({ error: { code: 'STREAM_UNAVAILABLE', message: `Audio request failed (${response.status})` } });
         return;

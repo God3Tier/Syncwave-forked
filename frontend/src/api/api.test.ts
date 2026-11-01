@@ -103,3 +103,14 @@ describe('searchSongs', () => {
     expect(matchesQuery({ title: 'Late Night Drive', artist: 'Velvet Synth' }, 'night rain')).toBe(false);
   });
 });
+
+describe('gatewayPath', () => {
+  it('allows only /api/ paths on this origin', async () => {
+    const { gatewayPath } = await import('./http');
+    expect(gatewayPath('/api/streaming/tracks/x/audio')).toBe('/api/streaming/tracks/x/audio');
+    expect(gatewayPath(`${window.location.origin}/api/catalogue/songs?limit=5`)).toBe('/api/catalogue/songs?limit=5');
+    expect(() => gatewayPath('http://169.254.169.254/latest/meta-data')).toThrow(ApiError);
+    expect(() => gatewayPath('//evil.example/api/x')).toThrow(ApiError);
+    expect(() => gatewayPath('/admin')).toThrow(ApiError);
+  });
+});

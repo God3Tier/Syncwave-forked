@@ -53,3 +53,25 @@ describe('uuid', () => {
     }
   });
 });
+
+describe('highlightSegments', () => {
+  it('marks every term case-insensitively without regular expressions', async () => {
+    const { highlightSegments } = await import('./highlight');
+    expect(highlightSegments('Late Night Drive', 'night')).toEqual([
+      { text: 'Late ', match: false },
+      { text: 'Night', match: true },
+      { text: ' Drive', match: false },
+    ]);
+    expect(highlightSegments('Daisy Bell', 'bell dai')).toEqual([
+      { text: 'Dai', match: true },
+      { text: 'sy ', match: false },
+      { text: 'Bell', match: true },
+    ]);
+    // Regex metacharacters are just text.
+    expect(highlightSegments('a+b (live)', '(live) .*')).toEqual([
+      { text: 'a+b ', match: false },
+      { text: '(live)', match: true },
+    ]);
+    expect(highlightSegments('Glow', '')).toEqual([{ text: 'Glow', match: false }]);
+  });
+});

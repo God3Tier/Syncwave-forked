@@ -59,7 +59,22 @@ export function buildUrl(path: string, query?: RequestOptions['query']): string 
   return qs ? `${path}?${qs}` : path;
 }
 
+/**
+ * The browser may only call the SyncWave gateway: a path under /api/ on this
+ * page's own origin. URLs that services hand back (Streaming's stream_url,
+ * Sync's PREPARE) go through this too, so a bad value cannot send the browser
+ * to another host. Returns the path and query to fetch.
+ */
+export function gatewayPath(url: string): string {
+  const resolved = new URL(url, window.location.origin);
+  if (resolved.origin !== window.location.origin || !resolved.pathname.startsWith('/api/')) {
+    throw new ApiError(0, 'URL_NOT_ALLOWED', `Refusing to fetch ${resolved.origin}${resolved.pathname}: not a SyncWave API path`);
+  }
+  return `${resolved.pathname}${resolved.search}`;
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const url = gatewayPath(buildUrl(path, options.query));
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers };
   let body = options.body;
   if (options.json !== undefined) {
@@ -69,7 +84,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   let response: Response;
   try {
-    response = await fetch(buildUrl(path, options.query), {
+    response = await fetch(url, {
       method: options.method ?? 'GET',
       headers,
       body,

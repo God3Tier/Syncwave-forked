@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { Song } from '../api/types';
 import { formatDuration } from '../format';
+import { highlightSegments } from '../highlight';
 import { usePlayer } from '../player/context';
 import { AddToPlaylist } from './AddToPlaylist';
 import { EqualizerIcon, Icon, SongArt, StatusChip } from './ui';
@@ -14,18 +15,15 @@ export interface SongLike {
   processing_status?: Song['processing_status'];
 }
 
-/** Escapes and highlights query terms in a title (Stitch "Search results" screen). */
+/** Highlights query terms in a title (Stitch "Search results" screen). */
 function highlight(text: string, query?: string): ReactNode {
-  const terms = query?.trim().split(/\s+/).filter(Boolean);
-  if (!terms?.length) return text;
-  const pattern = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
-  return text.split(pattern).map((part, i) =>
-    i % 2 === 1 ? (
+  return highlightSegments(text, query).map((segment, i) =>
+    segment.match ? (
       <mark key={i} className="rounded bg-primary/20 px-0.5 text-primary">
-        {part}
+        {segment.text}
       </mark>
     ) : (
-      part
+      segment.text
     ),
   );
 }

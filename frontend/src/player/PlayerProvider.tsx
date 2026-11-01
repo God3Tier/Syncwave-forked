@@ -7,7 +7,7 @@
 // an object URL; the window logic stays the same once ranges arrive.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ApiError } from '../api/http';
+import { ApiError, gatewayPath } from '../api/http';
 import { getStreamInfo } from '../api/media';
 import { config } from '../config';
 import { PlayerContext, type BufferState, type Player, type PlayerState } from './context';
@@ -57,7 +57,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setBuffer(id, 'loading');
       const promise = (async () => {
         const info = await getStreamInfo(id, controller.signal);
-        const response = await fetch(info.stream_url, { signal: controller.signal });
+        const response = await fetch(gatewayPath(info.stream_url), { signal: controller.signal });
         if (!response.ok) throw new ApiError(response.status, 'STREAM_UNAVAILABLE', `Audio request failed (${response.status})`);
         const url = URL.createObjectURL(await response.blob());
         urls.current.set(id, url);
