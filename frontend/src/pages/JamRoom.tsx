@@ -418,7 +418,13 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
                 </div>
                 {owner && (
                   <div className="flex items-center">
-                    <IconButton icon="play_circle" label="Play this now" onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))} />
+                    <IconButton
+                      icon="play_circle"
+                      label={jam.state === 'PREPARING' ? 'Wait until the current song is ready' : 'Play this now'}
+                      disabled={jam.state === 'PREPARING'}
+                      onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))}
+                      className="disabled:cursor-not-allowed"
+                    />
                     {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, userId, item.queue_item_id))} />}
                   </div>
                 )}
