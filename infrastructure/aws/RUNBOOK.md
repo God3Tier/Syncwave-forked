@@ -205,7 +205,8 @@ it, in turn, so run them in the same terminal.
 - **Bringing up only some:** set `SERVICES` to just those for this session.
 
 ```sh
-SERVICES="lyrics waveform"             # add new services here (and in §8)
+SERVICES="lyrics waveform playlist recommendation"   # add new services here (and in §8)
+DB_SERVICES="lyrics waveform playlist"               # the ones with a database (recommendation has none)
 
 cd infrastructure/aws                  # from the repo root
 for SVC in $SERVICES; do
@@ -214,24 +215,32 @@ done
 cd -
 ```
 
+`DB_SERVICES` is the part of `SERVICES` whose stack has a `module.db`. A
+service without a database (Recommendation) is left out of it; steps a) and b)
+use it. A service that Jam, Sync or the Catalogue stack call by name
+(Playlist) must be applied before the stacks that read its outputs.
+
 **a) Image repositories and databases first.** The tasks can't start without either.
 
 ```sh
 cd infrastructure/aws                  # from the repo root
 for SVC in $SERVICES; do
-  terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this -target=module.db
+  terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this
+done
+for SVC in $DB_SERVICES; do
+  terraform -chdir=services/$SVC apply -target=module.db
 done
 cd -
 ```
 
 Terraform warns that `-target` is for exceptional use; this is one. Type
-`yes` once for each service.
+`yes` once for each apply.
 
 **b) Create each service's database and login role.**
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-for SVC in $SERVICES; do
+for SVC in $DB_SERVICES; do
   TASK=$(eval "$(terraform -chdir=services/$SVC output -raw db_init_command)")
   aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
   echo "$SVC db-init exit code: $(aws ecs describe-tasks --cluster syncwave --tasks $TASK \
@@ -282,6 +291,28 @@ cd -
 their tasks, and the loop then prints that service's API URL. If it times out
 after 10 minutes, go to [7 Debug](#7-debug).
 
+**While the Catalogue stack does not exist.** Playlist and Recommendation call
+the Catalogue Service at `http://catalogue.syncwave.internal:8080`, a name only
+the Catalogue's own stack registers (there is no `services/catalogue/` yet). If
+nothing answers on that name, Recommendation returns 502 and Playlist refuses to
+add songs. Until the Catalogue is deployed, apply those two with their fallback
+modes instead of step d) as written:
+
+```sh
+cd infrastructure/aws                  # from the repo root
+terraform -chdir=services/playlist       apply -var catalogue_mode=off    # accepts any song id
+terraform -chdir=services/recommendation apply -var catalogue_mode=stub   # ranks the built-in demo songs
+cd -
+```
+
+`off` and `stub` change only the `CATALOGUE_MODE` environment variable
+(`services/playlist/README.md`, `services/recommendation/README.md`); nothing
+else differs. The change is a new task definition revision, so it goes live
+with the next CI deploy, or immediately with [6 Change configuration](#6-change-configuration).
+Once the Catalogue is deployed, apply both again **without** the `-var` (the
+default is `http`) and roll them out the same way. Nothing else needs to
+change, because the Catalogue stack takes over the same private DNS name.
+
 ### 2.4 CI deploys during the session (optional)
 
 Only needed if merges to `main` during this session should deploy here.
@@ -316,10 +347,12 @@ cd infrastructure/aws                  # from the repo root
 ALB=$(terraform -chdir=platform output -raw base_url)
 curl -s $ALB/api/lyrics/health; echo        # {"status":"ok"}
 curl -s $ALB/api/waveform/health; echo      # {"status":"ok"}
+curl -s $ALB/api/playlist/health; echo      # {"status":"ok"}
+curl -s $ALB/api/recommendation/health; echo   # {"status":"ok"}
 curl -s $ALB/api/nope/x; echo               # {"error":{"code":"UNKNOWN_SERVICE",...}}
 
 aws ecs describe-services --cluster syncwave \
-  --services lyrics lyrics-worker waveform waveform-worker rabbitmq \
+  --services lyrics lyrics-worker waveform waveform-worker playlist recommendation rabbitmq \
   --query 'services[].{service:serviceName,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
   --output table                            # running = desired, rollout COMPLETED
 
@@ -569,7 +602,7 @@ stack keeps its state in the bootstrap bucket. The ECR repositories, the
 audio bucket and the state bucket are deleted together with their contents.
 
 ```sh
-SERVICES="lyrics waveform"             # the same list as §2.3
+SERVICES="lyrics waveform playlist recommendation"   # the same list as §2.3
 
 cd infrastructure/aws                  # from the repo root
 for SVC in $SERVICES; do

@@ -105,3 +105,18 @@ variable "http_route" {
   })
   default = null
 }
+
+variable "extra_ports" {
+  description = "Container ports besides 8080 that other services call, e.g. [50051] for gRPC. They are reachable only from other application tasks (the services security group)."
+  type        = list(number)
+  default     = []
+}
+
+variable "service_discovery" {
+  description = "Registers <name>.<namespace> in the private DNS so other services can call this one by name. Null if nothing calls it."
+  type = object({
+    namespace_id = string
+    name         = string
+  })
+  default = null
+}

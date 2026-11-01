@@ -112,7 +112,7 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_services" {
 # Every application task (and the db-init tasks) uses this group
 resource "aws_security_group" "services" {
   name        = "syncwave-services"
-  description = "Application tasks: port 8080 from the ALB only"
+  description = "Application tasks: port 8080 from the ALB, service ports from each other"
   vpc_id      = aws_vpc.this.id
 }
 
@@ -122,6 +122,25 @@ resource "aws_vpc_security_group_ingress_rule" "services_from_alb" {
   ip_protocol                  = "tcp"
   from_port                    = 8080
   to_port                      = 8080
+}
+
+# Service-to-service calls, as in Compose: HTTP on 8080 (Playlist and
+# Recommendation call the Catalogue), the Streaming Service on 8081 (Sync
+# calls it) and gRPC on 50051 (Jam calls Playlist, Sync calls Catalogue).
+# Only tasks in this group can reach these ports; the ALB still reaches 8080 only.
+resource "aws_vpc_security_group_ingress_rule" "services_from_services" {
+  for_each = {
+    http      = 8080
+    streaming = 8081
+    grpc      = 50051
+  }
+
+  security_group_id            = aws_security_group.services.id
+  referenced_security_group_id = aws_security_group.services.id
+  description                  = "Service to service (${each.key})"
+  ip_protocol                  = "tcp"
+  from_port                    = each.value
+  to_port                      = each.value
 }
 
 resource "aws_vpc_security_group_egress_rule" "services_all" {

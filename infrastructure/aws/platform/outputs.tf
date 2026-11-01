@@ -42,6 +42,11 @@ output "service_discovery_namespace" {
   value = aws_service_discovery_private_dns_namespace.this.name
 }
 
+output "service_discovery_namespace_id" {
+  description = "For a service that other services call by name (modules/ecs-service service_discovery)."
+  value       = aws_service_discovery_private_dns_namespace.this.id
+}
+
 output "alb_dns_name" {
   value = aws_lb.this.dns_name
 }
