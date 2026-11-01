@@ -20,6 +20,12 @@ variable "certificate_arn" {
   default     = null
 }
 
+variable "cloudfront_enabled" {
+  description = "Serve the site over HTTPS at a cloudfront.net address (cloudfront.tf). Needs no domain; leave certificate_arn null."
+  type        = bool
+  default     = true
+}
+
 # --- Postgres -------------------------------------------------------------
 
 variable "db_instance_class" {

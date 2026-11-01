@@ -175,7 +175,7 @@ cd -
 ```sh
 cd infrastructure/aws                  # from the repo root
 terraform -chdir=platform init -backend-config=../backend.hcl
-terraform -chdir=platform apply                          # about 50 to add; type "yes". ~10 minutes, mostly RDS
+terraform -chdir=platform apply                          # about 50 to add; type "yes". ~10-15 minutes, mostly RDS and CloudFront
 cd -
 ```
 
@@ -328,14 +328,16 @@ platform stack prints:
 terraform -chdir=infrastructure/aws/platform output -raw base_url; echo   # from the repo root
 ```
 
-Open that URL (`http://syncwave-<id>.ap-southeast-1.elb.amazonaws.com`) in a
-browser for the web UI once the frontend stack is up; the APIs are at
-`<base_url>/api/<service>/...`. Each service stack prints its own address too
+Open that URL (`https://<id>.cloudfront.net`) in a browser for the web UI
+once the frontend stack is up; the APIs are at `<base_url>/api/<service>/...`.
+Each service stack prints its own address too
 (`terraform -chdir=infrastructure/aws/services/<folder> output -raw api_url`).
-It is plain `http://` because the platform has no TLS certificate, so the
-browser may say the site is not secure, and it won't share your location: on
-Discover, "Match weather" then asks you to pick a city. The address changes
-every session, because the load balancer is recreated.
+CloudFront serves it over HTTPS with its own certificate and passes every
+request to the ALB, so browsers allow location (Discover's weather match) and
+the clipboard. The address changes every session, because the distribution is
+recreated. The ALB itself still answers on plain HTTP at
+`terraform -chdir=infrastructure/aws/platform output -raw alb_url`, which is
+handy for telling a CloudFront problem from a service one.
 
 **Leaving a service out.** Services call each other by private DNS name, and
 a name exists only while that service's stack is up. If you bring up only
@@ -638,7 +640,7 @@ cd infrastructure/aws                  # from the repo root
 for SVC in $(echo $SERVICES | tr ' ' '\n' | tac); do
   terraform -chdir=services/$SVC destroy                 # type "yes" for each
 done
-terraform -chdir=platform destroy                        # ~10 minutes, mostly RDS
+terraform -chdir=platform destroy                        # ~15 minutes, mostly RDS and CloudFront
 terraform -chdir=bootstrap destroy                       # last
 cd -
 ```

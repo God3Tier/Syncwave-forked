@@ -5,6 +5,7 @@
 
 locals {
   https     = var.certificate_arn != null
+  alb_url   = "${local.https ? "https" : "http"}://${aws_lb.this.dns_name}"
   not_found = jsonencode({ error = { code = "UNKNOWN_SERVICE", message = "No service is routed at this path" } })
 }
 
