@@ -1,0 +1,41 @@
+# Child pipeline for the web UI (see ci/service.yml). The root .gitlab-ci.yml
+# starts it when this folder, contracts/websocket or ci/ changes.
+#
+# No deploy job yet: production needs an ECS service for the frontend and an
+# ALB default rule for / (infrastructure/aws/), which do not exist yet.
+
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: frontend               # = folder name = compose service name = image name
+  SERVICE_DIR: frontend
+
+.node:
+  image: node:24-alpine
+  variables:
+    npm_config_cache: $CI_PROJECT_DIR/.npm
+  cache:
+    key:
+      files: [frontend/package-lock.json]
+    paths:
+      - .npm
+  before_script:
+    - cd "$SERVICE_DIR"
+    - npm ci --no-audit --no-fund --prefer-offline
+
+lint:
+  extends: [.lint, .node]
+  script:
+    - npm run lint
+    - npm run typecheck
+
+test:
+  extends: [.test, .node]
+  variables:
+    TEST_REPORTS: report.xml
+  script:
+    - npx vitest run --reporter=default --reporter=junit --outputFile.junit=report.xml
+
+build:
+  extends: .build-image

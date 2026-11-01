@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 
 from recommendation_service.catalogue import CatalogueClient
+from recommendation_service.errors import WeatherUnavailable
 from recommendation_service.models import Recommendation, Weather
 from recommendation_service.ranking import WEATHER_MATCH, rank
 from recommendation_service.weather import WeatherClient
@@ -54,8 +55,19 @@ async def _weather_or_none(
         return None
     try:
         return await asyncio.wait_for(weather_client.current(lat, lon), timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "weather unavailable, recommending without it: no answer within %ss", timeout_seconds
+        )
+        return None
+    except WeatherUnavailable as error:
+        # Expected (provider down, error status, unreadable answer): one line,
+        # the error already says what went wrong.
+        logger.warning("weather unavailable, recommending without it: %s", error)
+        return None
     except Exception:
         # Deliberately broad: weather is a supporting signal, so *any* failure in
-        # it, including a bug in a provider, must never break listening.
-        logger.warning("weather unavailable, recommending without it", exc_info=True)
+        # it, including a bug in a provider, must never break listening. A bug is
+        # not expected, so this one keeps its stack trace.
+        logger.exception("weather lookup failed unexpectedly, recommending without it")
         return None

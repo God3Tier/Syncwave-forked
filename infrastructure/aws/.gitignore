@@ -1,0 +1,17 @@
+# Terraform working files. Commit .terraform.lock.hcl; never commit state.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+
+# Local overrides may hold account-specific values
+backend.hcl
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

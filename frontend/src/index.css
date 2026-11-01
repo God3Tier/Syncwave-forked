@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+/* Design tokens exported from the Stitch "SyncWave Dark" design system
+   (Material-style roles; see frontend/README.md for the Stitch project). */
+@theme {
+  --color-background: #0e0e15;
+  --color-surface: #0e0e15;
+  --color-surface-dim: #0e0e15;
+  --color-surface-bright: #2b2b36;
+  --color-surface-container-lowest: #000000;
+  --color-surface-container-low: #13131b;
+  --color-surface-container: #191922;
+  --color-surface-container-high: #1f1f28;
+  --color-surface-container-highest: #25252f;
+  --color-surface-variant: #25252f;
+  --color-on-surface: #eae7f1;
+  --color-on-surface-variant: #acaab4;
+  --color-outline: #76747e;
+  --color-outline-variant: #484750;
+
+  --color-primary: #ba9eff;
+  --color-primary-dim: #8455ef;
+  --color-primary-container: #ae8dff;
+  --color-on-primary: #39008c;
+  --color-secondary: #3adffa;
+  --color-secondary-dim: #1ad0eb;
+  --color-secondary-container: #006877;
+  --color-tertiary: #ff86c3;
+  --color-tertiary-container: #f673b7;
+  --color-error: #ff6e84;
+  --color-error-container: #a70138;
+
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-partial: #fb923c;
+
+  --font-headline: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: var(--font-body);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-on-surface font-body antialiased;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+  }
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  direction: ltr;
+  vertical-align: middle;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  -webkit-font-smoothing: antialiased;
+}
+.material-symbols-outlined.fill {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.bg-grid-mesh {
+  background-image: radial-gradient(rgb(186 158 255 / 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.eq-bar {
+  transform-origin: bottom;
+  animation: eq 0.9s ease-in-out infinite;
+}

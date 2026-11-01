@@ -15,14 +15,16 @@ services:
       SERVICE_NAME: recommendation
       PORT: "8080"
       LOG_LEVEL: INFO
-      # `stub` until the Catalogue Service lists songs; then `http`.
-      CATALOGUE_MODE: stub
+      # `http` (default): songs come from the Catalogue Service. `stub` serves
+      # 8 fixed demo songs that exist nowhere else, for running on its own.
+      CATALOGUE_MODE: ${CATALOGUE_MODE:-http}
       CATALOGUE_URL: http://catalogue:8080
       CATALOGUE_TIMEOUT_SECONDS: "3"
       CANDIDATE_LIMIT: "100"
-      # `stub` for a fixed condition, `off` to exercise the fallback, `open-meteo`
-      # for the real Open-Meteo API (needs internet, no key).
-      WEATHER_MODE: ${WEATHER_MODE:-stub}
+      # `open-meteo` (default): the real Open-Meteo API (needs internet, no key; if
+      # it is unreachable the service recommends without weather). `stub` is a
+      # fixed condition, `off` exercises the fallback.
+      WEATHER_MODE: ${WEATHER_MODE:-open-meteo}
       WEATHER_STUB_CONDITION: RAIN
       WEATHER_TIMEOUT_SECONDS: "2"
     env_file:

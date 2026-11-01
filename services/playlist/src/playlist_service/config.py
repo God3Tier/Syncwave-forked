@@ -7,12 +7,21 @@ from functools import lru_cache
 
 from sqlalchemy.engine import URL
 
+# `off`: any song id is accepted (no Catalogue needed). `http`: a song is added
+# only if the Catalogue Service has it.
+CATALOGUE_MODES = ("off", "http")
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     service_name: str
     log_level: str
     database_url: str
+    catalogue_mode: str
+    catalogue_url: str
+    catalogue_timeout_seconds: float
+    grpc_port: int  # 0 turns the gRPC server off
+    internal_service_token: str
 
 
 def database_url() -> str:
@@ -33,12 +42,24 @@ def database_url() -> str:
     ).render_as_string(hide_password=False)
 
 
+def catalogue_mode() -> str:
+    mode = os.getenv("CATALOGUE_MODE", "http").lower()
+    if mode not in CATALOGUE_MODES:
+        raise ValueError(f"CATALOGUE_MODE must be one of {CATALOGUE_MODES}, not {mode!r}")
+    return mode
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "playlist"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         database_url=database_url(),
+        catalogue_mode=catalogue_mode(),
+        catalogue_url=os.getenv("CATALOGUE_URL", "http://catalogue:8080"),
+        catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
+        grpc_port=int(os.getenv("GRPC_PORT", "50051")),
+        internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
     )
 
 

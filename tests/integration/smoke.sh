@@ -32,11 +32,17 @@ check "rabbitmq: events exchange"   "http://syncwave:syncwave@$HOST:15672/api/ex
 check "rabbitmq: lyrics queue"      "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/lyrics.song-uploaded"
 check "rabbitmq: waveform queue"    "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/waveform.song-uploaded"
 
-# Every service that exists must answer /health through the gateway.
+# Every service the root stack runs (its compose.yaml is under `include:` in
+# docker-compose.yml) must answer through the gateway.
 for dir in services/*/; do
   name=$(basename "$dir")
   [ "$name" = "_template" ] && continue
-  check "service: $name" "http://$HOST:8080/api/$name/health"
+  grep -q "services/$name/compose.yaml" docker-compose.yml || continue
+  case "$name" in
+    # Routed as /api/streaming and has no /health; /cache is its healthcheck.
+    audio_transmitter) check "service: streaming" "http://$HOST:8080/api/streaming/cache" ;;
+    *) check "service: $name" "http://$HOST:8080/api/$name/health" ;;
+  esac
 done
 if [ -d frontend ]; then
   check "frontend" "http://$HOST:8080/"

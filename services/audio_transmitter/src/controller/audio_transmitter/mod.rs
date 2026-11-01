@@ -1,7 +1,7 @@
 pub mod audio_by_time;
 pub mod cache_state;
+pub mod stream_info;
 pub mod track_audio;
-mod errors; 
 
 use actix_web::web;
 
@@ -11,6 +11,10 @@ pub fn configure(config: &mut web::ServiceConfig) {
         .route(
             "/tracks/{track_id}/audio",
             web::get().to(track_audio::get_track_audio),
+        )
+        .route(
+            "/tracks/{track_id}/stream-info",
+            web::get().to(stream_info::get_stream_info),
         )
         .route("/cache", web::get().to(cache_state::get))
         .route(

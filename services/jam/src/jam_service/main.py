@@ -35,13 +35,19 @@ from jam_service.models import (
     SeekRequest,
     StartPlaybackRequest,
 )
+from jam_service.playlist_client import (
+    PlaylistClientError,
+    PlaylistNotFoundError,
+    create_playlist_client,
+)
 from jam_service.repository import JamRepository
 from jam_service.sync_client import Command, SyncClientError, SyncConflictError, create_sync_client
 
 settings = get_settings()
 repository = JamRepository(settings.database_url)
 sync_client = create_sync_client(settings)
-manager = JamManager(repository, sync_client, settings.mock_jam_token)
+playlist_client = create_playlist_client(settings)
+manager = JamManager(repository, sync_client, playlist_client, settings.mock_jam_token)
 
 
 @asynccontextmanager
@@ -64,6 +70,7 @@ Authenticated = Annotated[None, Depends(require_token)]
 
 
 @app.exception_handler(JamNotFoundError)
+@app.exception_handler(PlaylistNotFoundError)
 async def not_found_handler(_, error: JamNotFoundError) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": str(error)})
 
@@ -84,6 +91,11 @@ async def sync_handler(_, error: SyncClientError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": str(error)})
 
 
+@app.exception_handler(PlaylistClientError)
+async def playlist_handler(_, error: PlaylistClientError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(error)})
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
@@ -97,7 +109,7 @@ async def ready() -> dict[str, str]:
 
 @app.post("/jams", response_model=JamResponse, status_code=201)
 async def create_jam(request: CreateJamRequest, _: Authenticated) -> JamResponse:
-    return await manager.create(request.owner_id)
+    return await manager.create(request.owner_id, request.playlist_id)
 
 
 @app.get("/jams/{jam_id}", response_model=JamResponse)

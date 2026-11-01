@@ -11,7 +11,8 @@ All HTTP calls use `X-Jam-Token: local-jam-member-token` in local development.
 Mutations include an `actor_id`; Jam verifies membership or ownership before
 changing state or calling Sync.
 
-- `POST /jams`, `GET /jams/{jam_id}`
+- `POST /jams`, `GET /jams/{jam_id}`. Pass an optional `playlist_id` to
+  create the Jam with that Playlist Service order copied into its queue.
 - `POST /jams/{jam_id}/members`, `DELETE /jams/{jam_id}/members/{participant_id}`
 - `POST /jams/{jam_id}/queue`, `PUT /jams/{jam_id}/queue`
 - `DELETE /jams/{jam_id}/queue/{queue_item_id}`
@@ -37,6 +38,11 @@ Leaving `SYNC_GRPC_TARGET` blank uses a deterministic fake for isolated Jam
 development. Compose sets it to `sync:50051` and uses the shared internal
 token for authenticated calls.
 
+Compose also sets `PLAYLIST_GRPC_TARGET=playlist:50051`. When `playlist_id`
+is supplied to `POST /jams`, Jam calls `PlaylistQueryService.GetPlaylist`
+with the Playlist-specific `x-internal-token` and a 750 ms deadline. The
+returned song order becomes the Jam's mutable queue snapshot.
+
 ## Test
 
 ```sh
@@ -47,15 +53,20 @@ python -m venv .venv
 .venv/Scripts/ruff format --check src tests
 ```
 
-Jam uses its own PostgreSQL database and Alembic migration. Generated Sync
-bindings live under `src/syncwave/sync/v1`; regenerate them from
-`contracts/grpc/syncwave/sync/v1/sync.proto` whenever that contract changes.
+Jam uses its own PostgreSQL database and Alembic migration. Generated Sync and
+Playlist bindings live under `src/syncwave/{sync,playlist}/v1`; regenerate
+them from the corresponding files under `contracts/grpc/syncwave/` whenever a
+contract changes.
 
-## Current cross-service mismatch
+## Cross-service calls
 
-Jam and Sync use canonical UUID song IDs and millisecond time values. The
-current `audio_transmitter` branch uses integer track IDs and seconds over
-HTTP, and does not implement `StreamingQueryService.GetStreamInfo`. Sync keeps
-its media dependency fake until Streaming and Catalogue implement
-`contracts/grpc/syncwave/media/v1/media.proto`; Jam does not bypass Sync or
-translate this incompatible contract itself.
+Jam calls Playlist only when importing a playlist and calls Sync for
+authorized playback commands. It does not call Catalogue or Streaming;
+Sync owns those playback-readiness checks.
+
+## Streaming integration
+
+Jam, Playlist, Catalogue, Sync, and Streaming use canonical UUID song IDs.
+On start or skip, Jam calls Sync; Sync validates Catalogue readiness and asks
+Streaming for the browser-facing audio URL. Jam intentionally does not bypass
+Sync or call Streaming itself.

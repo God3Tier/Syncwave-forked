@@ -4,8 +4,7 @@ The service talks to the Catalogue through the small `CatalogueClient`
 interface. Two implementations exist:
 
 - `StubCatalogue`: a fixed demo list, used until the Catalogue Service exists.
-- `HttpCatalogue`: calls the Catalogue over HTTP. **The endpoint it calls is an
-  assumption** (the Catalogue has no API contract yet), see the class docstring.
+- `HttpCatalogue`: calls the Catalogue over HTTP, see the class docstring.
 """
 
 import uuid
@@ -58,7 +57,7 @@ class StubCatalogue:
 class HttpCatalogue:
     """Asks the Catalogue Service for its READY songs.
 
-    Assumed contract (not agreed with the Catalogue owner yet):
+    Contract (matches the Catalogue's `GET /songs`; it also returns fields we ignore):
 
         GET {CATALOGUE_URL}/songs?processing_status=READY&limit=N
         200 {"items": [{"song_id", "title", "artist", "duration_ms", "mood"?}, ...],
@@ -81,11 +80,23 @@ class HttpCatalogue:
                 params={"processing_status": "READY", "limit": limit},
             )
             response.raise_for_status()
-            return [_parse_song(item) for item in response.json()["items"]]
+            # The Catalogue leaves duration_ms null until Waveform has measured it.
+            # Such a song cannot be shown with a length, so skip it instead of
+            # failing the whole request.
+            return [
+                _parse_song(item)
+                for item in response.json()["items"]
+                if not _has_null_duration(item)
+            ]
         except (httpx2.HTTPError, ValueError, KeyError, TypeError) as error:
             # ValueError covers bad JSON and bad UUIDs, KeyError/TypeError a body
             # of the wrong shape.
             raise CatalogueUnavailable(f"The Catalogue Service failed: {error!r}") from error
+
+
+def _has_null_duration(item: dict[str, Any]) -> bool:
+    # Only an explicit null; a missing key is a malformed item and still an error.
+    return "duration_ms" in item and item["duration_ms"] is None
 
 
 def _parse_song(item: dict[str, Any]) -> Song:

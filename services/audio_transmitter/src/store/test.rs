@@ -9,6 +9,11 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use std::time::Duration;
+use uuid::Uuid;
+
+fn song_id(value: u128) -> Uuid {
+    Uuid::from_u128(value)
+}
 
 struct MockS3 {
     calls: AtomicUsize,
@@ -77,8 +82,8 @@ async fn get_track_returns_cached_bytes_without_a_second_s3_fetch() {
     let (endpoint, mock_s3) = start_mock_s3(Duration::ZERO).await;
     let store = audio_store(10, &endpoint);
 
-    let first = store.get_track(42).await.unwrap();
-    let second = store.get_track(42).await.unwrap();
+    let first = store.get_track(song_id(42), "42").await.unwrap();
+    let second = store.get_track(song_id(42), "42").await.unwrap();
 
     assert_eq!(first.as_ref(), b"audio-data");
     assert_eq!(second.as_ref(), b"audio-data");
@@ -90,8 +95,8 @@ async fn failed_get_track_is_not_cached_and_the_next_call_retries() {
     let (endpoint, mock_s3) = start_mock_s3(Duration::ZERO).await;
     let store = audio_store(10, &endpoint);
 
-    assert!(store.get_track(7).await.is_err());
-    assert!(store.get_track(7).await.is_err());
+    assert!(store.get_track(song_id(7), "7").await.is_err());
+    assert!(store.get_track(song_id(7), "7").await.is_err());
 
     assert_eq!(mock_s3.calls.load(Ordering::SeqCst), 2);
 }
@@ -103,7 +108,7 @@ async fn concurrent_cache_misses_share_one_s3_fetch() {
     let store = Arc::new(audio_store(10, &endpoint));
     let results = futures_util::future::join_all((0..8).map(|_| {
         let store = store.clone();
-        async move { store.get_track(42).await }
+        async move { store.get_track(song_id(42), "42").await }
     }))
     .await;
 
@@ -117,7 +122,10 @@ async fn cache_evicts_entries_when_entry_capacity_is_exceeded() {
     let store = audio_store(1, &endpoint);
 
     for track_id in [1, 2, 1] {
-        store.get_track(track_id).await.unwrap();
+        store
+            .get_track(song_id(track_id), &track_id.to_string())
+            .await
+            .unwrap();
     }
 
     assert_eq!(mock_s3.calls.load(Ordering::SeqCst), 2);
@@ -128,7 +136,10 @@ async fn get_track_by_timing_returns_the_expected_half_open_interval() {
     let (endpoint, _) = start_mock_s3(Duration::ZERO).await;
     let store = audio_store(10, &endpoint);
 
-    let bytes = store.get_track_by_timing(44, 2, 5, 10).await.unwrap();
+    let bytes = store
+        .get_track_by_timing(song_id(44), "44", 2, 5, 10)
+        .await
+        .unwrap();
 
     assert_eq!(bytes.as_ref(), b"234");
 }
@@ -138,7 +149,10 @@ async fn get_track_by_timing_clamps_end_to_track_runtime() {
     let (endpoint, _) = start_mock_s3(Duration::ZERO).await;
     let store = audio_store(10, &endpoint);
 
-    let bytes = store.get_track_by_timing(44, 0, 11, 10).await.unwrap();
+    let bytes = store
+        .get_track_by_timing(song_id(44), "44", 0, 11, 10)
+        .await
+        .unwrap();
 
     assert_eq!(bytes.as_ref(), b"0123456789");
 }

@@ -4,7 +4,7 @@
 # Service will. Lets you try Lyrics and Waveform end to end without Upload.
 #
 # Usage (from the repo root, with `docker compose up -d` running):
-#   sh tests/integration/publish-song-uploaded.sh <song_id> <audio_key> [lyrics_key]
+#   sh tests/integration/publish-song-uploaded.sh <song_id> <audio_key> [lyrics_key] [title] [artist]
 #
 #   EVENT_ID=<uuid>  reuse an event_id, e.g. to simulate a duplicate delivery
 #   HOST=<host>      where RabbitMQ's management API is published (default: localhost)
@@ -17,6 +17,8 @@ fi
 song_id=$1
 audio_key=$2
 lyrics_key=${3:-}
+title=${4:-Demo}
+artist=${5:-SyncWave Artist}
 host=${HOST:-localhost}
 
 new_uuid() {
@@ -33,8 +35,8 @@ lyrics_field=""
 if [ -n "$lyrics_key" ]; then
   lyrics_field=$(printf ', "lyrics_reference": "%s"' "$lyrics_key")
 fi
-event=$(printf '{"event_id": "%s", "event_type": "SongUploaded", "version": 1, "song_id": "%s", "timestamp": "%s", "producer": "upload", "correlation_id": "%s", "payload": {"audio_reference": "%s"%s}}' \
-  "$event_id" "$song_id" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$event_id" "$audio_key" "$lyrics_field")
+event=$(printf '{"event_id": "%s", "event_type": "SongUploaded", "version": 1, "song_id": "%s", "timestamp": "%s", "producer": "upload", "correlation_id": "%s", "payload": {"audio_reference": "%s", "title": "%s", "artist": "%s"%s}}' \
+  "$event_id" "$song_id" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$event_id" "$audio_key" "$title" "$artist" "$lyrics_field")
 
 # The management API takes the message body as a string; base64 avoids escaping it.
 body=$(printf '%s' "$event" | base64 | tr -d '\n')

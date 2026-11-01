@@ -37,6 +37,7 @@ class JamResponse(StrictModel):
 
 class CreateJamRequest(StrictModel):
     owner_id: UUID
+    playlist_id: UUID | None = None
 
 
 class MemberRequest(StrictModel):

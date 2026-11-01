@@ -1,32 +1,33 @@
+mod catalogue;
 mod controller;
-mod db;
-mod models;
-mod schema;
 mod store;
 
 use actix_web::{App, HttpServer, web};
 use aws_sdk_s3::Client;
 use aws_smithy_types::timeout::TimeoutConfig;
-use std::{env, io, time::Duration};
+use catalogue::{Catalogue, HttpCatalogue};
+use std::{env, io, sync::Arc, time::Duration};
 use store::audio::AudioStore;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+// pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        // TODO: Set this to panic if not available
-        "postgres://orchestrator:orchestrator_dev_password@localhost:5432/orchestrator".to_owned()
-    });
-
-    // TODO: This should panic upon failure as well
-    let pool = db::create_pool(&database_url)
-        .map_err(|error| io::Error::other(format!("failed to create database pool: {error}")))?;
-    db::initialize_schema(&pool).map_err(|error| {
-        io::Error::other(format!("failed to initialize database schema: {error}"))
-    })?;
-    let pool = web::Data::new(pool);
+    // Song metadata comes from the Catalogue Service; this service has no database.
+    let catalogue_url = env::var("CATALOGUE_URL")
+        .unwrap_or_else(|_| "http://localhost:8080/api/catalogue".to_owned());
+    let catalogue_timeout = env::var("CATALOGUE_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|seconds| *seconds > 0.0)
+        .unwrap_or(3.0);
+    let catalogue: Arc<dyn Catalogue> = Arc::new(
+        HttpCatalogue::new(&catalogue_url, Duration::from_secs_f64(catalogue_timeout)).map_err(
+            |error| io::Error::other(format!("failed to build the Catalogue client: {error}")),
+        )?,
+    );
+    let catalogue = web::Data::new(catalogue);
 
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .timeout_config(
@@ -37,8 +38,16 @@ async fn main() -> std::io::Result<()> {
         )
         .load()
         .await;
-    let s3_client = Client::new(&config);
-    let bucket_name = "TEMP".to_string();
+    // A local S3-compatible store (RustFS in Docker Compose, set via
+    // AWS_ENDPOINT_URL) is addressed by path: the virtual-hosted name
+    // `<bucket>.s3` does not resolve on the Compose network. Real S3 keeps
+    // the SDK's default addressing.
+    let mut s3_config = aws_sdk_s3::config::Builder::from(&config);
+    if env::var_os("AWS_ENDPOINT_URL").is_some() {
+        s3_config = s3_config.force_path_style(true);
+    }
+    let s3_client = Client::from_conf(s3_config.build());
+    let bucket_name = env::var("S3_BUCKET").unwrap_or_else(|_| "syncwave-audio".to_owned());
 
     // TODO: Set the cache to be configurable
     let store = web::Data::new(AudioStore::new(10_000, s3_client, bucket_name));
@@ -46,7 +55,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(store.clone())
-            .app_data(pool.clone())
+            .app_data(catalogue.clone())
             .configure(controller::configure_routes)
     })
     .bind(("0.0.0.0", 8081))?

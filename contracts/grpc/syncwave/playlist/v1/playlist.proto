@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package syncwave.playlist.v1;
+
+// Jam and Sync read a playlist from the Playlist Service, which owns
+// playlists and their order (plan.md section 10). Read-only: nothing here
+// changes a playlist.
+service PlaylistQueryService {
+  // NOT_FOUND if no such playlist, INVALID_ARGUMENT if playlist_id is not a
+  // UUID, UNAUTHENTICATED without a valid x-internal-token.
+  rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
+}
+
+message GetPlaylistRequest {
+  string playlist_id = 1;
+}
+
+// One song in a playlist. Titles, artists and audio belong to the Catalogue
+// and Streaming services, so only the song_id is given.
+message PlaylistSong {
+  string song_id = 1;
+  // 0-based and contiguous, in play order.
+  int32 position = 2;
+}
+
+message GetPlaylistResponse {
+  string playlist_id = 1;
+  string owner_id = 2;
+  string name = 3;
+  // In play order (the same order the REST API returns).
+  repeated PlaylistSong songs = 4;
+}

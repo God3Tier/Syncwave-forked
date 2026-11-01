@@ -29,6 +29,31 @@ docker compose up -d --build --wait
 
 Check that everything is wired up: `sh tests/integration/smoke.sh`.
 
+The stack starts with one demo song already loaded: "Daisy Bell", a
+public-domain 1894 recording with synced lyrics (see
+[infrastructure/seed](infrastructure/seed/README.md)). It is READY a few
+seconds after `--wait` returns.
+
+### Try the three scenarios
+
+All three run in the browser at <http://localhost:8080>.
+
+1. **Discover & Listen.** Discover lists recommendations and recently
+   added songs. Open "Daisy Bell" and press Play: the waveform playhead
+   moves and the current lyric line is highlighted. "Match my weather"
+   uses your browser location for the weather signal.
+2. **Upload & Process.** On Upload, add a title, an artist, an audio file
+   and optionally an `.lrc` file. The processing panel shows Lyrics and
+   Waveform working in parallel until the song is READY. This needs the
+   Upload Service; without it, the page says so.
+3. **Create & Synchronise a Jam.** Create a playlist and choose "Start Jam
+   with this playlist", or use the Jam page. Open the invite link in a
+   second tab with `?user=new` added, to join as another listener, or on
+   another device on the same network. Tap "enable audio" on every device,
+   then press Play as the owner. Each device buffers the song and starts it
+   at the same server time. The Sync stats panel shows the clock offset and
+   start error.
+
 Stop with `docker compose down`, and add `-v` to also delete all local
 data (databases, queues, uploaded audio).
 
