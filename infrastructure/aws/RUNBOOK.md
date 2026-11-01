@@ -333,8 +333,9 @@ browser for the web UI once the frontend stack is up; the APIs are at
 `<base_url>/api/<service>/...`. Each service stack prints its own address too
 (`terraform -chdir=infrastructure/aws/services/<folder> output -raw api_url`).
 It is plain `http://` because the platform has no TLS certificate, so the
-browser may say the site is not secure. The address changes every session,
-because the load balancer is recreated.
+browser may say the site is not secure, and it won't share your location: on
+Discover, "Match weather" then asks you to pick a city. The address changes
+every session, because the load balancer is recreated.
 
 **Leaving a service out.** Services call each other by private DNS name, and
 a name exists only while that service's stack is up. If you bring up only
@@ -379,6 +380,25 @@ In GitLab, under Settings > CI/CD > Variables, add each of these as a
 The values are the same every session, so the last three can stay set.
 `AWS_ROLE_ARN` is what turns the `deploy` jobs on: delete it at teardown
 (§8), or deploy jobs on `main` fail while nothing is up.
+
+### 2.5 Load the demo songs
+
+A fresh database has no songs. This uploads the five demo songs from
+`infrastructure/seed` (Daisy Bell with lyrics, plus one calm, mellow, upbeat
+and energetic song for the weather recommendations) through the Upload API.
+It needs the upload, catalogue, lyrics and waveform stacks, and Python's
+standard library only.
+
+```sh
+cd infrastructure/aws                  # from the repo root
+ALB=$(terraform -chdir=platform output -raw base_url)
+python ../seed/upload-songs.py --base-url $ALB
+cd -
+```
+
+It prints `UPLOADED` for each song, then `READY` once it is processed (about
+a minute). A song already in the Catalogue prints `SKIP`, so running it again
+is harmless.
 
 ---
 
