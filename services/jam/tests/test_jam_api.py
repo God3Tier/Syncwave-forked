@@ -183,3 +183,55 @@ def test_get_reconciles_readiness_driven_sync_state(client: TestClient) -> None:
     refreshed = client.get(f"/jams/{jam_id}")
     assert refreshed.status_code == 200
     assert refreshed.json()["state"] == "SCHEDULED"
+
+
+def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    for _ in range(3):
+        response = client.post(
+            f"/jams/{jam_id}/queue",
+            json={"actor_id": owner_id, "song_id": str(uuid4())},
+        )
+    queue_ids = [item["queue_item_id"] for item in response.json()["queue"]]
+
+    started = client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"actor_id": owner_id, "request_id": str(uuid4())},
+    ).json()
+    client.post(
+        f"/jams/{jam_id}/playback/readiness-decision",
+        json={"actor_id": owner_id, "request_id": str(uuid4()), "decision": "CONTINUE"},
+    ).raise_for_status()
+
+    # A new song moves the existing session on (next generation), like a skip,
+    # instead of replacing it and stranding the devices connected to it.
+    play_now = {"actor_id": owner_id, "request_id": str(uuid4()), "queue_item_id": queue_ids[2]}
+    switched = client.post(f"/jams/{jam_id}/playback/start", json=play_now).json()
+    assert switched["current_queue_item_id"] == queue_ids[2]
+    assert switched["sync_generation"] == started["sync_generation"] + 1
+    assert switched["state"] == "PREPARING"
+
+
+def test_play_now_starts_a_new_session_when_sync_lost_it(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    client.post(
+        f"/jams/{jam_id}/queue", json={"actor_id": owner_id, "song_id": str(uuid4())}
+    ).raise_for_status()
+    client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"actor_id": owner_id, "request_id": str(uuid4())},
+    ).raise_for_status()
+    client.post(
+        f"/jams/{jam_id}/playback/readiness-decision",
+        json={"actor_id": owner_id, "request_id": str(uuid4()), "decision": "CANCEL"},
+    ).raise_for_status()
+    sync_client._snapshots.clear()  # as if Sync restarted
+
+    restarted = client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"actor_id": owner_id, "request_id": str(uuid4())},
+    )
+    assert restarted.status_code == 200
+    assert restarted.json()["state"] == "PREPARING"

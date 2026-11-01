@@ -8,6 +8,7 @@ import { formatDuration } from '../format';
 import { AddToPlaylist } from '../components/AddToPlaylist';
 import { Page } from '../components/Layout';
 import { LyricsView } from '../components/LyricsView';
+import { Visualizer } from '../components/Visualizer';
 import { Waveform } from '../components/Waveform';
 import { Button, Card, Icon, Notice, SongArt, Spinner, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
@@ -23,7 +24,7 @@ function optional<T>(promise: Promise<T>): Promise<T | null> {
   });
 }
 
-/** "Now Playing" song page (Stitch): waveform, synced lyrics and the buffer window. */
+/** "Now Playing" song page (Stitch): waveform, synced lyrics, the buffer window and a live visualiser. */
 export function SongPage() {
   const { songId = '' } = useParams();
   const navigate = useNavigate();
@@ -148,6 +149,14 @@ export function SongPage() {
         </Card>
         <BufferWindowCard />
       </div>
+
+      <Card className="mt-6">
+        <h2 className="mb-4 flex items-center gap-2 font-headline text-lg font-semibold">
+          Visualiser <span className="font-mono text-xs font-normal text-secondary">· live</span>
+        </h2>
+        <Visualizer active={isCurrent && player.playing} />
+        {!(isCurrent && player.playing) && <p className="mt-3 font-mono text-[11px] text-outline">Press play to see the music move.</p>}
+      </Card>
     </Page>
   );
 }

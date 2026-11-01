@@ -101,9 +101,10 @@ after confirming it belongs to the test environment.
 
 ## Playlist, Recommendation and Jam
 
-All need at least 4 `READY` songs in the Catalogue. A fresh stack has only the
-seeded demo song, so first add three more, e.g. by running `upload-flow.py`
-three times (each run leaves one `READY` song behind). None of them is run by
+All need at least 4 `READY` songs in the Catalogue. A fresh local stack has
+the five seeded demo songs (infrastructure/seed); on any other stack, load
+them first with `python infrastructure/seed/upload-songs.py --base-url <url>`.
+None of them is run by
 CI: they would need the same setup there, so adding them to the `integration`
 job as they are would fail the `staging` pipeline for everyone.
 

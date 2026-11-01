@@ -383,6 +383,25 @@ The values are the same every session, so the last three can stay set.
 `AWS_ROLE_ARN` is what turns the `deploy` jobs on: delete it at teardown
 (§8), or deploy jobs on `main` fail while nothing is up.
 
+### 2.5 Load the demo songs
+
+A fresh database has no songs. This uploads the five demo songs from
+`infrastructure/seed` (Daisy Bell with lyrics, plus one calm, mellow, upbeat
+and energetic song for the weather recommendations) through the Upload API.
+It needs the upload, catalogue, lyrics and waveform stacks, and Python's
+standard library only.
+
+```sh
+cd infrastructure/aws                  # from the repo root
+ALB=$(terraform -chdir=platform output -raw base_url)
+python ../seed/upload-songs.py --base-url $ALB
+cd -
+```
+
+It prints `UPLOADED` for each song, then `READY` once it is processed (about
+a minute). A song already in the Catalogue prints `SKIP`, so running it again
+is harmless.
+
 ---
 
 ## 3. Smoke test
