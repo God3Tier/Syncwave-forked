@@ -127,6 +127,12 @@ module "api" {
     path_prefix  = "/api/lyrics"
     priority     = var.api_route_priority
   }
+
+  # The song request orchestrator calls http://lyrics.syncwave.internal:8080
+  service_discovery = {
+    namespace_id = local.platform.service_discovery_namespace_id
+    name         = "lyrics"
+  }
 }
 
 # ---------------------------------------------------------------------------

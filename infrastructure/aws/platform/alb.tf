@@ -67,3 +67,29 @@ locals {
   # The listener that service routes attach to
   app_listener_arn = local.https ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
 }
+
+# Rule priorities on the listener (infrastructure/aws/README.md has the table):
+#   10-110  one rule per service, /api/<service>/*
+#   900     this rule: any other /api/* path gets the gateway's 404
+#   1000    the frontend's catch-all /* (services/frontend)
+# Without this rule, an unknown /api path would fall through to the
+# frontend and return its index.html with a 200.
+resource "aws_lb_listener_rule" "unknown_api" {
+  listener_arn = local.app_listener_arn
+  priority     = 900
+
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "application/json"
+      message_body = local.not_found
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
+}

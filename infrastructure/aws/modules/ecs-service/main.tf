@@ -27,7 +27,7 @@ locals {
       image        = var.image
       essential    = true
       stopTimeout  = var.stop_timeout
-      portMappings = [for port in concat(local.routed ? [8080] : [], var.extra_ports) : { containerPort = port, protocol = "tcp" }]
+      portMappings = [for port in concat(local.routed ? [var.port] : [], var.extra_ports) : { containerPort = port, protocol = "tcp" }]
       environment  = [for key, value in var.environment : { name = key, value = value }]
       secrets      = [for key, value in var.secrets : { name = key, valueFrom = value }]
       logConfiguration = {
@@ -148,7 +148,7 @@ resource "aws_ecs_service" "this" {
     content {
       target_group_arn = aws_lb_target_group.this[0].arn
       container_name   = var.name
-      container_port   = 8080
+      container_port   = var.port
     }
   }
 
@@ -162,6 +162,9 @@ resource "aws_ecs_service" "this" {
 
   # The API applies its migrations before it starts listening
   health_check_grace_period_seconds = local.routed ? 60 : null
+
+  # Lets a worker stack wait until its API has migrated the database
+  wait_for_steady_state = var.wait_for_steady_state
 
   lifecycle {
     ignore_changes = [task_definition]
@@ -189,13 +192,14 @@ resource "aws_service_discovery_service" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# ALB route: /api/<service>/<path> -> <service>:8080/<path>
+# ALB route: /api/<service>/<path> -> <service>:<port>/<path>. With
+# rewrite = false and path_prefix = "" it is the catch-all /* (the frontend).
 
 resource "aws_lb_target_group" "this" {
   count                = local.routed ? 1 : 0
   name                 = substr(local.family, 0, 32)
   target_type          = "ip"
-  port                 = 8080
+  port                 = var.port
   protocol             = "HTTP"
   vpc_id               = var.http_route.vpc_id
   deregistration_delay = 30
@@ -227,12 +231,15 @@ resource "aws_lb_listener_rule" "this" {
   }
 
   # The services' routes have no prefix (GET /health, GET /songs/{id}/lyrics)
-  transform {
-    type = "url-rewrite"
-    url_rewrite_config {
-      rewrite {
-        regex   = "^${var.http_route.path_prefix}/(.*)$"
-        replace = "/$1"
+  dynamic "transform" {
+    for_each = var.http_route.rewrite ? [1] : []
+    content {
+      type = "url-rewrite"
+      url_rewrite_config {
+        rewrite {
+          regex   = "^${var.http_route.path_prefix}/(.*)$"
+          replace = "/$1"
+        }
       }
     }
   }
