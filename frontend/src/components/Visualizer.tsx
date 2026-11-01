@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { usePlayer } from '../player/context';
 
-const BARS = 64;
-// Bars are spaced evenly in pitch (log frequency) over the range music lives in.
+// Bars per side. The picture is mirrored like a music video's: the bass is in
+// the middle and higher notes spread out to both edges, spaced evenly in pitch
+// (log frequency) over the range music lives in.
+const BARS = 40;
 const MIN_HZ = 60;
 const MAX_HZ = 10_000;
 const LOW = '#ba9eff';
@@ -10,7 +12,7 @@ const HIGH = '#3adffa';
 
 /**
  * Live frequency bars for the song that is playing, the kind music videos
- * show. Unlike <Waveform>, which draws the whole song from the Waveform
+ * show, mirrored left to right and top to bottom. Unlike <Waveform>, which draws the whole song from the Waveform
  * Service's peaks, this reads the player's Web Audio analyser every frame.
  * When playback stops the bars fall back to rest.
  */
@@ -52,19 +54,23 @@ export function Visualizer({ active, height = 160 }: { active: boolean; height?:
         if (current[i] > 0.01) moving = true;
       }
 
-      const step = width / BARS;
+      const step = width / (BARS * 2);
       const barWidth = step * 0.6;
-      const mid = height / 2;
+      const centreX = width / 2;
+      const centreY = height / 2;
       const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, LOW);
+      gradient.addColorStop(0, HIGH);
+      gradient.addColorStop(0.5, LOW);
       gradient.addColorStop(1, HIGH);
       ctx.fillStyle = gradient;
       ctx.shadowColor = HIGH;
       ctx.shadowBlur = 10;
       current.forEach((level, i) => {
         const barHeight = Math.max(3, level * (height - 12));
+        const offset = i * step + (step - barWidth) / 2;
         ctx.beginPath();
-        ctx.roundRect(i * step + (step - barWidth) / 2, mid - barHeight / 2, barWidth, barHeight, barWidth / 2);
+        ctx.roundRect(centreX + offset, centreY - barHeight / 2, barWidth, barHeight, barWidth / 2);
+        ctx.roundRect(centreX - offset - barWidth, centreY - barHeight / 2, barWidth, barHeight, barWidth / 2);
         ctx.fill();
       });
       ctx.shadowBlur = 0;
