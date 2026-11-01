@@ -160,7 +160,10 @@ as the future transport boundary, while Compose uses this HTTP adapter.
 
 ## Persistence
 
-Compose uses Sync's existing isolated PostgreSQL database. Alembic applies the
+Compose uses Sync's existing isolated PostgreSQL database. The connection comes
+from `DATABASE_URL` if it is set (Compose, the tests), otherwise from `DB_HOST`,
+`DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` (AWS, where the password
+comes from Secrets Manager). Alembic applies the
 versioned schema before the API starts and safely adopts databases created by
 the earlier bootstrap implementation. Tests use SQLite through the same
 repository interface and cover migration upgrade/downgrade and service-restart

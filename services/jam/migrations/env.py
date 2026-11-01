@@ -1,16 +1,15 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from jam_service.config import database_url
 from jam_service.repository import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
 target_metadata = Base.metadata
 
 
@@ -21,9 +20,7 @@ def run_migrations(connection: object) -> None:
 
 
 async def run_online_migrations() -> None:
-    engine = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}), prefix="sqlalchemy."
-    )
+    engine = create_async_engine(database_url())
     async with engine.connect() as connection:
         await connection.run_sync(run_migrations)
     await engine.dispose()
