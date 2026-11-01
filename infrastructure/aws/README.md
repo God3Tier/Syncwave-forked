@@ -9,7 +9,8 @@ sessions: each session creates everything and destroys it again at the end.
 > **Status: proposal.** `platform/` is shared by every service and needs
 > the team's agreement before it is applied (RabbitMQ and Postgres choices
 > below, the S3 key layout with Upload). `services/lyrics` and
-> `services/waveform` are the first two service stacks.
+> `services/waveform` were the first two service stacks; `services/playlist`
+> and `services/recommendation` follow the same pattern.
 
 ## Layout: one shared stack, one stack per service
 
@@ -22,7 +23,9 @@ infrastructure/aws/
 │   └── service-database/ one service's database/role on the shared RDS + its password secret
 └── services/
     ├── lyrics/           ECR repo, database, API (lyrics) and worker (lyrics-worker)
-    └── waveform/         ECR repo, database, API (waveform) and worker (waveform-worker)
+    ├── waveform/         ECR repo, database, API (waveform) and worker (waveform-worker)
+    ├── playlist/         ECR repo, database, API + gRPC (playlist), internal token for Jam
+    └── recommendation/   ECR repo, API (recommendation); no database, no worker
 ```
 
 - **platform** holds what every service needs and no single service owns.
@@ -44,7 +47,25 @@ Copy `services/lyrics/`, then:
 3. Make sure the ECS service names match `ECS_SERVICES` in the service's
    `.gitlab-ci.yml`, and keep the `ecs_services` and `api_url` outputs (the
    runbook reads them).
-4. Add the folder name to `SERVICES` in RUNBOOK.md §2.3 and §8.
+4. Add the folder name to `SERVICES` in RUNBOOK.md §2.3 and §8 (and to
+   `DB_SERVICES` if the stack has a `module.db`).
+
+### Services that call each other
+
+Services reach each other inside the VPC by name, as they do in Compose:
+
+- **Names:** pass `service_discovery = { namespace_id = local.platform.service_discovery_namespace_id, name = "<service>" }`
+  to `modules/ecs-service` and the service is reachable as
+  `<service>.syncwave.internal`. Playlist does this for Jam's gRPC call.
+  Callers build the name from `local.platform.service_discovery_namespace`,
+  for example `http://catalogue.syncwave.internal:8080`.
+- **Ports:** `extra_ports` publishes ports besides 8080 (Playlist: `[50051]`).
+  The `services` security group lets tasks in the group reach 8080, 8081
+  (Streaming) and 50051 (gRPC) on each other; only the ALB reaches 8080 from outside.
+- **Tokens shared between services:** the stack of the service being *called*
+  creates the secret and outputs its ARN (Playlist: `internal_token_secret_arn`);
+  the caller's stack reads it through `terraform_remote_state`. Apply the
+  called service first.
 
 ## Architecture
 
@@ -53,7 +74,8 @@ internet ──> ALB :80 (/api/<service>/* rules, prefix rewritten away)
                │
                ▼   public subnets, tasks with public IPs, no NAT gateway
          ┌───────────────────────────────────────────────┐
-         │ lyrics   waveform   (more services...)        │  SG "services": 8080 from ALB only
+         │ lyrics   waveform   (more services...)        │  SG "services": 8080 from ALB;
+         │ playlist recommendation                       │  8080, 8081, 50051 between services
          │ lyrics-worker   waveform-worker               │
          │ rabbitmq (rabbitmq.syncwave.internal:5672)    │  SG "rabbitmq": 5672 from services
          └───────────────────────────────────────────────┘
@@ -113,8 +135,8 @@ here in the same merge request as the stack.
 | 40 | upload | `/api/upload/*` (reserved) |
 | **50** | **lyrics** | `/api/lyrics/*` |
 | **60** | **waveform** | `/api/waveform/*` |
-| 70 | playlist | `/api/playlist/*` (reserved) |
-| 80 | recommendation | `/api/recommendation/*` (reserved) |
+| **70** | **playlist** | `/api/playlist/*` |
+| **80** | **recommendation** | `/api/recommendation/*` |
 | 90 | jam | `/api/jam/*` (reserved) |
 | 100 | sync | `/api/sync/*` (reserved) |
 
@@ -146,11 +168,12 @@ Rough on-demand prices in ap-southeast-1, with everything running. Check the
 | RabbitMQ task (0.5 vCPU, 1 GB) | $22 |
 | Lyrics API + worker, Waveform API (0.25 vCPU, 0.5 GB each; worker on Spot) | $25 |
 | Waveform worker (1 vCPU, 2 GB, Spot) | $15 |
-| Public IPv4 addresses (one per task + the ALB's) | $25 |
+| Playlist API + Recommendation API (0.25 vCPU, 0.5 GB each) | $20 |
+| Public IPv4 addresses (one per task + the ALB's) | $32 |
 | Secrets, logs, ECR, S3 | < $5 |
-| **Total** | **≈ $130** (about $4 a day) |
+| **Total** | **≈ $155** (about $5 a day) |
 
-That is about **$0.18 per hour while it is up**, billed by the hour or less,
+That is about **$0.21 per hour while it is up**, billed by the hour or less,
 and nothing between sessions because everything is destroyed (RUNBOOK.md §8).
 A three-hour session costs well under a dollar. The brief's budget is
 reimbursed only if it was requested in Week 7. A local Kubernetes cluster is

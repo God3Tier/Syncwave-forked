@@ -27,7 +27,7 @@ locals {
       image        = var.image
       essential    = true
       stopTimeout  = var.stop_timeout
-      portMappings = local.routed ? [{ containerPort = 8080, protocol = "tcp" }] : []
+      portMappings = [for port in concat(local.routed ? [8080] : [], var.extra_ports) : { containerPort = port, protocol = "tcp" }]
       environment  = [for key, value in var.environment : { name = key, value = value }]
       secrets      = [for key, value in var.secrets : { name = key, valueFrom = value }]
       logConfiguration = {
@@ -152,6 +152,14 @@ resource "aws_ecs_service" "this" {
     }
   }
 
+  # Other services call this one by name, e.g. playlist.syncwave.internal
+  dynamic "service_registries" {
+    for_each = var.service_discovery == null ? [] : [1]
+    content {
+      registry_arn = aws_service_discovery_service.this[0].arn
+    }
+  }
+
   # The API applies its migrations before it starts listening
   health_check_grace_period_seconds = local.routed ? 60 : null
 
@@ -161,6 +169,23 @@ resource "aws_ecs_service" "this" {
 
   # The target group must be attached to the ALB before a service can use it
   depends_on = [aws_lb_listener_rule.this]
+}
+
+# ---------------------------------------------------------------------------
+# Private DNS name: <name>.<namespace>, e.g. playlist.syncwave.internal
+
+resource "aws_service_discovery_service" "this" {
+  count = var.service_discovery == null ? 0 : 1
+  name  = var.service_discovery.name
+
+  dns_config {
+    namespace_id   = var.service_discovery.namespace_id
+    routing_policy = "MULTIVALUE"
+    dns_records {
+      type = "A"
+      ttl  = 10
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
