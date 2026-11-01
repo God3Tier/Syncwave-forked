@@ -83,7 +83,11 @@ resource "aws_ecs_task_definition" "rabbitmq" {
       environment  = [{ name = "RABBITMQ_DEFAULT_USER", value = local.rabbitmq_user }]
       secrets      = [{ name = "RABBITMQ_DEFAULT_PASS", valueFrom = aws_secretsmanager_secret.rabbitmq.arn }]
       healthCheck = {
-        command     = ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+        # As the rabbitmq user, like the server (the image starts as root and
+        # steps down). A root check that runs before the server has created
+        # ~/.erlang.cookie creates it root-only, and the server then fails
+        # with "Error when reading /var/lib/rabbitmq/.erlang.cookie: eacces".
+        command     = ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
         interval    = 10
         timeout     = 10
         retries     = 6

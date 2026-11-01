@@ -107,8 +107,7 @@ printf 'bucket       = "syncwave-tfstate-%s"\nregion       = "ap-southeast-1"\nu
 
 ```sh
 terraform -chdir=platform init -backend-config=../backend.hcl
-terraform -chdir=platform plan -out=tfplan               # review: about 50 resources to add, no NAT gateway
-terraform -chdir=platform apply tfplan                   # ~10 minutes, mostly RDS
+terraform -chdir=platform apply                          # about 50 to add; type "yes". ~10 minutes, mostly RDS
 ```
 
 If the apply fails with *"Provider with url https://gitlab.com already
@@ -171,8 +170,7 @@ copies the image that CI already tested.
 **d) Everything else** (ECS services, task roles, ALB route):
 
 ```sh
-terraform -chdir=services/$SVC plan -out=tfplan          # review
-terraform -chdir=services/$SVC apply tfplan
+terraform -chdir=services/$SVC apply                     # type "yes"
 aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
 terraform -chdir=services/$SVC output api_url
 ```
