@@ -34,9 +34,10 @@ check "rabbitmq: waveform queue"    "http://syncwave:syncwave@$HOST:15672/api/qu
 
 # Check the APIs included in the root Compose stack. Standalone service
 # folders are not necessarily deployed, and Streaming uses /cache for health.
-for name in catalogue lyrics waveform playlist recommendation jam sync; do
+for name in catalogue lyrics waveform playlist recommendation jam sync upload; do
   check "service: $name" "http://$HOST:8080/api/$name/health"
 done
+check "upload: readiness" "http://$HOST:8080/api/upload/ready"
 check "service: streaming" "http://$HOST:8080/api/streaming/cache"
 if [ -d frontend ]; then
   check "frontend" "http://$HOST:8080/"
