@@ -58,7 +58,10 @@ Services reach each other inside the VPC by name, as they do in Compose:
   to `modules/ecs-service` and the service is reachable as
   `<service>.syncwave.internal`. Playlist does this for Jam's gRPC call.
   Callers build the name from `local.platform.service_discovery_namespace`,
-  for example `http://catalogue.syncwave.internal:8080`.
+  for example `http://catalogue.syncwave.internal:8080`. That name exists only
+  once a Catalogue stack registers it; until then Playlist and Recommendation
+  run with `catalogue_mode=off` / `stub` (RUNBOOK.md §2.3, "While the
+  Catalogue stack does not exist").
 - **Ports:** `extra_ports` publishes ports besides 8080 (Playlist: `[50051]`).
   The `services` security group lets tasks in the group reach 8080, 8081
   (Streaming) and 50051 (gRPC) on each other; only the ALB reaches 8080 from outside.

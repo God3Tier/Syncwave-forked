@@ -291,6 +291,28 @@ cd -
 their tasks, and the loop then prints that service's API URL. If it times out
 after 10 minutes, go to [7 Debug](#7-debug).
 
+**While the Catalogue stack does not exist.** Playlist and Recommendation call
+the Catalogue Service at `http://catalogue.syncwave.internal:8080`, a name only
+the Catalogue's own stack registers (there is no `services/catalogue/` yet). If
+nothing answers on that name, Recommendation returns 502 and Playlist refuses to
+add songs. Until the Catalogue is deployed, apply those two with their fallback
+modes instead of step d) as written:
+
+```sh
+cd infrastructure/aws                  # from the repo root
+terraform -chdir=services/playlist       apply -var catalogue_mode=off    # accepts any song id
+terraform -chdir=services/recommendation apply -var catalogue_mode=stub   # ranks the built-in demo songs
+cd -
+```
+
+`off` and `stub` change only the `CATALOGUE_MODE` environment variable
+(`services/playlist/README.md`, `services/recommendation/README.md`); nothing
+else differs. The change is a new task definition revision, so it goes live
+with the next CI deploy, or immediately with [6 Change configuration](#6-change-configuration).
+Once the Catalogue is deployed, apply both again **without** the `-var` (the
+default is `http`) and roll them out the same way. Nothing else needs to
+change, because the Catalogue stack takes over the same private DNS name.
+
 ### 2.4 CI deploys during the session (optional)
 
 Only needed if merges to `main` during this session should deploy here.
