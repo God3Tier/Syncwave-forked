@@ -23,6 +23,7 @@ _sym_db = _symbol_database.Default()
 
 
 
+
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1dsyncwave/media/v1/media.proto\x12\x11syncwave.media.v1\"!\n\x0eGetSongRequest\x12\x0f\n\x07song_id\x18\x01 \x01(\t\"w\n\x0fGetSongResponse\x12\x0f\n\x07song_id\x18\x01 \x01(\t\x12>\n\x11processing_status\x18\x02 \x01(\x0e\x32#.syncwave.media.v1.ProcessingStatus\x12\x13\n\x0b\x64uration_ms\x18\x03 \x01(\x03\"\'\n\x14GetStreamInfoRequest\x12\x0f\n\x07song_id\x18\x01 \x01(\t\"U\n\x15GetStreamInfoResponse\x12\x0f\n\x07song_id\x18\x01 \x01(\t\x12\x12\n\nstream_url\x18\x02 \x01(\t\x12\x17\n\x0fsupports_ranges\x18\x03 \x01(\x08*\x92\x01\n\x10ProcessingStatus\x12!\n\x1dPROCESSING_STATUS_UNSPECIFIED\x10\x00\x12 \n\x1cPROCESSING_STATUS_PROCESSING\x10\x01\x12\x1b\n\x17PROCESSING_STATUS_READY\x10\x02\x12\x1c\n\x18PROCESSING_STATUS_FAILED\x10\x03\x32i\n\x15\x43\x61talogueQueryService\x12P\n\x07GetSong\x12!.syncwave.media.v1.GetSongRequest\x1a\".syncwave.media.v1.GetSongResponse2{\n\x15StreamingQueryService\x12\x62\n\rGetStreamInfo\x12\'.syncwave.media.v1.GetStreamInfoRequest\x1a(.syncwave.media.v1.GetStreamInfoResponseb\x06proto3')
 
 _globals = globals()
