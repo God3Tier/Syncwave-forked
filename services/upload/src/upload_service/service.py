@@ -68,6 +68,15 @@ def validate_file(file: UploadFile, limit: int, *, lyrics: bool = False) -> str:
 
 def build_event(record: UploadRecord) -> dict[str, Any]:
     event_id = str(record.event_id)
+    payload: dict[str, Any] = {
+        "title": record.title,
+        "artist": record.artist,
+        "audio_reference": record.audio_reference,
+        "lyrics_reference": record.lyrics_reference,
+    }
+    if record.duration_ms is not None:
+        payload["duration_ms"] = record.duration_ms
+
     return {
         "event_id": event_id,
         "event_type": "SongUploaded",
@@ -76,13 +85,7 @@ def build_event(record: UploadRecord) -> dict[str, Any]:
         "timestamp": now().isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "producer": "upload",
         "correlation_id": event_id,
-        "payload": {
-            "title": record.title,
-            "artist": record.artist,
-            "duration_ms": record.duration_ms,
-            "audio_reference": record.audio_reference,
-            "lyrics_reference": record.lyrics_reference,
-        },
+        "payload": payload,
     }
 
 
