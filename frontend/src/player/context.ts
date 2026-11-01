@@ -23,6 +23,8 @@ export interface Player extends PlayerState {
   seek: (ms: number) => void;
   setVolume: (value: number) => void;
   positionMs: () => number;
+  /** Frequency data of what is playing, for the visualiser; null if Web Audio is unavailable. Call it only once playback has started. */
+  analyser: () => AnalyserNode | null;
 }
 
 export const PlayerContext = createContext<Player | null>(null);

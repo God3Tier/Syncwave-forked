@@ -7,7 +7,14 @@ from fastapi import WebSocket
 from jam_service.models import JamResponse, JamState, QueueItem, ReadinessDecision
 from jam_service.playlist_client import PlaylistClient
 from jam_service.repository import JamRepository, PersistedJam
-from jam_service.sync_client import Command, ReadinessStatus, SyncClient
+from jam_service.sync_client import (
+    Command,
+    ReadinessStatus,
+    SyncClient,
+    SyncClientError,
+    SyncConflictError,
+    SyncSnapshot,
+)
 
 
 class JamNotFoundError(LookupError):
@@ -206,9 +213,7 @@ class JamManager:
             selection = (
                 jam.queue[0] if queue_item_id is None else self._queue_item(jam, queue_item_id)
             )
-            snapshot = await self._sync.start(
-                request_id, jam.jam_id, jam.owner_id, selection, jam.participant_ids
-            )
+            snapshot = await self._switch_song(jam, request_id, selection)
             self._apply_snapshot(jam, snapshot.generation, snapshot.state)
             jam.current_queue_item_id = selection.queue_item_id
             await self._save(jam)
@@ -325,6 +330,27 @@ class JamManager:
         if jam.sync_generation is None:
             raise JamConflictError("playback has not started")
         return jam
+
+    async def _switch_song(self, jam: Jam, request_id: UUID, selection: QueueItem) -> SyncSnapshot:
+        """Start `selection` for everyone.
+
+        Once Sync has a session, every device's WebSocket belongs to it, and a
+        new StartPlayback would replace it and leave those connections behind
+        (no device would get PREPARE, so playback would stay PREPARING). So a
+        later start moves the existing session to the new song, as a skip does.
+        Sync rejects that while a song is still preparing (409). Jam's stored
+        state can lag behind Sync's, so Sync makes that call.
+        """
+        if jam.sync_generation is not None:
+            try:
+                return await self._sync.skip(request_id, jam.jam_id, jam.sync_generation, selection)
+            except SyncConflictError:
+                raise
+            except SyncClientError:
+                pass  # Sync no longer has the session (it restarted); start a new one
+        return await self._sync.start(
+            request_id, jam.jam_id, jam.owner_id, selection, jam.participant_ids
+        )
 
     @staticmethod
     def _queue_item(jam: Jam, queue_item_id: UUID | None) -> QueueItem:

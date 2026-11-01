@@ -21,6 +21,7 @@ import {
 } from '../api/jam';
 import { getWaveform } from '../api/media';
 import type { Jam, Readiness } from '../api/types';
+import { copyText } from '../clipboard';
 import { Waveform } from '../components/Waveform';
 import { Button, Card, EqualizerIcon, Icon, IconButton, Notice, SongArt, Spinner, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
@@ -84,6 +85,7 @@ export function JamRoom() {
   const [sync, setSync] = useState<SyncSnapshot | null>(null);
   const [session, setSession] = useState<SyncSession | null>(null);
   const sessionRef = useRef<SyncSession | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
   useEffect(() => {
@@ -182,7 +184,15 @@ export function JamRoom() {
   const currentItem = jam.queue.find((item) => item.queue_item_id === jam.current_queue_item_id) ?? null;
   const currentSongId = sync?.songId ?? currentItem?.song_id ?? null;
 
-  const copyInvite = () => void navigator.clipboard?.writeText(`${window.location.origin}/jam/${jamId}`);
+  const copyInvite = async () => {
+    const link = `${window.location.origin}/jam/${jamId}`;
+    if (await copyText(link)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      window.prompt('Copy this invite link', link);
+    }
+  };
   const leave = async () => {
     sessionRef.current?.close();
     if (!owner) await leaveJam(jamId, userId).catch(() => undefined);
@@ -194,15 +204,15 @@ export function JamRoom() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/20 bg-surface/80 px-4 py-3 backdrop-blur md:px-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-headline text-lg font-bold">Jam</h1>
-          <button type="button" onClick={copyInvite} title="Copy Jam ID link" className="flex items-center gap-1.5 rounded border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 font-mono text-xs text-secondary">
+          <button type="button" onClick={() => void copyInvite()} title="Copy invite link" className="flex items-center gap-1.5 rounded border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 font-mono text-xs text-secondary">
             {shortId(jamId)} <Icon name="content_copy" className="text-sm text-outline" />
           </button>
           <StatusChip status={owner ? 'OWNER' : 'MEMBER'} />
           <StatusChip status={jam.state} />
         </div>
         <div className="flex items-center gap-2">
-          <Button icon="link" onClick={copyInvite} className="py-1.5 text-xs">
-            Copy invite link
+          <Button icon={copied ? 'check' : 'link'} onClick={() => void copyInvite()} className="py-1.5 text-xs">
+            {copied ? 'Copied' : 'Copy invite link'}
           </Button>
           <Button variant="ghost" icon="logout" onClick={() => void leave()} className="py-1.5 text-xs">
             Leave
@@ -224,11 +234,11 @@ export function JamRoom() {
             tone="info"
             action={
               <Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">
-                Tap to enable audio
+                Join Jam (Enable Audio)
               </Button>
             }
           >
-            This device plays in sync with everyone else once audio is enabled.
+            Join to listen: this device then plays in sync with everyone else. Every listener, the owner included, joins before playback.
           </Notice>
         )}
       </div>
@@ -408,7 +418,13 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
                 </div>
                 {owner && (
                   <div className="flex items-center">
-                    <IconButton icon="play_circle" label="Play this now" onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))} />
+                    <IconButton
+                      icon="play_circle"
+                      label={jam.state === 'PREPARING' ? 'Wait until the current song is ready' : 'Play this now'}
+                      disabled={jam.state === 'PREPARING'}
+                      onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))}
+                      className="disabled:cursor-not-allowed"
+                    />
                     {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, userId, item.queue_item_id))} />}
                   </div>
                 )}
