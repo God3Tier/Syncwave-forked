@@ -39,8 +39,8 @@ for dir in services/*/; do
   [ "$name" = "_template" ] && continue
   grep -q "services/$name/compose.yaml" docker-compose.yml || continue
   case "$name" in
-    # Routed as /api/streaming and has no /health; /cache is its healthcheck.
-    audio_transmitter) check "service: streaming" "http://$HOST:8080/api/streaming/cache" ;;
+    # The gateway routes this folder as /api/streaming.
+    audio_transmitter) check "service: streaming" "http://$HOST:8080/api/streaming/health" ;;
     *) check "service: $name" "http://$HOST:8080/api/$name/health" ;;
   esac
 done

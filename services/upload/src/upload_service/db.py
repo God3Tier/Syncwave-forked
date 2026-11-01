@@ -40,6 +40,7 @@ class UploadRecord(Base):
     event_id: Mapped[uuid.UUID] = mapped_column(Uuid, unique=True)
     title: Mapped[str] = mapped_column(String(200))
     artist: Mapped[str] = mapped_column(String(200))
+    mood: Mapped[str | None] = mapped_column(String(64))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     audio_reference: Mapped[str] = mapped_column(String(512))
     lyrics_reference: Mapped[str | None] = mapped_column(String(512))

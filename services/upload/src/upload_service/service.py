@@ -14,6 +14,7 @@ from upload_service.config import Settings
 from upload_service.db import Status, UploadRecord, now
 
 logger = logging.getLogger(__name__)
+MAX_MOOD_LENGTH = 64
 AUDIO_TYPES = {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
@@ -76,6 +77,8 @@ def build_event(record: UploadRecord) -> dict[str, Any]:
     }
     if record.duration_ms is not None:
         payload["duration_ms"] = record.duration_ms
+    if record.mood is not None:
+        payload["mood"] = record.mood
 
     return {
         "event_id": event_id,
@@ -102,6 +105,7 @@ class UploadService:
         duration_ms: int | None,
         audio: UploadFile,
         lyrics: UploadFile | None,
+        mood: str | None = None,
     ) -> UploadRecord:
         title, artist = title.strip(), artist.strip()
         if (
@@ -113,6 +117,13 @@ class UploadService:
             or "\x00" in artist
         ):
             raise UploadError(400, "INVALID_REQUEST", "Title and artist need 1 to 200 characters")
+        # Recommendation matches moods case-sensitively ("calm", "upbeat"...), and
+        # Catalogue stores at most 64 characters. A blank form field means no mood.
+        mood = (mood or "").strip().lower() or None
+        if mood is not None and (len(mood) > MAX_MOOD_LENGTH or "\x00" in mood):
+            raise UploadError(
+                400, "INVALID_REQUEST", f"Mood needs at most {MAX_MOOD_LENGTH} characters"
+            )
         extension = await asyncio.to_thread(validate_file, audio, self.settings.audio_max_bytes)
         if lyrics is not None:
             await asyncio.to_thread(
@@ -124,6 +135,7 @@ class UploadService:
             event_id=uuid.uuid4(),
             title=title,
             artist=artist,
+            mood=mood,
             duration_ms=duration_ms,
             audio_reference=f"audio/{song_id}{extension}",
             lyrics_reference=f"lyrics/{song_id}.lrc" if lyrics else None,

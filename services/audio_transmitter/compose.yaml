@@ -20,7 +20,7 @@ services:
         aliases:
           - streaming
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/cache"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/health"]
       interval: 5s
       timeout: 3s
       retries: 10

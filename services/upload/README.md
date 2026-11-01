@@ -8,7 +8,7 @@ publisher process sends committed `SongUploaded` events to RabbitMQ.
 
 | Interface | Purpose |
 | --- | --- |
-| `POST /uploads` | Multipart `title`, `artist`, `audio`, optional `lyrics` and `duration_ms`; returns `202` with a receipt |
+| `POST /uploads` | Multipart `title`, `artist`, `audio`, optional `lyrics`, `duration_ms` and `mood`; returns `202` with a receipt |
 | `GET /uploads/{song_id}` | Receipt and event delivery status |
 | `GET /health` | Process health |
 | `GET /ready` | Database schema and S3 bucket availability |
@@ -24,8 +24,8 @@ enter title/artist, select an audio file and optional lyrics file, and click
 **Execute**. A successful upload returns `202` with a receipt. Copy its
 `song_id` into `GET /uploads/{song_id}` to check event delivery status.
 
-1. Validate title/artist, optional positive duration, file size/type and audio
-   header. Audio is spooled to disk by the multipart parser, then passed to S3
+1. Validate title/artist, optional positive duration, optional mood (trimmed,
+   lowercased, at most 64 characters), file size/type and audio header. Audio is spooled to disk by the multipart parser, then passed to S3
    as a file object; it is not loaded into one large Python byte string.
 2. Generate UUID v4 `song_id` and `event_id`. Save an `UPLOADING` receipt in
    the Upload database. Client filenames never become S3 paths.
@@ -70,14 +70,14 @@ finished. `publish_attempts`, `last_error_code` and `published_at` make delivery
 observable. Poll Catalogue separately for canonical `processing_status`,
 `lyrics_status` and `waveform_status`.
 
-The event includes `title`, `artist`, nullable `duration_ms`, `audio_reference`
-and nullable `lyrics_reference`, plus the shared event envelope. These metadata
-fields match the Catalogue implementation on `feature/catalogue-service`.
-That service and its `catalogue.song-uploaded` binding are not on this branch
-yet; Catalogue registration requires integrating that work. Lyrics/Waveform
-bindings already exist here. The metadata fields are additive in the event
-schema, so existing consumers/examples remain compatible. Shared contract
-review by affected owners remains part of the merge process.
+The event includes `title`, `artist`, `audio_reference`, nullable
+`lyrics_reference`, and `duration_ms` and `mood` when supplied, plus the shared
+event envelope (`contracts/events/song-uploaded.schema.json`). Catalogue
+registers the song from it.
+
+`mood` feeds Recommendation, which puts songs whose mood suits the weather
+first. It recognises `calm`, `mellow`, `upbeat` and `energetic`; any other mood
+is stored but never matches the weather.
 
 ## Run and try
 
@@ -88,7 +88,7 @@ docker compose up -d --build upload upload-publisher
 curl http://localhost:8080/api/upload/health
 curl http://localhost:8080/api/upload/ready
 curl -i -X POST http://localhost:8080/api/upload/uploads \
-  -F 'title=Example song' -F 'artist=Example artist' \
+  -F 'title=Example song' -F 'artist=Example artist' -F 'mood=calm' \
   -F 'audio=@/path/to/song.mp3' -F 'lyrics=@/path/to/song.lrc'
 curl http://localhost:8080/api/upload/uploads/<song_id>
 docker compose logs upload upload-publisher

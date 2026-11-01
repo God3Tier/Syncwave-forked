@@ -223,6 +223,8 @@ integration:
     - echo "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - docker compose up --detach --no-build --pull always --quiet-pull --wait --wait-timeout 300
     - sh tests/integration/smoke.sh docker
+    # Scenario 2 end to end, with the Python already in the Upload image.
+    - docker compose exec -T upload python - --base-url http://gateway:8080 < tests/integration/upload-flow.py
     - if [ -f tests/e2e/run.sh ]; then sh tests/e2e/run.sh docker; fi
   after_script:
     - docker compose ps --all > compose-ps.txt 2>&1 || true

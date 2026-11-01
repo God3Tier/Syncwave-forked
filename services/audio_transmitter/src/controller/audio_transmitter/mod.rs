@@ -1,5 +1,6 @@
 pub mod audio_by_time;
 pub mod cache_state;
+pub mod health;
 pub mod stream_info;
 pub mod track_audio;
 
@@ -16,6 +17,7 @@ pub fn configure(config: &mut web::ServiceConfig) {
             "/tracks/{track_id}/stream-info",
             web::get().to(stream_info::get_stream_info),
         )
+        .route("/health", web::get().to(health::get))
         .route("/cache", web::get().to(cache_state::get))
         .route(
             "/tracks/{track_id}/audio/range",
