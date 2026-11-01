@@ -27,9 +27,9 @@
           "minLength": 1
         },
         "mood": {
-          "description": "Optional mood label for the song.",
+          "description": "Optional mood label for the song, lowercase (Recommendation matches calm, mellow, upbeat and energetic to the weather). At most 64 characters, the Catalogue column size.",
           "anyOf": [
-            { "type": "string", "minLength": 1 },
+            { "type": "string", "minLength": 1, "maxLength": 64 },
             { "type": "null" }
           ]
         },

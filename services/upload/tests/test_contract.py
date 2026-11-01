@@ -27,12 +27,11 @@ def test_produced_events_follow_shared_schema(client: TestClient, wav: bytes) ->
     publisher = FakePublisher()
     for with_lyrics in (False, True):
         files = {"audio": ("song.wav", wav)}
+        data = {"title": "T", "artist": "A"}
         if with_lyrics:
             files["lyrics"] = ("song.lrc", b"[00:01.00]Hello")
-        assert (
-            client.post("/uploads", data={"title": "T", "artist": "A"}, files=files).status_code
-            == 202
-        )
+            data["mood"] = "calm"
+        assert client.post("/uploads", data=data, files=files).status_code == 202
         assert run(client, dispatch_one, app.state.database.sessions, publisher)
     for event in publisher.events:
         validator.validate(event)

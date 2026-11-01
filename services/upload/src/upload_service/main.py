@@ -29,6 +29,7 @@ class Receipt(BaseModel):
     status: Status
     title: str
     artist: str
+    mood: str | None
     duration_ms: int | None
     audio_reference: str
     lyrics_reference: str | None
@@ -127,10 +128,11 @@ async def create_upload(
     audio: Annotated[UploadFile, File()],
     lyrics: Annotated[UploadFile | None, File()] = None,
     duration_ms: Annotated[int | None, Form(gt=0, le=2147483647)] = None,
+    mood: Annotated[str | None, Form(max_length=64)] = None,
 ) -> Receipt:
     """Store media and queue its event. A 202 response does not mean processing is complete."""
     service: UploadService = request.app.state.service
-    record = await service.create(title, artist, duration_ms, audio, lyrics)
+    record = await service.create(title, artist, duration_ms, audio, lyrics, mood)
     # Relative to the public gateway, without reflecting untrusted headers.
     response.headers["Location"] = f"/api/upload/uploads/{record.song_id}"
     return Receipt.from_record(record)

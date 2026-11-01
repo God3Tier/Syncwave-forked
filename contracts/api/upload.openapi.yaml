@@ -169,6 +169,15 @@ components:
             exclusiveMinimum: 0.0
           - type: 'null'
           title: Duration Ms
+        mood:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Mood
+          description: Optional mood label, e.g. calm, mellow, upbeat or energetic
+            (the moods Recommendation matches to the weather). Trimmed and lowercased;
+            blank means none.
       type: object
       required:
       - title
@@ -193,6 +202,11 @@ components:
         artist:
           type: string
           title: Artist
+        mood:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mood
         duration_ms:
           anyOf:
           - type: integer
@@ -235,6 +249,7 @@ components:
       - status
       - title
       - artist
+      - mood
       - duration_ms
       - audio_reference
       - lyrics_reference

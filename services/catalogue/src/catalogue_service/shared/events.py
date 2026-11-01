@@ -114,8 +114,8 @@ def parse_song_uploaded(body: bytes) -> SongUploaded:
     if not isinstance(audio_reference, str) or not audio_reference:
         raise InvalidEvent("payload.audio_reference must be a non-empty string", **ids)
     mood = payload.get("mood")
-    if mood is not None and (not isinstance(mood, str) or not mood):
-        raise InvalidEvent("payload.mood must be a non-empty string or null", **ids)
+    if mood is not None and (not isinstance(mood, str) or not mood or len(mood) > 64):
+        raise InvalidEvent("payload.mood must be a 1-64 character string or null", **ids)
     lyrics_reference = payload.get("lyrics_reference")
     if lyrics_reference is not None and (
         not isinstance(lyrics_reference, str) or not lyrics_reference

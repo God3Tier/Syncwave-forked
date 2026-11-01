@@ -15,6 +15,7 @@ from referencing import Registry, Resource
 from catalogue_service.shared.events import (
     QUEUE_PROCESSING_RESULTS,
     QUEUE_SONG_UPLOADED,
+    InvalidEvent,
     parse_song_uploaded,
 )
 from catalogue_service.worker.handler import CatalogueHandler
@@ -130,6 +131,22 @@ async def test_invalid_event_is_dead_lettered_without_publishing(
     assert message.outcome == "ack"
     assert publisher.dead_lettered == [(QUEUE_SONG_UPLOADED, b"not json")]
     assert publisher.events == []
+
+
+@pytest.mark.parametrize(("mood", "valid"), [("calm", True), ("x" * 64, True), ("x" * 65, False)])
+def test_mood_fits_the_catalogue_column(
+    song_uploaded: Callable[..., dict[str, Any]], mood: str, valid: bool
+) -> None:
+    event = song_uploaded()
+    event["payload"]["mood"] = mood
+    body = json.dumps(event).encode()
+
+    assert validator("SongUploaded").is_valid(event) == valid
+    if valid:
+        assert parse_song_uploaded(body).mood == mood
+    else:
+        with pytest.raises(InvalidEvent):
+            parse_song_uploaded(body)
 
 
 def test_the_schemas_reject_unknown_payload_fields() -> None:

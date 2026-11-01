@@ -64,6 +64,22 @@ def test_instrumental_and_optional_duration(client: TestClient, wav: bytes) -> N
     assert response.json()["duration_ms"] == 1000
 
 
+@pytest.mark.parametrize(("sent", "stored"), [(" Calm ", "calm"), ("  ", None), (None, None)])
+def test_optional_mood_is_normalised_and_published(
+    client: TestClient, wav: bytes, sent: str | None, stored: str | None
+) -> None:
+    data = {"title": "T", "artist": "A"}
+    if sent is not None:
+        data["mood"] = sent
+    response = client.post("/uploads", data=data, files={"audio": ("song.wav", wav)})
+    assert response.status_code == 202, response.text
+    assert response.json()["mood"] == stored
+    publisher = FakePublisher()
+    assert run(client, dispatch_one, app.state.database.sessions, publisher)
+    assert publisher.events[0]["payload"].get("mood") == stored
+    assert ("mood" in publisher.events[0]["payload"]) == (stored is not None)
+
+
 def test_broker_outage_retries_same_event_after_restart(client: TestClient, wav: bytes) -> None:
     receipt = submit(client, wav).json()
     publisher = FakePublisher(fail=True)
@@ -183,6 +199,8 @@ def test_rejects_invalid_audio_without_writing(
         {"title": "T", "artist": "A", "duration_ms": "2147483648"},
         {"title": "T\x00", "artist": "A"},
         {"title": "x" * 201, "artist": "A"},
+        {"title": "T", "artist": "A", "mood": "x" * 65},
+        {"title": "T", "artist": "A", "mood": "calm\x00"},
     ],
 )
 def test_rejects_invalid_metadata(client: TestClient, storage: FakeStorage, wav: bytes, data):
