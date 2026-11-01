@@ -58,7 +58,7 @@ All three run in the browser at <http://localhost:8080>.
 3. **Create & Synchronise a Jam.** Create a playlist and choose "Start Jam
    with this playlist", or use the Jam page. Open the invite link in a
    second tab with `?user=new` added, to join as another listener, or on
-   another device on the same network. Tap "enable audio" on every device,
+   another device on the same network. Press "Join Jam (Enable Audio)" on every device,
    then press Play as the owner. Each device buffers the song and starts it
    at the same server time. The Sync stats panel shows the clock offset and
    start error.

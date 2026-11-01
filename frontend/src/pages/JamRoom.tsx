@@ -234,11 +234,11 @@ export function JamRoom() {
             tone="info"
             action={
               <Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">
-                Tap to enable audio
+                Join Jam (Enable Audio)
               </Button>
             }
           >
-            This device plays in sync with everyone else once audio is enabled.
+            Join to listen: this device then plays in sync with everyone else. Every listener, the owner included, joins before playback.
           </Notice>
         )}
       </div>

@@ -49,7 +49,7 @@ Jam and Sync use the local stack's mock tokens. You can override them at build t
 
 `src/sync/syncSession.ts` is a TypeScript port of the Sync demo harness (`services/sync/src/sync_service/demo.py`). It plays the real stream instead of a test tone.
 
-1. When the owner starts playback, every device opens `/api/sync/ws`. The browser only allows audio after a user gesture, so a device needs a tap on "enable audio" before this happens.
+1. When the owner starts playback, every device opens `/api/sync/ws`. The browser only allows audio after a user gesture, so a device needs a tap on "Join Jam (Enable Audio)" before this happens.
 2. The device estimates its clock offset from 5 `TIME_PING`/`TIME_PONG` samples. It takes the median of the 3 lowest-delay samples (`src/sync/clock.ts`), then sends a fresh ping every 15 s.
 3. On `PREPARE` it downloads and decodes the `stream_url`, then sends `READY`.
 4. On `PLAY_AT`, `RESUME_AT`, `PAUSE_AT` or `SEEK_TO` it converts the server time to local time and schedules Web Audio.
