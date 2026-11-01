@@ -321,6 +321,21 @@ cd -
 their tasks, and the loop then prints that service's API URL. If it times out
 after 10 minutes, go to [7 Debug](#7-debug).
 
+**Open the app.** Everything is behind the load balancer's address, which the
+platform stack prints:
+
+```sh
+terraform -chdir=infrastructure/aws/platform output -raw base_url; echo   # from the repo root
+```
+
+Open that URL (`http://syncwave-<id>.ap-southeast-1.elb.amazonaws.com`) in a
+browser for the web UI once the frontend stack is up; the APIs are at
+`<base_url>/api/<service>/...`. Each service stack prints its own address too
+(`terraform -chdir=infrastructure/aws/services/<folder> output -raw api_url`).
+It is plain `http://` because the platform has no TLS certificate, so the
+browser may say the site is not secure. The address changes every session,
+because the load balancer is recreated.
+
 **Leaving a service out.** Services call each other by private DNS name, and
 a name exists only while that service's stack is up. If you bring up only
 some stacks, apply the callers with their fallbacks instead of step d) as
