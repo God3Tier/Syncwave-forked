@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest';
+import { formatDuration, formatMs, gradientFor, parseTimestamp, shortId } from './format';
+import { moveItem } from './hooks/useDragReorder';
+
+describe('format', () => {
+  it('formats durations as mm:ss', () => {
+    expect(formatDuration(0)).toBe('00:00');
+    expect(formatDuration(222_900)).toBe('03:42');
+    expect(formatDuration(null)).toBe('--:--');
+  });
+
+  it('parses seek input', () => {
+    expect(parseTimestamp('1:30')).toBe(90_000);
+    expect(parseTimestamp('01:05.5')).toBe(65_500);
+    expect(parseTimestamp('45')).toBe(45_000);
+    expect(parseTimestamp('')).toBeNull();
+    expect(parseTimestamp('1:2:3')).toBeNull();
+    expect(parseTimestamp('abc')).toBeNull();
+  });
+
+  it('formats signed milliseconds', () => {
+    expect(formatMs(12.44, 1)).toBe('+12.4 ms');
+    expect(formatMs(-21)).toBe('−21 ms');
+    expect(formatMs(null)).toBe('—');
+  });
+
+  it('shortens ids and gives each song a stable gradient', () => {
+    expect(shortId('7c1e0000-0000-4000-8000-00000000a90b')).toBe('7c1e…a90b');
+    expect(gradientFor('a')).toBe(gradientFor('a'));
+    expect(gradientFor('a')).not.toBe(gradientFor('b'));
+  });
+});
+
+describe('moveItem', () => {
+  it('moves an item into a gap of the original list', () => {
+    expect(moveItem(['a', 'b', 'c', 'd'], 0, 2)).toEqual(['b', 'a', 'c', 'd']);
+    expect(moveItem(['a', 'b', 'c', 'd'], 3, 0)).toEqual(['d', 'a', 'b', 'c']);
+    expect(moveItem(['a', 'b', 'c', 'd'], 1, 4)).toEqual(['a', 'c', 'd', 'b']);
+  });
+});
