@@ -3,9 +3,11 @@
 Copy-paste commands for the AWS production environment. **Why** things are
 set up this way is in [README.md](README.md).
 
-The commands are for **Git Bash**, the same shell the CI scripts use, and run
-from `infrastructure/aws/` (`cd infrastructure/aws` from the repo root). Each
-step says what you should see.
+The commands are for **Git Bash**, the same shell the CI scripts use. Start
+every step in the **repo root** (`syncwave/`). Steps that use Terraform begin
+with `cd infrastructure/aws` and end with `cd -`, which takes you back to the
+repo root; the other steps work from any directory. Each step says what you
+should see.
 
 **Nothing stays up between sessions.** A session starts with an empty account,
 brings everything up (§2, about 25 minutes), and ends by destroying all of it,
@@ -74,6 +76,67 @@ account, run `aws configure --profile syncwave` instead and add
 - If it leaks, **deactivate it immediately** (IAM > Users > Security
   credentials), then check CloudTrail for activity you don't recognise.
 
+### Log in to the GitLab container registry (once per machine)
+
+Each session copies CI's images from GitLab's registry into ECR (step 2.3c).
+The project is private, so Docker needs a token that can pull from its
+registry; anonymous pulls get `403 Forbidden`. You only need to **read**.
+
+**Open the token page:** in GitLab, select your avatar (top right) >
+**Edit profile** > in the left sidebar, **Access** > **Personal access
+tokens**. The **Generate token** dropdown offers two kinds of token. Use the
+fine-grained one if you can; it can only pull this project's images.
+
+**Option A: fine-grained token (recommended)**
+
+1. **Generate token** > **Fine-grained token**.
+2. **Name**: `syncwave-registry`. **Description** (optional): `Pull SyncWave
+   images for the AWS runbook`.
+3. **Expiration date**: the end of the project or semester (at most 365
+   days; GitLab picks 365 days if left empty).
+4. Under **Group and project access**, select **Only specific groups or
+   projects I have access to**, then **Add group or project** >
+   `cs302-2026/g4-team6/syncwave`. Add the project, not the `g4-team6`
+   group: a group includes all its subgroups and projects.
+5. Under **Add resource permissions**, keep the **Group and project** tab.
+   Type `container` in **Search for resources to add** (it is under
+   **Packages and Registry**) and tick **Container Repository**. Tick nothing
+   else, and leave the **User** and **Global** tabs empty.
+6. In the right panel, under **Group and project**, set the permission for
+   Container Repository to **Read**.
+7. **Generate token**, then copy the token. It is shown only once.
+
+**Option B: legacy token** (if fine-grained tokens aren't offered, or the
+group blocks them)
+
+1. **Generate token** > **Legacy token**.
+2. **Token name**: `syncwave-registry`. **Expiration date**: as above.
+3. Scopes: tick only **`read_registry`**. A legacy token reaches every
+   project you can see, so give it nothing more.
+4. **Generate token**, then copy the token. It is shown only once.
+
+**Log in** with your GitLab username and the token as the password. Pasting
+through stdin keeps the token out of your shell history:
+
+```sh
+read -rsp "GitLab token: " GL_TOKEN; echo
+echo "$GL_TOKEN" | docker login registry.gitlab.com --username <your gitlab username> --password-stdin
+unset GL_TOKEN
+```
+
+You should see `Login Succeeded`. Check that the token can pull the images:
+
+```sh
+docker buildx imagetools inspect registry.gitlab.com/cs302-2026/g4-team6/syncwave/lyrics:dev | head -n 3
+```
+
+You should see `Name:`, `MediaType:` and `Digest:` lines. `403 Forbidden` or
+`denied` means the token lacks the permission or the project.
+
+Docker remembers the login, so you only repeat this when the token expires
+or you change machines. Same rules as the AWS key: never commit or share the
+token. If it leaks, revoke it on the same Personal access tokens page.
+
 ---
 
 ## 2. Bring it up (every session)
@@ -84,10 +147,12 @@ are only needed the first time on a machine, but are harmless to repeat.
 ### 2.1 State bucket (bootstrap)
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 terraform -chdir=bootstrap init
 terraform -chdir=bootstrap apply                         # type "yes"
 terraform -chdir=bootstrap output -raw backend_hcl > backend.hcl
 cat backend.hcl
+cd -
 ```
 
 You should see `bucket = "syncwave-tfstate-<account id>"`, `use_lockfile = true`.
@@ -99,15 +164,19 @@ To work on a stack from another machine during the session, write the file
 from your own credentials instead of running bootstrap:
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 printf 'bucket       = "syncwave-tfstate-%s"\nregion       = "ap-southeast-1"\nuse_lockfile = true\nencrypt      = true\n' \
   "$(aws sts get-caller-identity --query Account --output text)" > backend.hcl
+cd -
 ```
 
 ### 2.2 Platform (shared; agree with the team first)
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 terraform -chdir=platform init -backend-config=../backend.hcl
 terraform -chdir=platform apply                          # about 50 to add; type "yes". ~10 minutes, mostly RDS
+cd -
 ```
 
 If the apply fails with *"Provider with url https://gitlab.com already
@@ -124,67 +193,104 @@ MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/rabbitmq --since 15m | grep "defi
 You should see `running 1, desired 1` and a `definitions loaded` line. The
 line can take a minute or two after the task starts.
 
-### 2.3 A service stack (repeat for each service)
+### 2.3 Service stacks
+
+`SERVICES` lists the service stacks to bring up: folder names under
+`services/`, separated by spaces. Each step below runs for every service in
+it, in turn, so run them in the same terminal.
+
+- **Adding your service:** once its stack is in `services/<name>/` (see
+  "Adding another service's stack" in README.md), add `<name>` here and in
+  the same list in §8.
+- **Bringing up only some:** set `SERVICES` to just those for this session.
 
 ```sh
-SVC=lyrics          # then again with SVC=waveform
-terraform -chdir=services/$SVC init -backend-config=../../backend.hcl
+SERVICES="lyrics waveform"             # add new services here (and in §8)
+
+cd infrastructure/aws                  # from the repo root
+for SVC in $SERVICES; do
+  terraform -chdir=services/$SVC init -backend-config=../../backend.hcl
+done
+cd -
 ```
 
-**a) Image repository and database first.** The tasks can't start without either.
+**a) Image repositories and databases first.** The tasks can't start without either.
 
 ```sh
-terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this -target=module.db
+cd infrastructure/aws                  # from the repo root
+for SVC in $SERVICES; do
+  terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this -target=module.db
+done
+cd -
 ```
 
-Terraform warns that `-target` is for exceptional use; this is one. Type `yes`.
+Terraform warns that `-target` is for exceptional use; this is one. Type
+`yes` once for each service.
 
-**b) Create the service's database and login role.**
+**b) Create each service's database and login role.**
 
 ```sh
-TASK=$(eval "$(terraform -chdir=services/$SVC output -raw db_init_command)")
-echo $TASK
-aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
-aws ecs describe-tasks --cluster syncwave --tasks $TASK --query 'tasks[0].containers[0].exitCode'
-MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/$SVC-db-init --since 15m
+cd infrastructure/aws                  # from the repo root
+for SVC in $SERVICES; do
+  TASK=$(eval "$(terraform -chdir=services/$SVC output -raw db_init_command)")
+  aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
+  echo "$SVC db-init exit code: $(aws ecs describe-tasks --cluster syncwave --tasks $TASK \
+    --query 'tasks[0].containers[0].exitCode' --output text)"
+  MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/$SVC-db-init --since 15m
+done
+cd -
 ```
 
-You should see exit code `0`, and `database lyrics is ready` in the log. It
-is safe to run again.
+For each service you should see exit code `0` and `database <service> is
+ready` in the log. It is safe to run again.
 
-**c) Put a first image in ECR.** The repository is new every session, so it
-starts empty.
+**c) Put a first image in ECR.** The repositories are new every session, so
+they start empty. This needs the GitLab registry login from §1.
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 ECR=$(terraform -chdir=platform output -raw ecr_registry)
-docker login registry.gitlab.com      # GitLab username + a personal access token with read_registry
-aws ecr get-login-password | docker login --username AWS --password-stdin $ECR
-docker buildx imagetools create --tag $ECR/syncwave/$SVC:main \
-  registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:dev
+aws ecr get-login-password | docker login --username AWS --password-stdin $ECR   # valid 12 hours
+for SVC in $SERVICES; do
+  docker buildx imagetools create --tag $ECR/syncwave/$SVC:main \
+    registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:dev
+done
+cd -
 ```
 
-Use the `:main` image instead of `:dev` once the service has been merged to
-`main`. You should see the manifest being pushed. No rebuild happens; this
-copies the image that CI already tested.
+Use the `:main` image instead of `:dev` once a service has been merged to
+`main`. You should see each manifest being pushed. No rebuild happens; this
+copies the images that CI already tested.
 
-**d) Everything else** (ECS services, task roles, ALB route):
+**d) Everything else** (ECS services, task roles, ALB routes):
 
 ```sh
-terraform -chdir=services/$SVC apply                     # type "yes"
-aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
-terraform -chdir=services/$SVC output api_url
+cd infrastructure/aws                  # from the repo root
+for SVC in $SERVICES; do
+  terraform -chdir=services/$SVC apply                   # type "yes" for each
+done
+for SVC in $SERVICES; do
+  # ecs_services lists the stack's ECS services, e.g. ["lyrics","lyrics-worker"]
+  aws ecs wait services-stable --cluster syncwave \
+    --services $(terraform -chdir=services/$SVC output -json ecs_services | tr '[]",' '    ')
+  terraform -chdir=services/$SVC output -raw api_url; echo
+done
+cd -
 ```
 
-`wait services-stable` returns silently when both services run their task.
-If it times out after 10 minutes, go to [7 Debug](#7-debug).
+`wait services-stable` returns silently once a stack's ECS services all run
+their tasks, and the loop then prints that service's API URL. If it times out
+after 10 minutes, go to [7 Debug](#7-debug).
 
 ### 2.4 CI deploys during the session (optional)
 
 Only needed if merges to `main` during this session should deploy here.
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 terraform -chdir=platform output -raw gitlab_deploy_role_arn; echo
 terraform -chdir=platform output -raw ecr_registry; echo
+cd -
 ```
 
 In GitLab, under Settings > CI/CD > Variables, add each of these as a
@@ -206,6 +312,7 @@ The values are the same every session, so the last three can stay set.
 ## 3. Smoke test
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 ALB=$(terraform -chdir=platform output -raw base_url)
 curl -s $ALB/api/lyrics/health; echo        # {"status":"ok"}
 curl -s $ALB/api/waveform/health; echo      # {"status":"ok"}
@@ -218,6 +325,7 @@ aws ecs describe-services --cluster syncwave \
 
 MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 1h | grep consuming     # consuming lyrics.song-uploaded with prefetch 10
 MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 1h | grep consuming   # consuming waveform.song-uploaded with prefetch 2
+cd -
 ```
 
 ---
@@ -229,15 +337,31 @@ This follows the same steps as "Try it without the Upload Service" in
 AWS, so the event is published from inside a worker container.
 
 **On your machine:** upload a song and its lyrics as the Upload Service
-would. `example.mp3`/`example.lrc` are in the repo root; any `.mp3`/`.lrc`
-works.
+would. No sample files are needed: Python generates a 3-second tone that
+fades out (the same one as the waveform README), and `printf` writes three
+lines of lyrics. Both are piped straight to S3 (`aws s3 cp -` reads stdin),
+so nothing is written to disk.
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 ALB=$(terraform -chdir=platform output -raw base_url)
 BUCKET=$(terraform -chdir=platform output -raw audio_bucket_name)
 SONG_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $SONG_ID
-aws s3 cp ../../example.mp3 s3://$BUCKET/audio/$SONG_ID.mp3
-aws s3 cp ../../example.lrc s3://$BUCKET/lyrics/$SONG_ID.lrc
+
+python -c "
+import io, math, struct, sys, wave
+buf = io.BytesIO()
+with wave.open(buf, 'wb') as f:
+    f.setnchannels(1); f.setsampwidth(2); f.setframerate(44100)
+    f.writeframes(b''.join(struct.pack('<h', int(30000 * (1 - i / 132300) * math.sin(i / 20))) for i in range(132300)))
+sys.stdout.buffer.write(buf.getvalue())
+" | aws s3 cp - s3://$BUCKET/audio/$SONG_ID.wav
+
+printf '[ti:Demo]\n[00:00.50]Hello\n[00:01.50]from\n[00:02.50]SyncWave\n' \
+  | aws s3 cp - s3://$BUCKET/lyrics/$SONG_ID.lrc
+
+aws s3 ls s3://$BUCKET/ --recursive | grep $SONG_ID      # both objects, about 258 KB and 60 bytes
+cd -
 
 WORKER=$(aws ecs list-tasks --cluster syncwave --service-name lyrics-worker --query 'taskArns[0]' --output text)
 aws ecs execute-command --cluster syncwave --task $WORKER --container lyrics-worker --interactive --command sh
@@ -259,7 +383,7 @@ async def main(song_id):
         "event_id": event_id, "event_type": "SongUploaded", "version": 1, "song_id": song_id,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "producer": "upload", "correlation_id": event_id,
-        "payload": {"audio_reference": f"audio/{song_id}.mp3", "lyrics_reference": f"lyrics/{song_id}.lrc",
+        "payload": {"audio_reference": f"audio/{song_id}.wav", "lyrics_reference": f"lyrics/{song_id}.lrc",
                     "title": "Demo", "artist": "SyncWave Artist"},
     }
     connection = await aio_pika.connect(host=os.environ["AMQP_HOST"], port=int(os.environ["AMQP_PORT"]),
@@ -289,8 +413,9 @@ curl -s "$ALB/api/waveform/songs/$SONG_ID/waveform?points=10"; echo
 curl -s $ALB/api/waveform/songs/$SONG_ID/waveform/bands | head -c 200; echo
 ```
 
-Lyrics come back with `"status": "READY"` and the timed `lines`; the waveform
-comes back as 10 peaks. If you get another status or a 404 at first,
+Lyrics come back with `"status": "READY"` and three timed `lines` (Hello,
+from, SyncWave); the waveform comes back as 10 peaks that get smaller as the
+tone fades. If you get another status or a 404 at first,
 processing is still running. To watch it happen:
 
 ```sh
@@ -313,9 +438,11 @@ and waits until they are stable.
 
 **By hand** (for example before CI variables are set). Use the content tag
 from the build job's log (`IMAGE_TAG=…`) or a branch tag such as `dev`.
-Log in to both registries first, as in step 2.3c.
+You need the GitLab registry login from §1 and the ECR login from step 2.3c
+(log in to ECR again if it has been more than 12 hours).
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 SVC=lyrics; TAG=<tag>
 ECR=$(terraform -chdir=platform output -raw ecr_registry)
 docker buildx imagetools create --tag $ECR/syncwave/$SVC:$TAG \
@@ -326,6 +453,7 @@ for s in $SVC $SVC-worker; do
     --query 'service.taskDefinition' --output text
 done
 aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
+cd -
 ```
 
 `--task-definition syncwave-<name>` without a revision number means the
@@ -357,6 +485,7 @@ the image is CI's job, and Terraform must not undo a deploy. Pass the image
 that is running now, then roll out:
 
 ```sh
+cd infrastructure/aws                  # from the repo root
 SVC=lyrics
 # The image tag the service is running now
 TAG=$(aws ecs describe-task-definition --query 'taskDefinition.containerDefinitions[0].image' --output text \
@@ -367,6 +496,7 @@ for s in $SVC $SVC-worker; do
   aws ecs update-service --cluster syncwave --service $s --task-definition syncwave-$s --query 'service.taskDefinition' --output text
 done
 aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
+cd -
 ```
 
 If you skip the `update-service` step, the change goes live with the next
@@ -439,10 +569,15 @@ stack keeps its state in the bootstrap bucket. The ECR repositories, the
 audio bucket and the state bucket are deleted together with their contents.
 
 ```sh
-terraform -chdir=services/waveform destroy               # type "yes"
-terraform -chdir=services/lyrics destroy
+SERVICES="lyrics waveform"             # the same list as §2.3
+
+cd infrastructure/aws                  # from the repo root
+for SVC in $SERVICES; do
+  terraform -chdir=services/$SVC destroy                 # type "yes" for each
+done
 terraform -chdir=platform destroy                        # ~10 minutes, mostly RDS
 terraform -chdir=bootstrap destroy                       # last
+cd -
 ```
 
 Each one should end with `Destroy complete!`. If a destroy fails, fix the

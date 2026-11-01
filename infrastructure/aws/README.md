@@ -42,7 +42,9 @@ Copy `services/lyrics/`, then:
    (from the service's `compose.yaml`) and the task role policy.
 2. Pick an unused listener priority from the table below.
 3. Make sure the ECS service names match `ECS_SERVICES` in the service's
-   `.gitlab-ci.yml`.
+   `.gitlab-ci.yml`, and keep the `ecs_services` and `api_url` outputs (the
+   runbook reads them).
+4. Add the folder name to `SERVICES` in RUNBOOK.md §2.3 and §8.
 
 ## Architecture
 
