@@ -54,12 +54,6 @@ variable "weather_timeout_seconds" {
   default     = 2
 }
 
-variable "weather_api_key_secret_arn" {
-  description = "Optional Secrets Manager secret holding WEATHER_API_KEY, for a provider that needs one. Open-Meteo does not, so leave null."
-  type        = string
-  default     = null
-}
-
 variable "api_route_priority" {
   description = "ALB listener rule priority; unique per service (README.md table)."
   type        = number

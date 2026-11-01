@@ -1,4 +1,5 @@
-# Environment files: real secrets never go into git (.env.example is the template)
+# Environment files: real secrets never go into git (each service's
+# .env.example documents its variables)
 .env
 .env.*
 !.env.example

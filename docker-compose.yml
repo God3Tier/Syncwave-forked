@@ -9,8 +9,8 @@
 # to `include:` below (copy services/_template/ to start).
 # Requires Docker Compose v2.24 or newer (`docker compose version`).
 #
-# Local credentials are fixed development values (see README.md). Real
-# third-party secrets go in .env (copy .env.example).
+# Local credentials are fixed development values (see README.md). No service
+# needs a third-party secret: the weather API (Open-Meteo) takes no key.
 
 name: syncwave
 

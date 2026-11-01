@@ -185,7 +185,6 @@ here in the same merge request as the stack.
 | `AWS_REGION` | `ap-southeast-1` |
 | `ECR_REGISTRY` | `terraform -chdir=platform output -raw ecr_registry` |
 | `ECS_CLUSTER` | `syncwave` |
-| `WEATHER_API_KEY` | masked; injected into the Recommendation task as a secret |
 
 GitLab authenticates with OIDC, so no AWS keys are stored in GitLab.
 `platform/gitlab.tf` creates the provider and the `syncwave-gitlab-deploy`
