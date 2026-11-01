@@ -257,17 +257,28 @@ Terraform warns that `-target` is for exceptional use; this is one. Type
 ```sh
 cd infrastructure/aws                  # from the repo root
 for SVC in $DB_SERVICES; do
-  TASK=$(eval "$(terraform -chdir=services/$SVC output -raw db_init_command)")
+  CMD=$(terraform -chdir=services/$SVC output -raw db_init_command 2>/dev/null)
+  if [ -z "$CMD" ]; then
+    echo "$SVC: no db_init_command output; rerun step a for it (terraform -chdir=services/$SVC apply -target=module.db)"
+    continue
+  fi
+  TASK=$(eval "$CMD")
   aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
   echo "$SVC db-init exit code: $(aws ecs describe-tasks --cluster syncwave --tasks $TASK \
     --query 'tasks[0].containers[0].exitCode' --output text)"
-  MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/$SVC-db-init --since 15m
+  # Named after the database, which isn't always the folder (song_request_orchestrator -> orchestrator)
+  MSYS_NO_PATHCONV=1 aws logs tail "$(terraform -chdir=services/$SVC output -raw db_init_log_group)" --since 15m
 done
 cd -
 ```
 
 For each service you should see exit code `0` and `database <service> is
 ready` in the log. It is safe to run again.
+
+A service that prints `no db_init_command output` has its database resources
+but no saved outputs: its `-target=module.db` apply in step a stopped before
+finishing. Run that apply again (with nothing left to create, it just saves the
+outputs), then run this step again.
 
 **c) Put a first image in ECR.** The repositories are new every session, so
 they start empty. This needs the GitLab registry login from §1.
