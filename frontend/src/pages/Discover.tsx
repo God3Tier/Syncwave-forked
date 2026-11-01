@@ -1,7 +1,7 @@
 import { useCallback, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { listSongs } from '../api/catalogue';
-import { browserLocation, getRecommendations } from '../api/recommendation';
+import { browserLocation, getRecommendations, WEATHER_CITIES, type LocationProblem } from '../api/recommendation';
 import type { Recommendation, Recommendations, Song, WeatherCondition } from '../api/types';
 import { Page } from '../components/Layout';
 import { SongRow } from '../components/SongRow';
@@ -13,6 +13,8 @@ import { rememberSong } from '../hooks/useSongs';
 import { usePlayer } from '../player/context';
 
 const WEATHER_KEY = 'syncwave.use_weather';
+const SOURCE_KEY = 'syncwave.weather_source';
+const MY_LOCATION = 'location';
 const weatherIcon: Record<WeatherCondition, string> = {
   CLEAR: 'clear_day',
   CLOUDY: 'cloud',
@@ -22,36 +24,81 @@ const weatherIcon: Record<WeatherCondition, string> = {
   FOG: 'foggy',
   OTHER: 'partly_cloudy_day',
 };
+const locationProblems: Record<LocationProblem, string> = {
+  insecure: 'Your browser only shares your location over HTTPS, and this site is served over HTTP.',
+  denied: 'Location access is blocked for this site.',
+  unavailable: 'Your browser could not find your location.',
+};
 
-function readWeatherOptIn(): boolean {
+function readSetting(key: string): string | null {
   try {
-    return localStorage.getItem(WEATHER_KEY) === '1';
+    return localStorage.getItem(key);
   } catch {
-    return false;
+    return null;
   }
 }
 
-function WeatherChip({ data, onEnable, enabled }: { data?: Recommendations; onEnable: () => void; enabled: boolean }) {
-  if (data?.weather_used && data.weather) {
-    const { condition, temperature_c } = data.weather;
+function saveSetting(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // per-tab only
+  }
+}
+
+/** One load of recommendations; `problem` says why the browser gave no location. */
+interface Picks {
+  result: Recommendations;
+  problem: LocationProblem | null;
+}
+
+function WeatherToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const option = (value: boolean, icon: string, label: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on === value}
+      onClick={() => onChange(value)}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-xs transition-colors ${
+        on === value ? 'bg-secondary/15 text-secondary shadow-[0_0_12px_rgb(58_223_250/0.12)]' : 'text-on-surface-variant hover:text-on-surface'
+      }`}
+    >
+      <Icon name={icon} className="text-base" />
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Recommendations" className="inline-flex rounded-full border border-outline-variant/40 p-0.5">
+      {option(false, 'auto_awesome', 'General')}
+      {option(true, 'partly_cloudy_day', 'Match weather')}
+    </div>
+  );
+}
+
+function WeatherStatus({ picks, loading }: { picks?: Picks; loading: boolean }) {
+  if (loading) return <span className="font-mono text-xs text-on-surface-variant">Checking the weather…</span>;
+  if (!picks) return null;
+  if (picks.problem) {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full border border-secondary/40 bg-secondary/5 px-4 py-1.5 font-mono text-xs text-secondary shadow-[0_0_16px_rgb(58_223_250/0.12)]">
-        <Icon name={weatherIcon[condition]} className="text-base" />
-        {condition.charAt(0) + condition.slice(1).toLowerCase()} · {Math.round(temperature_c)}°C · weather-matched
+      <span className="text-xs text-warn">
+        {locationProblems[picks.problem]} Showing general picks; choose a city to use its weather instead.
       </span>
     );
   }
-  if (!enabled) {
-    return (
-      <Button variant="cyan" icon="my_location" onClick={onEnable} className="rounded-full py-1.5 text-xs">
-        Match my weather
-      </Button>
-    );
+  const { weather, items } = picks.result;
+  if (!picks.result.weather_used || !weather) {
+    return <span className="text-xs text-warn">The weather service did not answer, so these are general picks.</span>;
   }
+  const matches = items.filter((item) => item.reason === 'WEATHER_MATCH').length;
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-outline-variant/40 px-4 py-1.5 font-mono text-xs text-on-surface-variant">
-      <Icon name="auto_awesome" className="text-base" />
-      General picks
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <span className="inline-flex items-center gap-2 rounded-full border border-secondary/40 bg-secondary/5 px-3 py-1 font-mono text-xs text-secondary">
+        <Icon name={weatherIcon[weather.condition]} className="text-base" />
+        {weather.condition.charAt(0) + weather.condition.slice(1).toLowerCase()} · {Math.round(weather.temperature_c)}°C
+      </span>
+      <span className="text-xs text-on-surface-variant">
+        {matches > 0 ? `${matches} song${matches === 1 ? '' : 's'} suit this weather and come first.` : 'No song suits this weather; general picks follow.'}
+      </span>
     </span>
   );
 }
@@ -93,11 +140,20 @@ function RecommendationCard({ item, queue }: { item: Recommendation; queue: stri
 export function Discover() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [useWeather, setUseWeather] = useState(readWeatherOptIn);
+  const [useWeather, setUseWeather] = useState(() => readSetting(WEATHER_KEY) === '1');
+  const [source, setSource] = useState(() => {
+    const saved = readSetting(SOURCE_KEY);
+    return saved && saved in WEATHER_CITIES ? saved : MY_LOCATION;
+  });
 
   const recommendations = useAsync(
-    async (signal) => getRecommendations(useWeather ? await browserLocation() : null, 12, signal),
-    [useWeather],
+    async (signal): Promise<Picks> => {
+      if (!useWeather) return { result: await getRecommendations(null, 12, signal), problem: null };
+      const place = source === MY_LOCATION ? await browserLocation() : WEATHER_CITIES[source];
+      if ('problem' in place) return { result: await getRecommendations(null, 12, signal), problem: place.problem };
+      return { result: await getRecommendations(place, 12, signal), problem: null };
+    },
+    [useWeather, source],
   );
 
   const [songs, setSongs] = useState<Song[]>([]);
@@ -123,13 +179,13 @@ export function Discover() {
     }
   }, [cursor]);
 
-  const enableWeather = () => {
-    try {
-      localStorage.setItem(WEATHER_KEY, '1');
-    } catch {
-      // per-tab only
-    }
-    setUseWeather(true);
+  const changeWeather = (on: boolean) => {
+    saveSetting(WEATHER_KEY, on ? '1' : '0');
+    setUseWeather(on);
+  };
+  const changeSource = (value: string) => {
+    saveSetting(SOURCE_KEY, value);
+    setSource(value);
   };
 
   const submit = (event: FormEvent) => {
@@ -137,7 +193,8 @@ export function Discover() {
     if (query.trim()) navigate(`/search?q=${encodeURIComponent(query.trim())}`);
   };
 
-  const recQueue = recommendations.data?.items.map((item) => item.song_id) ?? [];
+  const picks = recommendations.data?.result;
+  const recQueue = picks?.items.map((item) => item.song_id) ?? [];
   const playable = songs.filter((song) => song.processing_status === 'READY' || song.processing_status === 'PARTIAL').map((song) => song.song_id);
 
   return (
@@ -155,19 +212,39 @@ export function Discover() {
       </form>
 
       <section className="mb-12">
-        <SectionTitle aside={<WeatherChip data={recommendations.data} enabled={useWeather} onEnable={enableWeather} />}>
+        <SectionTitle aside={<WeatherToggle on={useWeather} onChange={changeWeather} />}>
           For you right now
           <span className="mt-1 block font-body text-sm font-normal text-on-surface-variant">
-            Recommendations from the catalogue, using your local weather when you allow it.
+            {useWeather
+              ? 'Songs whose mood suits the current weather come first, marked Weather match.'
+              : 'General picks from the catalogue; the weather is not used.'}
           </span>
         </SectionTitle>
-        {recommendations.loading && <Spinner label="Finding songs" />}
-        {recommendations.error !== undefined && <Notice tone="error">{errorMessage(recommendations.error)}</Notice>}
-        {recommendations.data && recommendations.data.items.length === 0 && (
-          <Notice>No playable songs yet. Upload one to get started.</Notice>
+        {useWeather && (
+          <div className="-mt-1 mb-4 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-on-surface-variant">
+              Weather in
+              <select
+                value={source}
+                onChange={(event) => changeSource(event.target.value)}
+                className="rounded-lg border border-outline-variant/40 bg-surface-container-high px-2 py-1 font-mono text-xs text-on-surface focus:border-secondary focus:outline-none"
+              >
+                <option value={MY_LOCATION}>my location</option>
+                {Object.keys(WEATHER_CITIES).map((city) => (
+                  <option key={city} value={city}>
+                    {city}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <WeatherStatus picks={recommendations.data} loading={recommendations.loading} />
+          </div>
         )}
-        <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
-          {recommendations.data?.items.map((item) => <RecommendationCard key={item.song_id} item={item} queue={recQueue} />)}
+        {recommendations.loading && !picks && <Spinner label="Finding songs" />}
+        {recommendations.error !== undefined && <Notice tone="error">{errorMessage(recommendations.error)}</Notice>}
+        {picks && picks.items.length === 0 && <Notice>No playable songs yet. Upload one to get started.</Notice>}
+        <div className={`-mx-1 flex gap-4 overflow-x-auto px-1 pb-2 transition-opacity ${recommendations.loading ? 'opacity-50' : ''}`}>
+          {picks?.items.map((item) => <RecommendationCard key={item.song_id} item={item} queue={recQueue} />)}
         </div>
       </section>
 

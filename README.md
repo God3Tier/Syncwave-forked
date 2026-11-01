@@ -34,10 +34,11 @@ sh tests/integration/smoke.sh
 python tests/integration/upload-flow.py   # Python 3.10+; adds one test song per run
 ```
 
-The stack starts with one demo song already loaded: "Daisy Bell", a
-public-domain 1894 recording with synced lyrics (see
-[infrastructure/seed](infrastructure/seed/README.md)). It is READY a few
-seconds after `--wait` returns.
+The stack starts with five public-domain demo songs already loaded (see
+[infrastructure/seed](infrastructure/seed/README.md)): "Daisy Bell", an 1894
+recording with synced lyrics, and one song for each mood Recommendation
+matches to the weather (calm, mellow, upbeat, energetic). They are READY a
+few seconds after `--wait` returns.
 
 ### Try the three scenarios
 
@@ -46,8 +47,10 @@ All three run in the browser at <http://localhost:8080>.
 1. **Discover & Listen.** Discover lists recommendations and recently
    added songs; Search finds songs by title or artist. Open "Daisy Bell"
    and press Play: the waveform playhead moves and the current lyric line
-   is highlighted. "Match my weather" uses your browser location for the
-   weather signal, and puts songs whose mood suits the weather first.
+   is highlighted, and the live visualiser below moves with the music.
+   Switch "For you right now" from General to "Match weather" to put songs
+   whose mood suits the weather first. It uses your browser location, or a
+   city you pick (browsers only share a location over HTTPS or localhost).
 2. **Upload & Process.** On Upload, add a title, an artist, an audio file
    and optionally an `.lrc` file and a mood. The processing panel shows
    Lyrics and Waveform working in parallel until the song is READY; it then

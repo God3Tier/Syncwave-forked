@@ -154,6 +154,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const positionMs = useCallback(() => (audioRef.current ? audioRef.current.currentTime * 1000 : 0), []);
 
+  // Built on first use, after the user has pressed play: a media element can be
+  // routed into Web Audio only once, and from then on it is heard only through
+  // the graph, so the analyser passes the sound on to the speakers.
+  const graphRef = useRef<{ context: AudioContext; analyser: AnalyserNode } | null>(null);
+  const analyser = useCallback((): AnalyserNode | null => {
+    if (!graphRef.current) {
+      try {
+        const context = new AudioContext();
+        const node = context.createAnalyser();
+        node.fftSize = 2048;
+        node.smoothingTimeConstant = 0.75;
+        node.minDecibels = -90;
+        node.maxDecibels = -20;
+        context.createMediaElementSource(getAudio()).connect(node);
+        node.connect(context.destination);
+        graphRef.current = { context, analyser: node };
+      } catch {
+        return null;
+      }
+    }
+    if (graphRef.current.context.state === 'suspended') void graphRef.current.context.resume();
+    return graphRef.current.analyser;
+  }, [getAudio]);
+
   const value = useMemo<Player>(
     () => ({
       ...state,
@@ -196,8 +220,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setState((s) => ({ ...s, volume }));
       },
       positionMs,
+      analyser,
     }),
-    [state, getAudio, loadIndex, maintainWindow, positionMs],
+    [state, getAudio, loadIndex, maintainWindow, positionMs, analyser],
   );
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
