@@ -115,6 +115,7 @@ export interface UploadReceipt {
   status: string;
   title: string;
   artist: string;
+  mood: string | null;
   duration_ms: number | null;
   audio_reference: string;
   lyrics_reference: string | null;

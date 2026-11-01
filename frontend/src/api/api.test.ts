@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, buildUrl, parseError } from './http';
 import { activeLineIndex, bandFrameAt, decodeBands } from './media';
 import { matchesQuery, searchSongs } from './search';
+import { uploadForm } from './upload';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -112,5 +113,22 @@ describe('gatewayPath', () => {
     expect(() => gatewayPath('http://169.254.169.254/latest/meta-data')).toThrow(ApiError);
     expect(() => gatewayPath('//evil.example/api/x')).toThrow(ApiError);
     expect(() => gatewayPath('/admin')).toThrow(ApiError);
+  });
+});
+
+describe('uploadForm', () => {
+  const audio = new File(['ID3'], 'song.mp3', { type: 'audio/mpeg' });
+
+  it('sends the chosen mood', () => {
+    const form = uploadForm({ title: 'T', artist: 'A', audio, mood: 'calm' });
+    expect(form.get('mood')).toBe('calm');
+    expect(form.get('title')).toBe('T');
+  });
+
+  it('leaves optional fields out when they are not set', () => {
+    const form = uploadForm({ title: 'T', artist: 'A', audio, mood: null, durationMs: null });
+    expect(form.has('mood')).toBe(false);
+    expect(form.has('duration_ms')).toBe(false);
+    expect(form.has('lyrics')).toBe(false);
   });
 });
