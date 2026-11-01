@@ -1,10 +1,11 @@
 # The audio bucket (syncwave-audio locally). Upload writes audio/ and
 # lyrics/ objects; Streaming, Lyrics and Waveform read them with their task
 # roles. Bucket names are global, so the account ID is part of the name.
+# force_destroy: the session teardown deletes it with whatever it holds.
 
 resource "aws_s3_bucket" "audio" {
   bucket        = "syncwave-audio-${data.aws_caller_identity.current.account_id}"
-  force_destroy = var.audio_bucket_force_destroy
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "audio" {

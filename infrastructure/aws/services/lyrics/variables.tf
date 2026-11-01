@@ -74,9 +74,3 @@ variable "worker_capacity_provider" {
   type        = string
   default     = "FARGATE_SPOT"
 }
-
-variable "ecr_force_delete" {
-  description = "Let terraform destroy delete the ECR repository even when it holds images. Set true only for a final teardown."
-  type        = bool
-  default     = false
-}

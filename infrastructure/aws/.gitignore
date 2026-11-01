@@ -8,6 +8,7 @@ crash.log
 crash.*.log
 
 # Local overrides may hold account-specific values
+backend.hcl
 *.tfvars
 !*.tfvars.example
 override.tf

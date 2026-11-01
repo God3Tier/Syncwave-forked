@@ -12,7 +12,7 @@ output "ecs_services" {
 }
 
 output "db_init_command" {
-  description = "Run once after the first apply (RUNBOOK.md)."
+  description = "Run once per session, after module.db is applied (RUNBOOK.md §2.3b)."
   value       = module.db.db_init_command
 }
 

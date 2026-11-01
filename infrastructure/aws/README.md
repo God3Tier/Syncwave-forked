@@ -2,8 +2,9 @@
 
 Production per plan.md §17: images in **ECR**, containers on **ECS Fargate**,
 audio in **S3**, plus RDS Postgres and RabbitMQ. Everything is Terraform in
-this folder. **[RUNBOOK.md](RUNBOOK.md)** has the commands: first-time
-setup, smoke test, deploys, debugging, pausing between demos and teardown.
+this folder. **[RUNBOOK.md](RUNBOOK.md)** has the commands: bringing it up,
+smoke test, deploys, debugging and teardown. Nothing stays up between
+sessions: each session creates everything and destroys it again at the end.
 
 > **Status: proposal.** `platform/` is shared by every service and needs
 > the team's agreement before it is applied (RabbitMQ and Postgres choices
@@ -14,7 +15,7 @@ setup, smoke test, deploys, debugging, pausing between demos and teardown.
 
 ```
 infrastructure/aws/
-├── bootstrap/            S3 bucket for Terraform state (run once per account; local state)
+├── bootstrap/            S3 bucket for Terraform state (applied first, destroyed last; local state)
 ├── platform/             shared: VPC, ECS cluster, ALB, RDS, RabbitMQ, audio bucket, GitLab deploy role
 ├── modules/
 │   ├── ecs-service/      one ECS service + task definition + logs + task role + optional ALB route
@@ -147,7 +148,8 @@ Rough on-demand prices in ap-southeast-1, with everything running. Check the
 | Secrets, logs, ECR, S3 | < $5 |
 | **Total** | **≈ $130** (about $4 a day) |
 
-The brief's budget is reimbursed only if it was requested in Week 7. **Pause
-everything between demos**: RUNBOOK.md §8 brings it down to about $30/month
-(the ALB, its IPs and storage). Or tear it all down (§9). A local Kubernetes cluster is also an
-accepted production environment if the budget is not available.
+That is about **$0.18 per hour while it is up**, billed by the hour or less,
+and nothing between sessions because everything is destroyed (RUNBOOK.md §8).
+A three-hour session costs well under a dollar. The brief's budget is
+reimbursed only if it was requested in Week 7. A local Kubernetes cluster is
+also an accepted production environment if the budget is not available.

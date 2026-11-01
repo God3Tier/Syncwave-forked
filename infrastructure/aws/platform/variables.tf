@@ -39,12 +39,6 @@ variable "db_allocated_storage" {
   default     = 20
 }
 
-variable "db_deletion_protection" {
-  description = "Set true once the data matters; terraform destroy then refuses to delete the instance."
-  type        = bool
-  default     = false
-}
-
 # --- RabbitMQ -------------------------------------------------------------
 
 variable "rabbitmq_image" {
@@ -68,14 +62,6 @@ variable "rabbitmq_desired_count" {
     condition     = contains([0, 1], var.rabbitmq_desired_count)
     error_message = "rabbitmq_desired_count must be 0 or 1."
   }
-}
-
-# --- S3 -------------------------------------------------------------------
-
-variable "audio_bucket_force_destroy" {
-  description = "Let terraform destroy delete the audio bucket even when it still holds objects. Set true only for a final teardown."
-  type        = bool
-  default     = false
 }
 
 # --- GitLab deploys -------------------------------------------------------

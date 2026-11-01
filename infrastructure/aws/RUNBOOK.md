@@ -4,51 +4,29 @@ Copy-paste commands for the AWS production environment. **Why** things are
 set up this way is in [README.md](README.md).
 
 The commands are for **Git Bash**, the same shell the CI scripts use, and run
-from `infrastructure/aws/`. Each step says what you should see.
+from `infrastructure/aws/` (`cd infrastructure/aws` from the repo root). Each
+step says what you should see.
+
+**Nothing stays up between sessions.** A session starts with an empty account,
+brings everything up (§2, about 25 minutes), and ends by destroying all of it,
+the state bucket included (§8). Nothing is billed in between.
+
+Each section sets the shell variables it uses, so you can start any section in
+a new terminal. Commands that pass a `/ecs/...` log group start with
+`MSYS_NO_PATHCONV=1`; without it, Git Bash turns the name into
+`C:/Program Files/Git/ecs/...`. In PowerShell, write variables as
+`$SVC = "lyrics"`, continue lines with a backtick instead of `\`, and leave out
+`MSYS_NO_PATHCONV=1`.
 
 Contents:
-[0 Every new terminal](#0-every-new-terminal) ·
 [1 Prerequisites](#1-prerequisites) ·
-[2 First-time setup](#2-first-time-setup) ·
+[2 Bring it up](#2-bring-it-up-every-session) ·
 [3 Smoke test](#3-smoke-test) ·
 [4 End-to-end test](#4-end-to-end-test-lyrics-and-waveform) ·
 [5 Deploy and roll back](#5-deploy-and-roll-back) ·
 [6 Change configuration](#6-change-configuration) ·
 [7 Debug](#7-debug) ·
-[8 Pause and resume](#8-pause-between-demos-and-resume) ·
-[9 Teardown](#9-teardown)
-
----
-
-## 0. Every new terminal
-
-```sh
-cd infrastructure/aws                  # from the repo root
-export MSYS_NO_PATHCONV=1              # Git Bash: stops /ecs/... arguments being turned into C:/Program Files/Git/ecs/...
-export AWS_REGION=ap-southeast-1
-export CLUSTER=syncwave
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export ECR=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-export GITLAB_IMAGES=registry.gitlab.com/cs302-2026/g4-team6/syncwave
-
-# Once the platform exists (after step 2.2):
-export ALB=$(terraform -chdir=platform output -raw base_url)
-export BUCKET=$(terraform -chdir=platform output -raw audio_bucket_name)
-
-# The image tag an ECS service is running now, e.g. `current_tag lyrics`
-current_tag() {
-  aws ecs describe-task-definition \
-    --task-definition "$(aws ecs describe-services --cluster $CLUSTER --services "$1" --query 'services[0].taskDefinition' --output text)" \
-    --query 'taskDefinition.containerDefinitions[0].image' --output text | sed 's/.*://'
-}
-```
-
-You should see no errors. `echo $ACCOUNT_ID` prints your 12-digit account
-ID. If it fails, sign in first (step 1).
-
-In PowerShell, set variables as `$env:AWS_REGION = "ap-southeast-1"` and
-continue lines with a backtick instead of `\`. Git Bash is simpler for
-everything below.
+[8 Tear it down](#8-tear-it-down-end-of-every-session)
 
 ---
 
@@ -61,24 +39,47 @@ session-manager-plugin         # "The Session Manager plugin was installed succe
 docker buildx version
 ```
 
-Sign in. Use whichever applies to your account:
+### Sign in with an IAM user access key (once per machine)
+
+The CLI and Terraform sign in with a long-lived access key of your existing
+IAM user. You need its access key ID and secret access key. If you don't have
+them, create a key in IAM > Users > *your user* > Security credentials >
+Create access key (use case "Command Line Interface (CLI)"); the secret is
+shown only once.
+
+Save the key as your default profile (stored in `~/.aws/credentials`):
 
 ```sh
-aws login                                   # console credentials (AWS CLI 2.32+)
-# or, for IAM Identity Center:
-aws configure sso && aws sso login --profile <profile> && export AWS_PROFILE=<profile>
+aws configure
+#   AWS Access Key ID:     AKIA...
+#   AWS Secret Access Key: <secret>
+#   Default region name:   ap-southeast-1
+#   Default output format: json
 
-aws sts get-caller-identity                 # shows your account and identity
+aws sts get-caller-identity                 # "Arn": "arn:aws:iam::<account>:user/<your user>"
 ```
 
-First-time setup creates IAM roles and an OIDC provider, so it needs an
-administrator identity. Day-to-day commands need much less.
+Every later `aws` and `terraform` command uses this profile and its region,
+in any new terminal. If your default profile is already used for another
+account, run `aws configure --profile syncwave` instead and add
+`export AWS_PROFILE=syncwave` to `~/.bashrc`.
+
+**Keep the key safe.** It works until someone deletes it, from anywhere.
+- Never put it in the repo, a `.tfvars` file, a Dockerfile or a GitLab
+  variable. GitLab deploys use OIDC and need no key (README.md).
+- One user and key per person; don't share a key over chat.
+- Rotate it: create a second key, `aws configure` with the new one, check
+  `aws sts get-caller-identity`, then deactivate and delete the old key in
+  the console.
+- If it leaks, **deactivate it immediately** (IAM > Users > Security
+  credentials), then check CloudTrail for activity you don't recognise.
 
 ---
 
-## 2. First-time setup
+## 2. Bring it up (every session)
 
-Run this once per AWS account, in this order.
+Run this at the start of every session, in this order. The `init` commands
+are only needed the first time on a machine, but are harmless to repeat.
 
 ### 2.1 State bucket (bootstrap)
 
@@ -90,15 +91,23 @@ cat backend.hcl
 ```
 
 You should see `bucket = "syncwave-tfstate-<account id>"`, `use_lockfile = true`.
-**Commit `backend.hcl`**: every root needs it, and it holds no secrets.
-`bootstrap/terraform.tfstate` stays on your machine and is gitignored. If it
-is lost, nothing breaks; see the comment at the top of `bootstrap/main.tf`.
+Every other stack's `init` reads `backend.hcl`. It is gitignored (it holds
+the account ID) and comes out the same every session.
+`bootstrap/terraform.tfstate` also stays on your machine.
+
+To work on a stack from another machine during the session, write the file
+from your own credentials instead of running bootstrap:
+
+```sh
+printf 'bucket       = "syncwave-tfstate-%s"\nregion       = "ap-southeast-1"\nuse_lockfile = true\nencrypt      = true\n' \
+  "$(aws sts get-caller-identity --query Account --output text)" > backend.hcl
+```
 
 ### 2.2 Platform (shared; agree with the team first)
 
 ```sh
 terraform -chdir=platform init -backend-config=../backend.hcl
-terraform -chdir=platform plan -out=tfplan               # review: about 50 resources, no NAT gateway
+terraform -chdir=platform plan -out=tfplan               # review: about 50 resources to add, no NAT gateway
 terraform -chdir=platform apply tfplan                   # ~10 minutes, mostly RDS
 ```
 
@@ -108,14 +117,13 @@ exists"*, run it again with `-var create_gitlab_oidc_provider=false`.
 Check that RabbitMQ is up and its queues were declared:
 
 ```sh
-aws ecs describe-services --cluster $CLUSTER --services rabbitmq \
+aws ecs describe-services --cluster syncwave --services rabbitmq \
   --query 'services[0].{running:runningCount,desired:desiredCount}' --output table
-aws logs tail /ecs/syncwave/rabbitmq --since 15m | grep "definitions loaded"
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/rabbitmq --since 15m | grep "definitions loaded"
 ```
 
 You should see `running 1, desired 1` and a `definitions loaded` line. The
-line can take a minute or two after the task starts. Now run the two
-`export ALB=…` / `export BUCKET=…` lines from step 0.
+line can take a minute or two after the task starts.
 
 ### 2.3 A service stack (repeat for each service)
 
@@ -137,39 +145,44 @@ Terraform warns that `-target` is for exceptional use; this is one. Type `yes`.
 ```sh
 TASK=$(eval "$(terraform -chdir=services/$SVC output -raw db_init_command)")
 echo $TASK
-aws ecs wait tasks-stopped --cluster $CLUSTER --tasks $TASK
-aws ecs describe-tasks --cluster $CLUSTER --tasks $TASK --query 'tasks[0].containers[0].exitCode'
-aws logs tail /ecs/syncwave/$SVC-db-init --since 15m
+aws ecs wait tasks-stopped --cluster syncwave --tasks $TASK
+aws ecs describe-tasks --cluster syncwave --tasks $TASK --query 'tasks[0].containers[0].exitCode'
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/$SVC-db-init --since 15m
 ```
 
 You should see exit code `0`, and `database lyrics is ready` in the log. It
 is safe to run again.
 
-**c) Put a first image in ECR.** After this, CI keeps it up to date.
+**c) Put a first image in ECR.** The repository is new every session, so it
+starts empty.
 
 ```sh
+ECR=$(terraform -chdir=platform output -raw ecr_registry)
 docker login registry.gitlab.com      # GitLab username + a personal access token with read_registry
 aws ecr get-login-password | docker login --username AWS --password-stdin $ECR
-docker buildx imagetools create --tag $ECR/syncwave/$SVC:main $GITLAB_IMAGES/$SVC:dev
+docker buildx imagetools create --tag $ECR/syncwave/$SVC:main \
+  registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:dev
 ```
 
-Use `$GITLAB_IMAGES/$SVC:main` instead of `:dev` once the service has been
-merged to `main`. You should see the manifest being pushed. No rebuild
-happens; this copies the image that CI already tested.
+Use the `:main` image instead of `:dev` once the service has been merged to
+`main`. You should see the manifest being pushed. No rebuild happens; this
+copies the image that CI already tested.
 
 **d) Everything else** (ECS services, task roles, ALB route):
 
 ```sh
 terraform -chdir=services/$SVC plan -out=tfplan          # review
 terraform -chdir=services/$SVC apply tfplan
-aws ecs wait services-stable --cluster $CLUSTER --services $SVC $SVC-worker
+aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
 terraform -chdir=services/$SVC output api_url
 ```
 
 `wait services-stable` returns silently when both services run their task.
 If it times out after 10 minutes, go to [7 Debug](#7-debug).
 
-### 2.4 Turn on CI deploys
+### 2.4 CI deploys during the session (optional)
+
+Only needed if merges to `main` during this session should deploy here.
 
 ```sh
 terraform -chdir=platform output -raw gitlab_deploy_role_arn; echo
@@ -186,25 +199,27 @@ In GitLab, under Settings > CI/CD > Variables, add each of these as a
 | `AWS_REGION` | `ap-southeast-1` |
 | `ECS_CLUSTER` | `syncwave` |
 
-From now on, a merge to `main` that changes a service runs its `deploy` job,
-which pushes the image and rolls the ECS services.
+The values are the same every session, so the last three can stay set.
+`AWS_ROLE_ARN` is what turns the `deploy` jobs on: delete it at teardown
+(§8), or deploy jobs on `main` fail while nothing is up.
 
 ---
 
 ## 3. Smoke test
 
 ```sh
+ALB=$(terraform -chdir=platform output -raw base_url)
 curl -s $ALB/api/lyrics/health; echo        # {"status":"ok"}
 curl -s $ALB/api/waveform/health; echo      # {"status":"ok"}
 curl -s $ALB/api/nope/x; echo               # {"error":{"code":"UNKNOWN_SERVICE",...}}
 
-aws ecs describe-services --cluster $CLUSTER \
+aws ecs describe-services --cluster syncwave \
   --services lyrics lyrics-worker waveform waveform-worker rabbitmq \
   --query 'services[].{service:serviceName,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
   --output table                            # running = desired, rollout COMPLETED
 
-aws logs tail /ecs/syncwave/lyrics-worker --since 1h | grep consuming     # consuming lyrics.song-uploaded with prefetch 10
-aws logs tail /ecs/syncwave/waveform-worker --since 1h | grep consuming   # consuming waveform.song-uploaded with prefetch 2
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 1h | grep consuming     # consuming lyrics.song-uploaded with prefetch 10
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 1h | grep consuming   # consuming waveform.song-uploaded with prefetch 2
 ```
 
 ---
@@ -220,12 +235,14 @@ would. `example.mp3`/`example.lrc` are in the repo root; any `.mp3`/`.lrc`
 works.
 
 ```sh
+ALB=$(terraform -chdir=platform output -raw base_url)
+BUCKET=$(terraform -chdir=platform output -raw audio_bucket_name)
 SONG_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $SONG_ID
 aws s3 cp ../../example.mp3 s3://$BUCKET/audio/$SONG_ID.mp3
 aws s3 cp ../../example.lrc s3://$BUCKET/lyrics/$SONG_ID.lrc
 
-WORKER=$(aws ecs list-tasks --cluster $CLUSTER --service-name lyrics-worker --query 'taskArns[0]' --output text)
-aws ecs execute-command --cluster $CLUSTER --task $WORKER --container lyrics-worker --interactive --command sh
+WORKER=$(aws ecs list-tasks --cluster syncwave --service-name lyrics-worker --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster syncwave --task $WORKER --container lyrics-worker --interactive --command sh
 ```
 
 **In the container shell that opens:** paste the following, with your song
@@ -265,7 +282,8 @@ exit
 
 You should see `published SongUploaded <event id> for song <song id>`.
 
-**Back on your machine**, after a few seconds (waveform takes longer than lyrics):
+**Back on your machine**, in the same terminal, after a few seconds (waveform
+takes longer than lyrics):
 
 ```sh
 curl -s $ALB/api/lyrics/songs/$SONG_ID/lyrics | head -c 400; echo
@@ -278,8 +296,8 @@ comes back as 10 peaks. If you get another status or a 404 at first,
 processing is still running. To watch it happen:
 
 ```sh
-aws logs tail /ecs/syncwave/lyrics-worker --since 10m
-aws logs tail /ecs/syncwave/waveform-worker --since 10m
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 10m
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/waveform-worker --since 10m
 ```
 
 `SongUploaded` is also routed to `catalogue.song-uploaded`, and the results
@@ -297,16 +315,19 @@ and waits until they are stable.
 
 **By hand** (for example before CI variables are set). Use the content tag
 from the build job's log (`IMAGE_TAG=…`) or a branch tag such as `dev`.
+Log in to both registries first, as in step 2.3c.
 
 ```sh
 SVC=lyrics; TAG=<tag>
-docker buildx imagetools create --tag $ECR/syncwave/$SVC:$TAG $GITLAB_IMAGES/$SVC:$TAG
+ECR=$(terraform -chdir=platform output -raw ecr_registry)
+docker buildx imagetools create --tag $ECR/syncwave/$SVC:$TAG \
+  registry.gitlab.com/cs302-2026/g4-team6/syncwave/$SVC:$TAG
 terraform -chdir=services/$SVC apply -var image_tag=$TAG            # registers revisions with that image
 for s in $SVC $SVC-worker; do
-  aws ecs update-service --cluster $CLUSTER --service $s --task-definition syncwave-$s \
+  aws ecs update-service --cluster syncwave --service $s --task-definition syncwave-$s \
     --query 'service.taskDefinition' --output text
 done
-aws ecs wait services-stable --cluster $CLUSTER --services $SVC $SVC-worker
+aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
 ```
 
 `--task-definition syncwave-<name>` without a revision number means the
@@ -317,8 +338,8 @@ latest revision.
 ```sh
 aws ecs list-task-definitions --family-prefix syncwave-lyrics --sort DESC --max-items 5 \
   --query 'taskDefinitionArns' --output table
-aws ecs update-service --cluster $CLUSTER --service lyrics --task-definition syncwave-lyrics:<revision>
-aws ecs wait services-stable --cluster $CLUSTER --services lyrics
+aws ecs update-service --cluster syncwave --service lyrics --task-definition syncwave-lyrics:<revision>
+aws ecs wait services-stable --cluster syncwave --services lyrics
 ```
 
 Do the same for `lyrics-worker` if it should go back too. A failing
@@ -339,20 +360,23 @@ that is running now, then roll out:
 
 ```sh
 SVC=lyrics
-TAG=$(current_tag $SVC); echo $TAG
+# The image tag the service is running now
+TAG=$(aws ecs describe-task-definition --query 'taskDefinition.containerDefinitions[0].image' --output text \
+  --task-definition "$(aws ecs describe-services --cluster syncwave --services $SVC --query 'services[0].taskDefinition' --output text)" \
+  | sed 's/.*://'); echo $TAG
 terraform -chdir=services/$SVC apply -var image_tag=$TAG             # plus your -var changes
 for s in $SVC $SVC-worker; do
-  aws ecs update-service --cluster $CLUSTER --service $s --task-definition syncwave-$s --query 'service.taskDefinition' --output text
+  aws ecs update-service --cluster syncwave --service $s --task-definition syncwave-$s --query 'service.taskDefinition' --output text
 done
-aws ecs wait services-stable --cluster $CLUSTER --services $SVC $SVC-worker
+aws ecs wait services-stable --cluster syncwave --services $SVC $SVC-worker
 ```
 
 If you skip the `update-service` step, the change goes live with the next
 CI deploy, because the deploy job builds on the latest revision.
 
-Always pass `-var image_tag=$(current_tag <svc>)` when applying a service
-stack that CI has already deployed. Otherwise the latest revision points at
-the old `:main` seed image until the next deploy.
+Always pass `-var image_tag=$TAG`, with `TAG` from the lines above, when
+applying a service stack that CI has already deployed. Otherwise the latest
+revision points at the old `:main` seed image until the next deploy.
 
 ---
 
@@ -360,16 +384,16 @@ the old `:main` seed image until the next deploy.
 
 ```sh
 # What ECS last did with a service (failed placements, health check failures, rollbacks)
-aws ecs describe-services --cluster $CLUSTER --services lyrics --query 'services[0].events[:8].message'
+aws ecs describe-services --cluster syncwave --services lyrics --query 'services[0].events[:8].message'
 
 # Why the most recent task stopped
-STOPPED=$(aws ecs list-tasks --cluster $CLUSTER --service-name lyrics --desired-status STOPPED --query 'taskArns[0]' --output text)
-aws ecs describe-tasks --cluster $CLUSTER --tasks $STOPPED \
+STOPPED=$(aws ecs list-tasks --cluster syncwave --service-name lyrics --desired-status STOPPED --query 'taskArns[0]' --output text)
+aws ecs describe-tasks --cluster syncwave --tasks $STOPPED \
   --query 'tasks[0].{reason:stoppedReason,exit:containers[0].exitCode,detail:containers[0].reason}'
 
 # Logs (Ctrl+C to stop following)
-aws logs tail /ecs/syncwave/lyrics --follow
-aws logs tail /ecs/syncwave/lyrics-worker --since 1h
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics --follow
+MSYS_NO_PATHCONV=1 aws logs tail /ecs/syncwave/lyrics-worker --since 1h
 
 # 502/503 from the ALB: are the API tasks healthy?
 aws elbv2 describe-target-health \
@@ -377,20 +401,20 @@ aws elbv2 describe-target-health \
   --query 'TargetHealthDescriptions[].TargetHealth'
 
 # A shell inside a running container
-TASK=$(aws ecs list-tasks --cluster $CLUSTER --service-name lyrics --query 'taskArns[0]' --output text)
-aws ecs execute-command --cluster $CLUSTER --task $TASK --container lyrics --interactive --command sh
+TASK=$(aws ecs list-tasks --cluster syncwave --service-name lyrics --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster syncwave --task $TASK --container lyrics --interactive --command sh
 
 # Restart a service (new tasks, same revision)
-aws ecs update-service --cluster $CLUSTER --service lyrics-worker --force-new-deployment --query 'service.serviceName'
+aws ecs update-service --cluster syncwave --service lyrics-worker --force-new-deployment --query 'service.serviceName'
 ```
 
 **RabbitMQ:** check queue depth and consumers, inspect the DLQs, clear a queue:
 
 ```sh
-RABBIT=$(aws ecs list-tasks --cluster $CLUSTER --service-name rabbitmq --query 'taskArns[0]' --output text)
-aws ecs execute-command --cluster $CLUSTER --task $RABBIT --container rabbitmq --interactive \
+RABBIT=$(aws ecs list-tasks --cluster syncwave --service-name rabbitmq --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster syncwave --task $RABBIT --container rabbitmq --interactive \
   --command "rabbitmqctl list_queues name messages consumers"
-aws ecs execute-command --cluster $CLUSTER --task $RABBIT --container rabbitmq --interactive \
+aws ecs execute-command --cluster syncwave --task $RABBIT --container rabbitmq --interactive \
   --command "rabbitmqctl purge_queue catalogue.song-uploaded"
 ```
 
@@ -406,64 +430,43 @@ Every worker queue should show `consumers 1`. Messages in
 | A worker shows `consumers 0` after RabbitMQ restarted | The worker reconnected before the queues were re-declared. `--force-new-deployment` on the worker. |
 | Waveform worker logs `DECODE_TIMEOUT` | The song is too long for the CPU. Raise `worker_cpu` (§6). |
 | `execute-command` fails with `TargetNotConnectedException` | The task was started before ECS Exec was enabled. Restart it with `--force-new-deployment`. |
+| `aws logs tail` says the log group `C:/Program Files/Git/ecs/...` doesn't exist | You left out `MSYS_NO_PATHCONV=1` in Git Bash. |
 
 ---
 
-## 8. Pause between demos, and resume
+## 8. Tear it down (end of every session)
 
-This takes the bill from about $4/day to about $1/day: the ALB, public IPs
-and storage keep running.
-
-**Pause:**
-
-```sh
-for s in lyrics lyrics-worker waveform waveform-worker rabbitmq; do
-  aws ecs update-service --cluster $CLUSTER --service $s --desired-count 0 --query 'service.serviceName' --output text
-done
-aws rds stop-db-instance --db-instance-identifier syncwave --query 'DBInstance.DBInstanceStatus'
-```
-
-**Resume:**
+Destroy in this order: the services read the platform's outputs, and every
+stack keeps its state in the bootstrap bucket. The ECR repositories, the
+audio bucket and the state bucket are deleted together with their contents.
 
 ```sh
-aws rds start-db-instance --db-instance-identifier syncwave --query 'DBInstance.DBInstanceStatus'
-aws rds wait db-instance-available --db-instance-identifier syncwave       # ~5 minutes
-aws ecs update-service --cluster $CLUSTER --service rabbitmq --desired-count 1 --query 'service.serviceName'
-for s in lyrics lyrics-worker waveform waveform-worker; do
-  aws ecs update-service --cluster $CLUSTER --service $s --desired-count 1 --query 'service.serviceName' --output text
-done
+terraform -chdir=services/waveform destroy               # type "yes"
+terraform -chdir=services/lyrics destroy
+terraform -chdir=platform destroy                        # ~10 minutes, mostly RDS
+terraform -chdir=bootstrap destroy                       # last
 ```
 
-Then run the smoke test (§3).
+Each one should end with `Destroy complete!`. If a destroy fails, fix the
+error and run it again before moving on. **Never destroy bootstrap while
+another stack still has resources**: their state is deleted with the bucket,
+Terraform loses track of them, and they keep being billed until deleted by
+hand.
 
-- AWS **restarts a stopped RDS instance after 7 days**. Stop it again if the break is longer.
-- A `terraform apply` of a stack also resets its desired counts to the variables (default 1).
-- Start RDS before applying `platform/`: Terraform can't modify a stopped instance.
-
----
-
-## 9. Teardown
-
-Destroy the service stacks before the platform, because they depend on its
-outputs. ECR repositories and the audio bucket refuse to be deleted while they
-hold images or objects. Turning on force-delete is a separate apply, because
-Terraform's destroy reads the setting from state.
+Check that nothing is left:
 
 ```sh
-for SVC in waveform lyrics; do
-  terraform -chdir=services/$SVC apply -target=aws_ecr_repository.this -var ecr_force_delete=true
-  terraform -chdir=services/$SVC destroy -var ecr_force_delete=true
-done
-
-terraform -chdir=platform apply -target=aws_s3_bucket.audio -var audio_bucket_force_destroy=true
-terraform -chdir=platform destroy -var audio_bucket_force_destroy=true      # ~10 minutes
+aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=syncwave \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v ':task-definition/'
 ```
 
-If you set `db_deletion_protection = true`, apply it as `false` first.
+You should see no output. Task definition revisions are hidden by the
+`grep`: they stay behind on purpose (`skip_destroy`) and cost nothing. A
+resource deleted in the last few minutes can still be listed; run it again
+later before deleting anything by hand.
 
-- Task definition revisions are left behind as ACTIVE (`skip_destroy`). They cost nothing.
-- Leave the bootstrap state bucket. It costs cents, and it's needed to rebuild.
-- To remove the bootstrap bucket as well: empty every object version in the S3 console, delete the `prevent_destroy` block in `bootstrap/main.tf`, then run `terraform -chdir=bootstrap destroy`.
+If you set `AWS_ROLE_ARN` in GitLab (§2.4), delete it now, so that `main`
+pipelines stop trying to deploy.
 
-Also delete the GitLab CI variable `AWS_ROLE_ARN`, so that `main` pipelines
-stop trying to deploy.
+If you no longer need AWS access at all, deactivate your access key (IAM >
+Users > Security credentials) and remove its profile from `~/.aws/credentials`.

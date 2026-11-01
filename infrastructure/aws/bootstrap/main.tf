@@ -1,6 +1,7 @@
 # Creates the S3 bucket that holds every other root's Terraform state.
-# Run once per AWS account (RUNBOOK.md step 2.1). This root keeps its own
-# state locally: it is a single bucket and can be re-imported if lost:
+# Applied first at the start of every session and destroyed last at the end
+# (RUNBOOK.md §2.1 and §8). This root keeps its own state locally: it is a
+# single bucket and can be re-imported if lost:
 #   terraform import aws_s3_bucket.state syncwave-tfstate-<account id>
 
 terraform {
@@ -33,12 +34,11 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 # The other roots derive this name from the account ID, so it must not change.
+# force_destroy also deletes the old state versions. Destroy this only after
+# the service and platform stacks, or their resources lose their state.
 resource "aws_s3_bucket" "state" {
-  bucket = "syncwave-tfstate-${data.aws_caller_identity.current.account_id}"
-
-  lifecycle {
-    prevent_destroy = true
-  }
+  bucket        = "syncwave-tfstate-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
 }
 
 # Versioning lets a corrupted or wrongly-applied state be rolled back.

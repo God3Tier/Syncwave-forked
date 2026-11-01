@@ -26,10 +26,11 @@ resource "aws_db_instance" "this" {
   publicly_accessible    = false
   multi_az               = false
 
-  backup_retention_period    = 1
+  # Torn down after every session (RUNBOOK.md §8), so nothing is kept:
+  # no automated backups (also skips the initial backup, so it starts faster)
+  # and no final snapshot.
+  backup_retention_period    = 0
   auto_minor_version_upgrade = true
   apply_immediately          = true
-  # A demo database: no snapshot on destroy unless protection is switched on
-  skip_final_snapshot = true
-  deletion_protection = var.db_deletion_protection
+  skip_final_snapshot        = true
 }

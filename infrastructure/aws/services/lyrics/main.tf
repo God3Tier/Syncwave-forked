@@ -56,11 +56,12 @@ locals {
 
 # ---------------------------------------------------------------------------
 # Image repository. ci/scripts/deploy-ecs.sh copies tested images here.
+# force_delete: the session teardown deletes it with its images.
 
 resource "aws_ecr_repository" "this" {
   name                 = "syncwave/lyrics"
   image_tag_mutability = "MUTABLE"
-  force_delete         = var.ecr_force_delete
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
