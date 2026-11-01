@@ -1,7 +1,9 @@
 # Orchestrator
 
 The orchestrator HTTP service listens on port `8080` and exposes `GET /health`.
-Its Compose stack includes its own PostgreSQL database.
+It runs as part of the root Compose stack (Compose service `orchestrator`),
+reached through the gateway at `/api/orchestrator/*`, with its own database
+`orchestrator` on the shared PostgreSQL.
 
 ## Playlist playback
 
@@ -16,7 +18,8 @@ The endpoint is protected by Cognito whenever authentication is configured.
 Upstream base URLs can be overridden with `PLAYLIST_SERVICE_URL`,
 `AUDIO_SERVICE_URL`, `LYRICS_SERVICE_URL`, and `WAVEFORM_SERVICE_URL`. Defaults
 are `http://playlist:8080`, `http://audio_transmitter:8081`,
-`http://lyrics:8080`, and `http://waveform:8080`.
+`http://lyrics:8080`, and `http://waveform:8080`; Compose sets the Streaming
+one to `http://streaming:8081`.
 
 `POST /playlists/{playlist_id}/play/next` fetches and appends the next three
 minutes of the current song to the same authenticated client's ring buffer.
@@ -29,7 +32,8 @@ send the same stable `X-Client-ID` header to both playback requests.
 
 ## Run
 
-From this directory:
+From this directory (the targets drive the root `docker-compose.yml`, which
+also starts PostgreSQL and the services the orchestrator calls):
 
 ```sh
 make up
@@ -38,9 +42,16 @@ make logs
 make down
 ```
 
-The database is published on port `5432` by default. Set `POSTGRES_PORT`,
-`POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in the environment or a
-local `.env` file to override the defaults.
+`curl http://localhost:8080/api/orchestrator/health` answers `OK` through the
+gateway. The orchestrator itself publishes no port.
+
+The database connection comes from `DATABASE_URL` if it is set, otherwise from
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` (Compose uses
+these, and so does AWS, where the password comes from Secrets Manager). The
+service opens its connection pool at startup and exits if the database is not
+reachable. The local database is created by `infrastructure/postgres/init.sql`;
+an existing local Postgres volume needs `docker compose down -v` once to get
+it.
 
 ## Security / Authentication
 
@@ -89,5 +100,5 @@ have a client secret.
 make test
 ```
 
-This runs the Rust test suite in Docker. `make clean` also removes the local
-database volume.
+This runs the Rust test suite in Docker; the tests need no database.
+`make clean` stops and removes the orchestrator container.

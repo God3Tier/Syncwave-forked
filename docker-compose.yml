@@ -25,6 +25,7 @@ include:
   - services/lyrics/compose.yaml
   - services/playlist/compose.yaml
   - services/upload/compose.yaml
+  - services/song_request_orchestrator/compose.yaml
   - frontend/compose.yaml
 
 services:
