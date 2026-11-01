@@ -9,7 +9,8 @@ On every push to `staging`, the root pipeline's `integration` job:
 1. starts `docker-compose.yml` with the images CI already built and tagged
    `:staging` (`IMAGE_REGISTRY` / `IMAGE_TAG`), so nothing is rebuilt;
 2. waits for every healthcheck (`docker compose up --wait`);
-3. runs `smoke.sh`, then `tests/e2e/run.sh` if it exists;
+3. runs `smoke.sh`, then `upload-flow.py` (below), then `tests/e2e/run.sh` if
+   it exists;
 4. keeps `compose-logs.txt` and `compose-ps.txt` as job artifacts for debugging.
 
 ## Run locally
@@ -30,12 +31,10 @@ e.g. "publish `SongUploaded`, expect `lyrics_status=READY` in Catalogue".
 only Python's standard library; it does not start containers or mock S3,
 RabbitMQ, the database, or the processing services.
 
-Before running it, integrate Catalogue and the UUID-based Streaming service
-from `feat/streaming-sync-integration`, and include Upload in root Compose.
-Start the gateway, Upload/publisher, Catalogue/worker, Lyrics/worker,
-Waveform/worker, Streaming, and their infrastructure. The Upload branch's
-older integer-track-ID Streaming implementation is not compatible with this
-scenario. Missing services fail the initial health/readiness checks.
+It needs the gateway, Upload/publisher, Catalogue/worker, Lyrics/worker,
+Waveform/worker, Streaming, and their infrastructure: `docker compose up -d
+--build --wait` starts all of them. Missing services fail the initial
+health/readiness checks.
 
 From the repository root in Windows PowerShell, using the prepared Upload
 virtual environment:
@@ -75,11 +74,9 @@ has not created the song's row yet is retried. `--report` optionally saves
 JSON evidence, including the test's song/event IDs when available; the example
 report filename is gitignored.
 
-### Add the scenario to staging CI
+### In staging CI
 
-After Upload and the integration dependencies have been merged into the CI
-branch, add this command immediately after `smoke.sh` in the root
-`integration` job's `script` list:
+The root `integration` job runs it right after `smoke.sh`:
 
 ```yaml
 - docker compose exec -T upload python - --base-url http://gateway:8080 < tests/integration/upload-flow.py
@@ -89,6 +86,7 @@ This runs the script using Python already present in the Upload image. It
 targets `gateway` on the Compose network; no additional Python installation
 is needed in the Docker CLI job image. Standard output contains the report,
 and the Python exit code causes the job to fail when the scenario fails.
+Unlike the scripts below, it creates its own song, so a fresh CI stack is fine.
 
 ### Fixture cleanup
 
@@ -100,6 +98,7 @@ There is no shared song-deletion API, so this script does not delete another
 service's rows, purge queues, or reset volumes. Use a disposable stack with
 its own data volumes for repeated runs, and remove that stack's data only
 after confirming it belongs to the test environment.
+
 ## Playlist, Recommendation and Jam
 
 All need at least 4 `READY` songs in the Catalogue (the demo songs are enough).
