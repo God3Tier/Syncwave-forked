@@ -59,8 +59,14 @@ services:
     image: ${IMAGE_REGISTRY:-syncwave}/catalogue:${IMAGE_TAG:-local}
     command: ["python", "-m", "catalogue_service.worker"]
     environment: *catalogue-environment
+    volumes:
+      - ../../infrastructure/health/check-consumers.py:/app/check-consumers.py:ro
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "/app/check-consumers.py", "catalogue.song-uploaded", "catalogue.processing-results"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
     restart: on-failure
     depends_on:
       catalogue:

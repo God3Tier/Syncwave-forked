@@ -1,6 +1,7 @@
 services:
   audio_transmitter:
     build: .
+    image: ${IMAGE_REGISTRY:-syncwave}/audio_transmitter:${IMAGE_TAG:-local}
     ports:
       - "8081:8081"
     # Song metadata comes from the Catalogue Service (no database of its own).
