@@ -9,13 +9,19 @@ On every push to `staging`, the root pipeline's `integration` job:
 1. starts `docker-compose.yml` with the images CI already built and tagged
    `:staging` (`IMAGE_REGISTRY` / `IMAGE_TAG`), so nothing is rebuilt;
 2. waits for every healthcheck (`docker compose up --wait`);
-3. runs `smoke.sh`, then `ingestion-flow.py` and `backend-flow.py` (both reuse
-   `upload-flow.py`), then `tests/e2e/run.sh` if it exists;
-4. keeps `compose-logs.txt`, `compose-ps.txt` and both scenario JSON reports
-   as job artifacts for debugging, including on failure.
+3. runs `smoke.sh`, then `ingestion-flow.py`, `backend-flow.py --check-reconnect`
+   and the sequential host-side `failure-recovery.py`, then `tests/e2e/run.sh`
+   if it exists;
+4. keeps `compose-logs.txt`, `compose-ps.txt` and all three scenario JSON
+   reports as job artifacts for debugging, including on failure.
 
 CI layers `ingestion.compose.yaml` over root Compose: Recommendation uses
 real Catalogue data and fixed RAIN weather for repeatable mood checks.
+
+For the complete item 4 commands, fault-case expectations, CI unit-suite audit
+and physical-device recording procedure, see [ITEM4_RUNBOOK.md](ITEM4_RUNBOOK.md).
+Browser work remains deferred; new fault/reconnect checks still need PASS
+reports, and physical validation requires real measurements.
 
 ## Run locally
 
@@ -308,14 +314,14 @@ Sync session remain identified in the report: there are no public deletion
 APIs for all of them. Run against disposable test data for repeated checks;
 no existing songs, shared queues, databases or volumes are deleted.
 
-The root staging `integration` job runs this scenario after ingestion checks
-and before the optional browser-test hook. It copies both scripts into Jam,
-then executes:
+The root staging `integration` job runs this scenario after ingestion checks,
+with the additional `--check-reconnect` flag, before host-side fault scenarios
+and the optional browser-test hook. It copies both scripts into Jam, then executes:
 
 ```yaml
 - docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
 - docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
-- docker compose exec -T jam python /tmp/backend-flow.py --report /tmp/backend-flow-report.json
+- docker compose exec -T jam python /tmp/backend-flow.py --check-reconnect --report /tmp/backend-flow-report.json
 ```
 
 `integration.after_script` retrieves the report even when the scenario fails.
@@ -334,8 +340,12 @@ if startup or an earlier scenario fails before this script runs, its report
 will not exist; the available ingestion report and Compose logs still help
 diagnose the failure. Live verification requires the updated configuration
 to reach staging through an authorized push/merge. Check the job output for
-both scenario PASS results, download both reports from job artifacts, and
-record the successful pipeline URL in `INTEGRATION_PLAN.md`.
+all scenario PASS results, download all three reports from job artifacts, and
+record the successful pipeline URL in `INTEGRATION_PLAN.md`. The fault runner
+also saves its report directly on the CLI host; it is retained with these
+artifacts. The separate `ci:test-coverage` validation job checks CI unit-test
+configuration and saves its own report; actual child-job passes remain the
+evidence that service unit suites executed successfully.
 
 ## Playlist, Recommendation and Jam
 
