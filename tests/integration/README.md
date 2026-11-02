@@ -9,9 +9,13 @@ On every push to `staging`, the root pipeline's `integration` job:
 1. starts `docker-compose.yml` with the images CI already built and tagged
    `:staging` (`IMAGE_REGISTRY` / `IMAGE_TAG`), so nothing is rebuilt;
 2. waits for every healthcheck (`docker compose up --wait`);
-3. runs `smoke.sh`, then `upload-flow.py` (below), then `tests/e2e/run.sh` if
-   it exists;
-4. keeps `compose-logs.txt` and `compose-ps.txt` as job artifacts for debugging.
+3. runs `smoke.sh`, then `ingestion-flow.py` (which reuses `upload-flow.py`),
+   then `tests/e2e/run.sh` if it exists;
+4. keeps `compose-logs.txt`, `compose-ps.txt` and the ingestion JSON report as
+   job artifacts for debugging, including on failure.
+
+CI layers `ingestion.compose.yaml` over root Compose: Recommendation uses
+real Catalogue data and fixed RAIN weather for repeatable mood checks.
 
 ## Run locally
 
@@ -101,7 +105,9 @@ report filename is gitignored.
 
 ### In staging CI
 
-The root `integration` job runs it right after `smoke.sh`:
+The root `integration` job now imports this flow through `ingestion-flow.py`
+(the complete item 2 scenario below). For debugging only the upload/processing
+part inside CI or another shell supporting input redirection, use:
 
 ```yaml
 - docker compose exec -T upload python - --base-url http://gateway:8080 < tests/integration/upload-flow.py
@@ -124,6 +130,111 @@ There is no shared song-deletion API, so this script does not delete another
 service's rows, purge queues, or reset volumes. Use a disposable stack with
 its own data volumes for repeated runs, and remove that stack's data only
 after confirming it belongs to the test environment.
+
+## Item 2: complete ingestion and discovery scenario
+
+`ingestion-flow.py` verifies the remaining ingestion/discovery acceptance
+criteria against the real APIs, S3, RabbitMQ, databases and consumers. It
+runs inside Upload using that image's existing `aio-pika` and `boto3`.
+No new Python dependencies or frontend are required.
+
+The script:
+
+1. Uploads two distinct four-second WAV/LRC fixtures with unique titles and
+   mixed-case/whitespace `mood` values. It reuses the full `upload-flow.py`
+   checks and verifies normalized mood reaches both the receipt and Catalogue.
+2. Waits for each ready song to appear exactly once in Search with matching
+   title/artist, including an uppercase query against the lowercase title.
+3. Captures an actual Catalogue `SongReady` on a temporary exclusive queue.
+   Replays the same body/event ID twice directly to `search.song-ready`;
+   waits for RabbitMQ to record both publications and acknowledgements with
+   no pending messages; verifies results, metadata and order are unchanged.
+4. Calls real Recommendation/Catalogue APIs without a location and with fixed
+   RAIN weather. A newer upbeat song is initially ahead of the calm song;
+   weather must promote the calm song and mark it `WEATHER_MATCH`, while the
+   upbeat song remains `GENERAL`.
+5. Uploads valid audio with untimed UTF-8 lyrics. Checks Catalogue `PARTIAL`,
+   Lyrics `FAILED` with `LYRICS_NOT_TIMESTAMPED` and an error message, Waveform
+   `READY`, and no Search result for that partial song.
+6. Captures its own original dead-lettered event, repairs only the exact
+   `lyrics/<fixture-song-id>.lrc` object, and replays that body/event ID directly
+   to Lyrics. Checks the same song becomes `READY` and searchable, lyrics and
+   audio bytes match, and the successful waveform (including `updated_at`)
+   is unchanged.
+
+### Run from Windows PowerShell
+
+Use a quiet local/disposable stack with no other uploads or event publishers
+during the check. Duplicate verification requires enabled RabbitMQ management
+statistics and an idle Search queue; it deliberately fails if additional
+Search publications are observed during that step. Statistics collection can
+add several seconds to the run. It does not accept a merely queued duplicate
+as proof of consumer processing.
+
+From the repository root, build the backend images, then start the selected
+services with deterministic test weather:
+
+```powershell
+docker compose build upload catalogue lyrics waveform audio_transmitter search recommendation
+docker compose -f docker-compose.yml -f tests/integration/ingestion.compose.yaml up -d --wait --wait-timeout 180 gateway upload upload-publisher catalogue catalogue-worker lyrics lyrics-worker waveform waveform-worker audio_transmitter search search-worker recommendation
+```
+
+The override keeps Catalogue mode `http` and sets only Recommendation weather
+to `stub`/`RAIN`. The root service defaults are unchanged. This scenario does
+not start the frontend, Playlist, Jam or Sync.
+
+Copy both scripts and execute the item 2 checks:
+
+```powershell
+docker compose cp tests/integration/upload-flow.py upload:/tmp/upload-flow.py
+docker compose cp tests/integration/ingestion-flow.py upload:/tmp/ingestion-flow.py
+docker compose exec -T upload python /tmp/ingestion-flow.py --report /tmp/ingestion-flow-report.json
+$LASTEXITCODE
+```
+
+Exit code 0 and report `result: PASS` mean all checks passed. Any nonzero code
+is a failure. `--timeout 180` bounds each processing/polling stage;
+`--request-timeout 15` bounds individual API requests. Main errors still
+produce a partial JSON report. Retrieve it **before** `docker compose down`:
+
+```powershell
+docker compose cp upload:/tmp/ingestion-flow-report.json tests/integration/ingestion-flow-report.json
+```
+
+If needed, inspect worker logs:
+
+```powershell
+docker compose logs --tail 100 upload upload-publisher catalogue-worker search-worker lyrics-worker waveform-worker recommendation
+```
+
+After copying evidence, stop the stack:
+
+```powershell
+docker compose down
+```
+
+The next normal root `docker compose up` restores the usual Recommendation
+weather configuration. Do not delete volumes to repeat this scenario.
+
+### Retained data and CI
+
+The script leaves three uniquely named songs, their S3 objects and processing
+records, and the recovery fixture's original entry in
+`lyrics.song-uploaded.dlq`. These are recorded in the report. It consumes only
+its own exclusive observer copies; it never gets/purges messages from a
+service queue or shared DLQ, stops a service, or edits service database rows.
+The exclusive observer queue is removed when its connection closes.
+
+The original dead letter remains as failure evidence: recovery republishes
+its captured copy, rather than deleting or moving other queued work. There
+is no shared song-deletion API, so use disposable test data for repeated runs.
+
+The root staging `integration` job starts the same weather override, runs
+this scenario after smoke checks, fails on a nonzero result, and retrieves
+`tests/integration/ingestion-flow-report.json` in `after_script`. That report
+and Compose logs/status are retained for one week with `when: always`.
+Other branches keep the existing pipeline rules. Live GitLab execution still
+requires an authorized push/merge and a successful staging pipeline.
 
 ## Self-contained backend scenario
 

@@ -1,6 +1,6 @@
 # Recommendation Service (README.md), included from the root docker-compose.yml.
 # The API behind the gateway at /api/recommendation. It needs no database,
-# RabbitMQ or S3: only the Catalogue and the Weather API, both stubbed for now.
+# RabbitMQ or S3: only Catalogue and the optional Weather API.
 
 services:
   recommendation:

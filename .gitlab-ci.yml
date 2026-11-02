@@ -221,12 +221,16 @@ integration:
     IMAGE_TAG: staging
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker compose up --detach --no-build --pull always --quiet-pull --wait --wait-timeout 300
+    # Real Catalogue/media/consumers; fixed weather keeps mood checks deterministic.
+    - docker compose -f docker-compose.yml -f tests/integration/ingestion.compose.yaml up --detach --no-build --pull always --quiet-pull --wait --wait-timeout 300
     - sh tests/integration/smoke.sh docker
-    # Scenario 2 end to end, with the Python already in the Upload image.
-    - docker compose exec -T upload python - --base-url http://gateway:8080 < tests/integration/upload-flow.py
+    # Item 2: upload, Search, duplicate delivery, mood ranking and processing recovery.
+    - docker compose cp tests/integration/upload-flow.py upload:/tmp/upload-flow.py
+    - docker compose cp tests/integration/ingestion-flow.py upload:/tmp/ingestion-flow.py
+    - docker compose exec -T upload python /tmp/ingestion-flow.py --report /tmp/ingestion-flow-report.json
     - if [ -f tests/e2e/run.sh ]; then sh tests/e2e/run.sh docker; fi
   after_script:
+    - docker compose cp upload:/tmp/ingestion-flow-report.json tests/integration/ingestion-flow-report.json || true
     - docker compose ps --all > compose-ps.txt 2>&1 || true
     - docker compose logs --no-color --timestamps > compose-logs.txt 2>&1 || true
   artifacts:
@@ -235,5 +239,6 @@ integration:
     paths:
       - compose-ps.txt
       - compose-logs.txt
+      - tests/integration/ingestion-flow-report.json
   rules:
     - if: $CI_PIPELINE_SOURCE != "merge_request_event" && $CI_COMMIT_BRANCH == "staging"

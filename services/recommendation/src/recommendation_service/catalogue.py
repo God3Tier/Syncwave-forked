@@ -64,7 +64,7 @@ class HttpCatalogue:
              "next_cursor": ...}
 
     It follows the list shape in contracts/api/README.md. Only the first page is
-    read: that is the candidate pool. `mood` is optional and not in the shared
+    read: that is the candidate pool. `mood` is optional in the Catalogue
     Song contract. Any failure, whether a network error, a timeout, a non-200
     status or an unreadable body, becomes CatalogueUnavailable.
     """
