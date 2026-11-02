@@ -61,10 +61,10 @@ Use an isolated Compose project for clean-volume verification.
 
 ## 2. Complete song ingestion and discovery
 
-- [ ] Implement or bring in the Upload service, add it to root Compose, and
+- [x] Implement or bring in the Upload service, add it to root Compose, and
   verify its existing gateway route. Validate uploads, store audio and lyrics,
   and publish the agreed `SongUploaded` event with matching object references.
-- [ ] Automate the fixture flow already exercised manually: upload, wait for
+- [x] Automate the fixture flow already exercised manually: upload, wait for
   Catalogue readiness, retrieve lyrics/waveform, and download the actual audio.
 - [ ] Implement or connect Search if the Discover journey requires it. Its
   gateway route exists, but no Search service is included in this branch.
@@ -102,7 +102,7 @@ including actionable errors when a dependency or processing stage fails.
 
 ## 4. Turn manual evidence into repeatable scenario tests
 
-- [ ] Add a backend scenario test using generated audio/lyrics and unique IDs.
+- [x] Add a backend scenario test using generated audio/lyrics and unique IDs.
   Assert processing results, playlist order copied into Jam, real audio bytes,
   and identical scheduled starts for two participants. Document fixture cleanup.
 - [ ] Implement `tests/e2e/run.sh` and browser tests for Discover & Listen,
