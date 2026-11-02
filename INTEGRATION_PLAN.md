@@ -131,12 +131,26 @@ including actionable errors when a dependency or processing stage fails.
 - [ ] Implement `tests/e2e/run.sh` and browser tests for Discover & Listen,
   Upload & Process, and Create & Synchronise a Jam. Staging already has an
   optional hook for this entry point; the current folder is a placeholder.
-- [ ] Cover duplicate events, failed decoding, unavailable S3, dependency
+- [x] Cover duplicate events, failed decoding, unavailable S3, dependency
   timeouts, worker/service restarts, unauthorized owner actions, and reconnects.
+  Duplicate `SongReady` and failed-lyrics recovery already passed under item 2.
+  `failure-recovery.py` now provides six sequential fault scenarios, and
+  `backend-flow.py --check-reconnect` checks catch-up without restarting the
+  owner. Staging is configured to run both; new local/CI PASS reports are
+  still required. Commands and retained-data details are in
+  `tests/integration/ITEM4_RUNBOOK.md`.
 - [ ] Check all service unit suites in CI and retain useful logs on failures.
+  The `ci:test-coverage` validation job now audits every deployed application
+  image's blocking child test job and retained results. Static configuration
+  checks passed for all 11 applications; actual unit-suite execution and a
+  successful pipeline link remain pending.
 - [ ] Validate synchronization across physical devices and real Wi-Fi using
   `services/sync/OBSERVABILITY.md`; record audible timing and drift separately
   from server schedules or browser timer measurements.
+  Blank start/recovery CSV templates and `summarize-sync-measurements.py` are
+  provided. At least 20 measured laptop/two-phone runs, delayed-client and
+  reconnect evidence, and reviewed external audio recordings remain required.
+  No physical measurements have been generated or claimed by these scripts.
 
 Acceptance: CI fails on a broken cross-service flow, and the agreed physical
 device synchronization target has measured evidence. Health checks alone do
