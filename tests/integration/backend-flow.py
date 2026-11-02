@@ -168,7 +168,9 @@ def passed(report: Json, label: str) -> None:
     print(f"PASS {label}", flush=True)
 
 
-async def playback(api: Api, sdk, client_wait_seconds: float, report: Json) -> None:
+async def playback(
+    api: Api, sdk, client_wait_seconds: float, report: Json, check_reconnect: bool = False
+) -> None:
     owner, member = str(uuid.uuid4()), str(uuid.uuid4())
     report.update(owner_id=owner, member_id=member)
     song_ids = [song["song_id"] for song in report["songs"]]
@@ -283,6 +285,66 @@ async def playback(api: Api, sdk, client_wait_seconds: float, report: Json) -> N
             for client, frame in zip(clients, play_frames, strict=True)
         }
         passed(report, "both participants receive identical future PLAY_AT schedules")
+        if check_reconnect:
+            # Observe the established owner's stream throughout the reconnect.
+            # Check every new control frame; cached initial frames are excluded.
+            stop_monitor = asyncio.Event()
+
+            async def watch_owner() -> None:
+                while not stop_monitor.is_set():
+                    try:
+                        async with asyncio.timeout(0.2):
+                            frame = json.loads(await clients[0].connection.recv())
+                            require(
+                                frame.get("type")
+                                not in {"PREPARE", "PLAY_AT", "SEEK_TO", "PAUSE_AT", "ERROR"},
+                                f"Reconnect disturbed owner: {frame.get('type')}",
+                            )
+                    except TimeoutError:
+                        continue
+
+            # Wait until the original scheduled start has passed. Use the two
+            # server timestamps' difference, avoiding cross-host clock assumptions.
+            lead = (first["target_server_time_ms"] - play_frames[0]["sent_at_ms"]) / 1000
+            await asyncio.sleep(max(0, lead) + 0.2)
+            monitor = asyncio.create_task(watch_owner())
+            try:
+                await clients[1].close()
+                clients[1] = Client(
+                    sdk, api.base_url, jam_id, member, "member-reconnected", client_wait_seconds
+                )
+                reconnect_started = time.monotonic()
+                await clients[1].connect()
+                rejoined = await clients[1].receive("JOINED")
+                require(
+                    rejoined["payload"]["participant_id"] == member,
+                    "Reconnect attached the wrong participant",
+                )
+                caught_up = await clients[1].receive("PLAY_AT")
+                payload = caught_up["payload"]
+                require(payload["generation"] == generation, "Reconnect changed generation")
+                require(
+                    payload["target_server_time_ms"] > caught_up["sent_at_ms"],
+                    "Reconnect catch-up is not scheduled in the future",
+                )
+                require(
+                    payload["start_position_ms"] > first["start_position_ms"],
+                    "Reconnect reset playback to the beginning",
+                )
+                report["reconnect"] = {
+                    "participant_id": member,
+                    "play_at": payload,
+                    "recovery_seconds": round(time.monotonic() - reconnect_started, 3),
+                }
+                await asyncio.sleep(1)
+                stop_monitor.set()
+                await monitor
+                report["reconnect"]["owner_undisturbed"] = True
+                passed(report, "reconnected participant catches up without restarting the owner")
+            finally:
+                if not monitor.done():
+                    monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
     finally:
         results = await asyncio.gather(
             *(client.close() for client in clients), return_exceptions=True
@@ -300,6 +362,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=180, help="Processing timeout per song")
     parser.add_argument("--request-timeout", type=float, default=15)
     parser.add_argument("--ws-timeout", type=float, default=10)
+    parser.add_argument(
+        "--check-reconnect",
+        action="store_true",
+        help="Also reconnect a participant after the scheduled start",
+    )
     parser.add_argument(
         "--report", type=Path, help="JSON evidence file, including partial failures"
     )
@@ -352,7 +419,7 @@ def main() -> int:
         passed(
             report, "both generated songs pass upload, processing and exact audio download checks"
         )
-        asyncio.run(playback(api, websockets, args.ws_timeout, report))
+        asyncio.run(playback(api, websockets, args.ws_timeout, report, args.check_reconnect))
         report["result"] = "PASS"
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"
