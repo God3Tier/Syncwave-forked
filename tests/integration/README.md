@@ -9,10 +9,10 @@ On every push to `staging`, the root pipeline's `integration` job:
 1. starts `docker-compose.yml` with the images CI already built and tagged
    `:staging` (`IMAGE_REGISTRY` / `IMAGE_TAG`), so nothing is rebuilt;
 2. waits for every healthcheck (`docker compose up --wait`);
-3. runs `smoke.sh`, then `ingestion-flow.py` (which reuses `upload-flow.py`),
-   then `tests/e2e/run.sh` if it exists;
-4. keeps `compose-logs.txt`, `compose-ps.txt` and the ingestion JSON report as
-   job artifacts for debugging, including on failure.
+3. runs `smoke.sh`, then `ingestion-flow.py` and `backend-flow.py` (both reuse
+   `upload-flow.py`), then `tests/e2e/run.sh` if it exists;
+4. keeps `compose-logs.txt`, `compose-ps.txt` and both scenario JSON reports
+   as job artifacts for debugging, including on failure.
 
 CI layers `ingestion.compose.yaml` over root Compose: Recommendation uses
 real Catalogue data and fixed RAIN weather for repeatable mood checks.
@@ -308,9 +308,9 @@ Sync session remain identified in the report: there are no public deletion
 APIs for all of them. Run against disposable test data for repeated checks;
 no existing songs, shared queues, databases or volumes are deleted.
 
-The new scenario is not wired into staging automatically. After it passes
-locally, add these entries after the existing smoke/upload checks in the
-root `integration.script` list:
+The root staging `integration` job runs this scenario after ingestion checks
+and before the optional browser-test hook. It copies both scripts into Jam,
+then executes:
 
 ```yaml
 - docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
@@ -318,15 +318,24 @@ root `integration.script` list:
 - docker compose exec -T jam python /tmp/backend-flow.py --report /tmp/backend-flow-report.json
 ```
 
-To retain the report as a CI artifact, also add a best-effort copy to the
-existing `integration.after_script` and the resulting file to artifact paths:
+`integration.after_script` retrieves the report even when the scenario fails.
+The job retains it with the ingestion report and Compose logs/status for one
+week using `artifacts.when: always`:
 
 ```yaml
-# Additional after_script entry:
-- docker compose cp jam:/tmp/backend-flow-report.json backend-flow-report.json || true
-# Additional artifacts.paths entry:
-- backend-flow-report.json
+# after_script entry:
+- docker compose cp jam:/tmp/backend-flow-report.json tests/integration/backend-flow-report.json || true
+# artifacts.paths entry:
+- tests/integration/backend-flow-report.json
 ```
+
+A nonzero scenario exit fails the job. Report collection is best effort:
+if startup or an earlier scenario fails before this script runs, its report
+will not exist; the available ingestion report and Compose logs still help
+diagnose the failure. Live verification requires the updated configuration
+to reach staging through an authorized push/merge. Check the job output for
+both scenario PASS results, download both reports from job artifacts, and
+record the successful pipeline URL in `INTEGRATION_PLAN.md`.
 
 ## Playlist, Recommendation and Jam
 

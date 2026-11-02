@@ -123,6 +123,11 @@ including actionable errors when a dependency or processing stage fails.
 - [x] Add a backend scenario test using generated audio/lyrics and unique IDs.
   Assert processing results, playlist order copied into Jam, real audio bytes,
   and identical scheduled starts for two participants. Document fixture cleanup.
+- [x] Wire `backend-flow.py` into staging's root `integration` job after
+  ingestion checks. Both scenario reports are collected in `after_script`
+  and retained with Compose logs/status for one week, including on failures.
+  Live staging execution and a successful pipeline link remain pending under
+  item 1; configuring the job does not establish that GitLab has run it.
 - [ ] Implement `tests/e2e/run.sh` and browser tests for Discover & Listen,
   Upload & Process, and Create & Synchronise a Jam. Staging already has an
   optional hook for this entry point; the current folder is a placeholder.
