@@ -68,30 +68,32 @@ Use an isolated Compose project for clean-volume verification.
 - [x] `upload-flow.py` automates submission, publication, Catalogue readiness,
   lyrics/waveform retrieval, measured duration and exact audio downloads.
   `backend-flow.py` reused it for two distinct WAV fixtures; both passed locally.
-- [ ] Complete live Search verification. Search and its worker are included in
+- [x] Complete live Search verification. Search and its worker are included in
   root Compose and the gateway; `SongReady` indexing, duplicate upserts and
   startup rebuilding are implemented, with unit tests present.
-  `ingestion-flow.py` now checks new uploads through Search and waits for two
-  repeated deliveries to be acknowledged without duplicate rows or reordering.
-  This new scenario has not been run yet.
+  `ingestion-flow.py` passed locally: both new uploads appeared exactly once
+  through case-insensitive title queries, and two repeated `SongReady`
+  deliveries were acknowledged without duplicate results or reordering.
 - [x] Optional mood metadata is implemented in Upload, the `SongUploaded`
   schema, Catalogue storage/REST contract and Recommendation's Catalogue
   adapter. Upload normalizes labels; weather matching promotes the agreed
   moods while songs without a mood retain general ranking.
-- [ ] Run `ingestion-flow.py` using `ingestion.compose.yaml` and keep its PASS
-  report. The scenario checks mood propagation and deterministic RAIN ranking,
-  plus invalid lyrics producing a clear `PARTIAL`/`LYRICS_NOT_TIMESTAMPED` error.
-  It repairs only its own lyrics object and replays its captured event to
-  verify recovery to READY/Search without changing the successful waveform.
+- [x] Run `ingestion-flow.py` using `ingestion.compose.yaml` and keep its PASS
+  report. Run `227e86d528604ac5abbce85fda7d0ef9` passed all five checks locally
+  on 2 November 2026 in 22.07 seconds. Mood propagation and deterministic RAIN
+  ranking passed. Invalid lyrics produced the expected
+  `PARTIAL`/`LYRICS_NOT_TIMESTAMPED` error; repairing only the fixture's lyrics
+  object and replaying its captured event restored the same song to READY
+  and Search without changing the successful waveform.
   See `tests/integration/README.md` for commands and retained fixture data.
 
 Acceptance: a user can submit a new song through the public API, discover it
 after processing, and retrieve playable audio with its lyrics and waveform.
 Failed processing produces a clear status and has a documented retry path.
-The ingestion/discovery implementation and automated checks are present;
-item 2 acceptance remains pending the new local report. CI is configured to
-run the scenario and retain its report; its live staging result is also
-pending and is part of the shared staging verification in item 1.
+Item 2 local acceptance passed, recorded in
+`tests/integration/ingestion-flow-report.json` with the run ID above. CI is
+configured to run the scenario and retain its report; live staging execution
+remains pending under the shared staging verification in item 1.
 
 ## 3. Connect the frontend and settle playback orchestration
 
