@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""Generate two songs, verify ingestion, then test Playlist -> Jam -> Sync.
+
+Run inside the Jam container with upload-flow.py alongside this file.
+Clients exercise the backend protocol; they do not play audible browser audio.
+"""
+
+import argparse
+import asyncio
+import importlib.util
+import json
+import os
+import sys
+import time
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
+
+Json = dict[str, Any]
+
+
+class FlowError(Exception):
+    pass
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise FlowError(message)
+
+
+def load_upload_flow():
+    path = Path(__file__).with_name("upload-flow.py")
+    require(path.is_file(), f"Copy upload-flow.py alongside this script: {path}")
+    spec = importlib.util.spec_from_file_location("syncwave_upload_flow_helpers", path)
+    require(spec is not None and spec.loader is not None, "Cannot load upload-flow.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class Api:
+    def __init__(self, base_url: str, timeout: float) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.jam_token = os.getenv("MOCK_JAM_TOKEN", "local-jam-member-token")
+
+    def call(
+        self,
+        method: str,
+        path: str,
+        data: Json | None = None,
+        *,
+        jam: bool = False,
+        expected: int = 200,
+    ) -> Json | None:
+        headers = {"Accept": "application/json"}
+        if jam:
+            headers["X-Jam-Token"] = self.jam_token
+        body = None
+        if data is not None:
+            body = json.dumps(data).encode()
+            headers["Content-Type"] = "application/json"
+        request = Request(self.base_url + path, data=body, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                require(response.status == expected, f"{method} {path}: HTTP {response.status}")
+                raw = response.read(1_000_001)
+                require(len(raw) <= 1_000_000, f"{path}: unexpectedly large response")
+        except HTTPError as exc:
+            detail = exc.read(1000).decode("utf-8", errors="replace")
+            exc.close()
+            raise FlowError(f"{method} {path}: HTTP {exc.code}: {detail}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise FlowError(f"{method} {path}: request failed: {exc}") from exc
+        if not raw:
+            return None
+        result = json.loads(raw)
+        require(isinstance(result, dict), f"{path}: expected a JSON object")
+        return result
+
+
+class Client:
+    def __init__(
+        self, sdk, base_url: str, jam_id: str, participant_id: str, name: str, timeout: float
+    ) -> None:
+        address = urlsplit(base_url)
+        scheme = "wss" if address.scheme == "https" else "ws"
+        query = urlencode(
+            {
+                "jam_id": jam_id,
+                "participant_id": participant_id,
+                "token": os.getenv("SYNC_PARTICIPANT_TOKEN", "local-sync-participant-token"),
+            }
+        )
+        self.url = f"{scheme}://{address.netloc}{address.path.rstrip('/')}/api/sync/ws?{query}"
+        self.sdk, self.name, self.jam_id, self.timeout = sdk, name, jam_id, timeout
+        self.connection = None
+        self.seq = 0
+        self.messages: list[Json] = []
+
+    async def connect(self) -> None:
+        self.connection = await self.sdk.connect(
+            self.url, open_timeout=self.timeout, close_timeout=3, max_size=65536
+        )
+
+    async def receive(
+        self, message_type: str, predicate: Callable[[Json], bool] | None = None
+    ) -> Json:
+        def matches(frame: Json) -> bool:
+            return frame.get("type") == message_type and (predicate is None or predicate(frame))
+
+        for frame in self.messages:
+            if matches(frame):
+                return frame
+        try:
+            async with asyncio.timeout(self.timeout):
+                while True:
+                    frame = json.loads(await self.connection.recv())
+                    require(isinstance(frame, dict), f"{self.name}: invalid WebSocket frame")
+                    require(frame.get("jam_id") == self.jam_id, f"{self.name}: wrong Jam ID")
+                    if frame.get("type") == "ERROR":
+                        raise FlowError(f"{self.name}: Sync error: {frame.get('payload')}")
+                    self.messages.append(frame)
+                    if matches(frame):
+                        return frame
+        except TimeoutError as exc:
+            raise FlowError(f"{self.name}: timed out waiting for {message_type}") from exc
+
+    async def send(self, message_type: str, payload: Json) -> None:
+        frame = {
+            "type": message_type,
+            "jam_id": self.jam_id,
+            "seq": self.seq,
+            "sent_at_ms": time.time_ns() // 1_000_000,
+            "payload": payload,
+        }
+        self.seq += 1
+        async with asyncio.timeout(self.timeout):
+            await self.connection.send(json.dumps(frame))
+
+    async def sample_clock(self) -> int:
+        for _ in range(5):
+            sample_id = str(uuid.uuid4())
+            await self.send(
+                "TIME_PING",
+                {
+                    "sample_id": sample_id,
+                    "client_sent_ms": time.time_ns() // 1_000_000,
+                },
+            )
+            await self.receive(
+                "TIME_PONG", lambda frame, wanted=sample_id: frame["payload"]["sample_id"] == wanted
+            )
+        return 5
+
+    async def close(self) -> None:
+        if self.connection is not None:
+            await self.connection.close()
+
+
+def passed(report: Json, label: str) -> None:
+    report["checks"].append(label)
+    print(f"PASS {label}", flush=True)
+
+
+async def playback(api: Api, sdk, client_wait_seconds: float, report: Json) -> None:
+    owner, member = str(uuid.uuid4()), str(uuid.uuid4())
+    report.update(owner_id=owner, member_id=member)
+    song_ids = [song["song_id"] for song in report["songs"]]
+    playlist = await asyncio.to_thread(
+        api.call,
+        "POST",
+        "/api/playlist/playlists",
+        {"owner_id": owner, "name": f"backend-flow-{report['run_id']}"},
+        expected=201,
+    )
+    playlist_id = str(uuid.UUID(playlist["playlist_id"]))
+    report["playlist_id"] = playlist_id
+    for song_id in song_ids:
+        await asyncio.to_thread(
+            api.call, "POST", f"/api/playlist/playlists/{playlist_id}/songs", {"song_id": song_id}
+        )
+    saved = await asyncio.to_thread(api.call, "GET", f"/api/playlist/playlists/{playlist_id}")
+    order = [song["song_id"] for song in saved["songs"]]
+    require(order == song_ids, "Saved playlist order differs from the inserted fixture order")
+    report["playlist_order"] = order
+    passed(report, "playlist contains both generated songs in the expected order")
+
+    jam = await asyncio.to_thread(
+        api.call,
+        "POST",
+        "/api/jam/jams",
+        {"owner_id": owner, "playlist_id": playlist_id},
+        jam=True,
+        expected=201,
+    )
+    jam_id = str(uuid.UUID(jam["jam_id"]))
+    report["jam_id"] = jam_id
+    if jam.get("member_token"):
+        api.jam_token = jam["member_token"]
+    require([item["song_id"] for item in jam["queue"]] == order, "Jam changed playlist order")
+    require([item["position"] for item in jam["queue"]] == [0, 1], "Invalid Jam queue positions")
+    queue_item_id = jam["queue"][0]["queue_item_id"]
+    passed(report, "Jam imports the exact playlist order")
+    joined = await asyncio.to_thread(
+        api.call, "POST", f"/api/jam/jams/{jam_id}/members", {"participant_id": member}, jam=True
+    )
+    require(set(joined["participant_ids"]) == {owner, member}, "Jam membership differs")
+
+    started = await asyncio.to_thread(
+        api.call,
+        "POST",
+        f"/api/jam/jams/{jam_id}/playback/start",
+        {"actor_id": owner, "request_id": str(uuid.uuid4())},
+        jam=True,
+    )
+    require(started["state"] == "PREPARING", "Jam did not enter PREPARING")
+    generation = started["sync_generation"]
+    require(isinstance(generation, int) and generation > 0, "Missing Sync generation")
+    clients = [
+        Client(sdk, api.base_url, jam_id, owner, "owner", client_wait_seconds),
+        Client(sdk, api.base_url, jam_id, member, "member", client_wait_seconds),
+    ]
+    try:
+        # Connect and sample concurrently to stay inside Sync's readiness deadline.
+        connections = await asyncio.gather(
+            *(client.connect() for client in clients), return_exceptions=True
+        )
+        for client, result in zip(clients, connections, strict=True):
+            if isinstance(result, BaseException):
+                raise FlowError(f"{client.name}: WebSocket connection failed: {result}")
+        await asyncio.gather(*(client.receive("JOINED") for client in clients))
+        prepared = await asyncio.gather(*(client.receive("PREPARE") for client in clients))
+        for client, frame in zip(clients, prepared, strict=True):
+            payload = frame["payload"]
+            require(payload["song_id"] == order[0], f"{client.name}: wrong PREPARE song")
+            require(payload["queue_item_id"] == queue_item_id, f"{client.name}: wrong queue item")
+            require(payload["generation"] == generation, f"{client.name}: wrong generation")
+            require(
+                payload["stream_url"] == f"/api/streaming/tracks/{order[0]}/audio",
+                f"{client.name}: PREPARE stream URL does not match the verified audio",
+            )
+            require(payload["start_position_ms"] == 0, f"{client.name}: unexpected start position")
+        passed(report, "both clients prepare the first fixture song and correct stream URL")
+        samples = await asyncio.gather(*(client.sample_clock() for client in clients))
+        report["clock_samples"] = dict(zip((c.name for c in clients), samples, strict=True))
+        passed(report, "both clients complete five clock exchanges")
+
+        duration = report["songs"][0]["duration_ms"]
+        await asyncio.gather(
+            *(
+                client.send(
+                    "READY",
+                    {
+                        "generation": generation,
+                        "buffered_duration_ms": duration,
+                        "media_duration_ms": duration,
+                    },
+                )
+                for client in clients
+            )
+        )
+        play_frames = await asyncio.gather(*(client.receive("PLAY_AT") for client in clients))
+        first = play_frames[0]["payload"]
+        require(
+            first == play_frames[1]["payload"], "Participants received different PLAY_AT payloads"
+        )
+        require(first["generation"] == generation, "PLAY_AT generation differs from PREPARE")
+        require(first["start_position_ms"] == 0, "PLAY_AT did not start at position zero")
+        require(first["playback_rate"] == 1, "Unexpected initial playback rate")
+        for frame in play_frames:
+            require(
+                first["target_server_time_ms"] > frame["sent_at_ms"],
+                "PLAY_AT target was not in the future when the server sent it",
+            )
+        report["play_at"] = {
+            client.name: frame["payload"]
+            for client, frame in zip(clients, play_frames, strict=True)
+        }
+        passed(report, "both participants receive identical future PLAY_AT schedules")
+    finally:
+        results = await asyncio.gather(
+            *(client.close() for client in clients), return_exceptions=True
+        )
+        errors = [str(result) for result in results if isinstance(result, BaseException)]
+        report["cleanup"]["websockets_closed"] = not errors
+        if errors:
+            report["cleanup"]["websocket_errors"] = errors
+    require(report["cleanup"]["websockets_closed"], "WebSocket cleanup failed")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default="http://gateway:8080")
+    parser.add_argument("--timeout", type=float, default=180, help="Processing timeout per song")
+    parser.add_argument("--request-timeout", type=float, default=15)
+    parser.add_argument("--ws-timeout", type=float, default=10)
+    parser.add_argument(
+        "--report", type=Path, help="JSON evidence file, including partial failures"
+    )
+    args = parser.parse_args()
+    address = urlsplit(args.base_url)
+    if address.scheme not in {"http", "https"} or not address.netloc:
+        parser.error("--base-url must be an HTTP(S) gateway URL")
+    if any(
+        not 0 < value < float("inf")
+        for value in (args.timeout, args.request_timeout, args.ws_timeout)
+    ):
+        parser.error("timeouts must be finite positive numbers")
+
+    report: Json = {
+        "run_id": uuid.uuid4().hex,
+        "base_url": args.base_url,
+        "result": "FAIL",
+        "checks": [],
+        "songs": [],
+        "cleanup": {"playlist_deleted": None},
+        "scope": "Backend protocol and media bytes; no audible browser playback measurement",
+        "retained_data": "Generated songs/S3 objects, Jam and Sync session; no deletion API",
+    }
+    started = time.monotonic()
+    api = Api(args.base_url, args.request_timeout)
+    try:
+        try:
+            import websockets
+        except ImportError as exc:
+            raise FlowError("Run inside the Jam container, which provides websockets") from exc
+        upload = load_upload_flow()
+        for path in ("/api/playlist/health", "/api/jam/ready", "/api/sync/health"):
+            api.call("GET", path)
+        for number in (1, 2):
+            frequency = 440 if number == 1 else 660
+            song: Json = {
+                "run_id": f"{report['run_id']}-{number}",
+                "frequency_hz": frequency,
+                "result": "FAIL",
+            }
+            report["songs"].append(song)
+            print(f"\nPreparing fixture song {number}/2...", flush=True)
+            upload.run(
+                upload.Api(api.base_url, args.request_timeout),
+                args.timeout,
+                song,
+                audio=upload.audio_fixture(frequency_hz=frequency),
+            )
+            song["result"] = "PASS"
+        passed(
+            report, "both generated songs pass upload, processing and exact audio download checks"
+        )
+        asyncio.run(playback(api, websockets, args.ws_timeout, report))
+        report["result"] = "PASS"
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        print(f"FAIL {report['error']}", file=sys.stderr, flush=True)
+    finally:
+        if playlist_id := report.get("playlist_id"):
+            try:
+                api.call("DELETE", f"/api/playlist/playlists/{playlist_id}", expected=204)
+                report["cleanup"]["playlist_deleted"] = True
+            except Exception as exc:
+                report["cleanup"]["playlist_deleted"] = False
+                report["cleanup"]["playlist_error"] = str(exc)
+                report["result"] = "FAIL"
+                print(f"FAIL test playlist cleanup: {exc}", file=sys.stderr, flush=True)
+
+    report["elapsed_seconds"] = round(time.monotonic() - started, 2)
+    print(json.dumps(report, indent=2), flush=True)
+    if args.report:
+        try:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"FAIL writing report: {exc}", file=sys.stderr, flush=True)
+            return 1
+    return 0 if report["result"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

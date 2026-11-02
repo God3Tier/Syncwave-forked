@@ -85,10 +85,10 @@ class Api:
         return value
 
 
-def audio_fixture() -> bytes:
+def audio_fixture(frequency_hz: float = 440) -> bytes:
     rate = 22050
     pcm = b"".join(
-        struct.pack("<h", round(8000 * math.sin(2 * math.pi * 440 * sample / rate)))
+        struct.pack("<h", round(8000 * math.sin(2 * math.pi * frequency_hz * sample / rate)))
         for sample in range(rate * DURATION_MS // 1000)
     )
     buffer = io.BytesIO()
@@ -148,7 +148,7 @@ def wait_for(api: Api, path: str, key: str, target: str, deadline: float) -> Jso
     raise FlowError(f"{path}: timed out waiting for {target}; last response: {last_response}")
 
 
-def run(api: Api, timeout: float, report: Json) -> None:
+def run(api: Api, timeout: float, report: Json, *, audio: bytes | None = None) -> None:
     print("Checking required services through the gateway...", flush=True)
     for path in (
         "/api/upload/ready",
@@ -160,7 +160,7 @@ def run(api: Api, timeout: float, report: Json) -> None:
         api.request(path)
         print(f"PASS {path}", flush=True)
 
-    audio = audio_fixture()
+    audio = audio_fixture() if audio is None else audio
     title = f"upload-flow-{report['run_id']}"
     body, content_type = multipart(title, audio)
     receipt = api.json(

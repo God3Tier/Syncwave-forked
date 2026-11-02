@@ -111,7 +111,8 @@ This runs the script using Python already present in the Upload image. It
 targets `gateway` on the Compose network; no additional Python installation
 is needed in the Docker CLI job image. Standard output contains the report,
 and the Python exit code causes the job to fail when the scenario fails.
-Unlike the scripts below, it creates its own song, so a fresh CI stack is fine.
+Unlike the manual Playlist/Recommendation scripts farther below, it creates
+its own song, so a fresh CI stack is fine.
 
 ### Fixture cleanup
 
@@ -123,6 +124,98 @@ There is no shared song-deletion API, so this script does not delete another
 service's rows, purge queues, or reset volumes. Use a disposable stack with
 its own data volumes for repeated runs, and remove that stack's data only
 after confirming it belongs to the test environment.
+
+## Self-contained backend scenario
+
+`backend-flow.py` combines the generated upload/processing checks with
+Playlist -> Jam -> Sync. It creates two new songs on every run, so it does not
+need any pre-existing READY songs. The WAV tones have different frequencies
+(440 and 660 Hz); a wrong-song audio response therefore fails the byte check.
+It reuses `upload-flow.py`, which must be copied alongside it.
+
+The scenario checks:
+
+1. Both songs pass upload, confirmed event delivery, Catalogue readiness,
+   lyrics/waveform retrieval, measured duration and exact audio-byte checks.
+2. A new playlist contains the two songs in their inserted order.
+3. Jam imports that exact order and admits the independent owner/member IDs.
+4. Both Sync clients receive `JOINED` and `PREPARE` for the correct first
+   song, queue item, media URL and generation.
+5. Both clients complete five clock exchanges and report readiness using the
+   actual fixture duration.
+6. Both receive identical `PLAY_AT` payloads, with a future server timestamp,
+   the same generation, position zero and normal playback rate.
+
+These are protocol clients: no frontend or audible playback is exercised.
+The test does not start/stop shared services or test outage/restart scenarios.
+
+### Run from Windows PowerShell
+
+From the repository root, build and start the required backend services:
+
+```powershell
+docker compose build upload catalogue lyrics waveform playlist audio_transmitter sync jam
+docker compose up -d --wait --wait-timeout 180 gateway upload upload-publisher catalogue catalogue-worker lyrics lyrics-worker waveform waveform-worker playlist audio_transmitter sync jam
+```
+
+The gateway, RabbitMQ, PostgreSQL and S3 dependencies start automatically.
+Search, Recommendation and the frontend are not required for this scenario.
+Copy the two scripts to known file paths (safe to repeat) and run inside Jam,
+whose image already provides Python and `websockets`:
+
+```powershell
+docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
+docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
+docker compose exec -T jam python /tmp/backend-flow.py --report /tmp/backend-flow-report.json
+$LASTEXITCODE
+```
+
+The default gateway URL is `http://gateway:8080` inside Compose. Exit code 0
+means all checks and playlist cleanup passed; any nonzero result is a failure.
+Processing may take up to `--timeout 180` seconds per song. HTTP requests use
+`--request-timeout 15`; individual WebSocket operations use `--ws-timeout 10`.
+Connection and clock sampling run concurrently to avoid unnecessarily using
+up Sync's preparation deadline.
+
+Copy the report back even if the test fails:
+
+```powershell
+docker compose cp jam:/tmp/backend-flow-report.json tests/integration/backend-flow-report.json
+```
+
+It includes both song/event IDs, object references, byte hashes, playlist/Jam
+IDs, both playback schedules and cleanup outcomes. Jam HTTP authentication
+uses its `MOCK_JAM_TOKEN` environment variable (or the local default); Sync
+uses `SYNC_PARTICIPANT_TOKEN` when supplied, otherwise the local participant
+token. Tokens are not included in the report.
+
+### Cleanup and CI
+
+All WebSockets are closed in a `finally` block, and the newly created playlist
+is deleted even when a later step fails. Generated songs, S3 objects, Jam and
+Sync session remain identified in the report: there are no public deletion
+APIs for all of them. Run against disposable test data for repeated checks;
+no existing songs, shared queues, databases or volumes are deleted.
+
+The new scenario is not wired into staging automatically. After it passes
+locally, add these entries after the existing smoke/upload checks in the
+root `integration.script` list:
+
+```yaml
+- docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
+- docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
+- docker compose exec -T jam python /tmp/backend-flow.py --report /tmp/backend-flow-report.json
+```
+
+To retain the report as a CI artifact, also add a best-effort copy to the
+existing `integration.after_script` and the resulting file to artifact paths:
+
+```yaml
+# Additional after_script entry:
+- docker compose cp jam:/tmp/backend-flow-report.json backend-flow-report.json || true
+# Additional artifacts.paths entry:
+- backend-flow-report.json
+```
 
 ## Playlist, Recommendation and Jam
 
