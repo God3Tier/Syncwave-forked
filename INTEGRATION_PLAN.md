@@ -1,6 +1,6 @@
 # Remaining integration work
 
-Updated: 2 November 2026. Original baseline branch: `feat/streaming-sync-integration`.
+Updated: 4 November 2026. Original baseline branch: `feat/streaming-sync-integration`.
 
 ## Verified baseline
 
@@ -102,9 +102,11 @@ The agreed implementation details and first-release boundaries are in
 buffer, laptop/mobile layouts, Nielsen heuristics, and Playwright coverage.
 Upload and full Search follow once their backend services are ready.
 
-- [ ] Add or integrate the production frontend and its Compose service. The
-  gateway currently forwards `/` to a frontend hostname that is absent.
-- [ ] Connect discovery, upload status, playlists, and playback to gateway APIs.
+- [x] Integrate the production frontend and its Compose service behind the
+  gateway. Desktop and mobile rendering passed local Playwright checks.
+- [x] Connect discovery, upload status, playlists, and playback to gateway APIs.
+  A browser upload reached Catalogue `READY`, then opened and played through
+  the production UI.
 - [ ] Connect Jam room membership, queue updates, owner controls, and the Sync
   WebSocket protocol, including clock sampling, buffering, readiness, scheduled
   playback, drift correction, reconnects, and readiness-timeout decisions.
@@ -128,22 +130,24 @@ including actionable errors when a dependency or processing stage fails.
   and retained with Compose logs/status for one week, including on failures.
   Live staging execution and a successful pipeline link remain pending under
   item 1; configuring the job does not establish that GitLab has run it.
-- [ ] Implement `tests/e2e/run.sh` and browser tests for Discover & Listen,
-  Upload & Process, and Create & Synchronise a Jam. Staging already has an
-  optional hook for this entry point; the current folder is a placeholder.
+- [ ] Wire the Playwright browser test into staging. `tests/e2e/test_app.py`
+  passes locally for Discover & Listen, Upload & Process, a two-browser Jam
+  join, and desktop/mobile layout. The current `docker:29-cli` integration
+  image has no browser runtime, so a pinned Playwright job or image is still
+  required before adding `tests/e2e/run.sh`.
 - [x] Cover duplicate events, failed decoding, unavailable S3, dependency
   timeouts, worker/service restarts, unauthorized owner actions, and reconnects.
   Duplicate `SongReady` and failed-lyrics recovery already passed under item 2.
   `failure-recovery.py` now provides six sequential fault scenarios, and
   `backend-flow.py --check-reconnect` checks catch-up without restarting the
-  owner. Staging is configured to run both; new local/CI PASS reports are
-  still required. Commands and retained-data details are in
+  owner. All six fault scenarios and reconnect passed locally on 4 November;
+  a successful staging run is still required. Commands and retained-data details are in
   `tests/integration/ITEM4_RUNBOOK.md`.
 - [ ] Check all service unit suites in CI and retain useful logs on failures.
   The `ci:test-coverage` validation job now audits every deployed application
   image's blocking child test job and retained results. Static configuration
-  checks passed for all 11 applications; actual unit-suite execution and a
-  successful pipeline link remain pending.
+  checks passed for all 11 applications. Every local suite passed in its
+  declared CI runtime on 4 November; a successful pipeline link remains pending.
 - [ ] Validate synchronization across physical devices and real Wi-Fi using
   `services/sync/OBSERVABILITY.md`; record audible timing and drift separately
   from server schedules or browser timer measurements.

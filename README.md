@@ -9,6 +9,8 @@ See [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) for verified integration status,
 remaining work, and acceptance criteria.
 See [FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the agreed laptop/mobile UI,
 nine-slot audio buffer, usability requirements, and Playwright test plan.
+See [infrastructure/aws/DEPLOYMENT.md](infrastructure/aws/DEPLOYMENT.md) for
+the AWS deployment sequence, current gaps, and production readiness gates.
 
 ## Run it locally
 

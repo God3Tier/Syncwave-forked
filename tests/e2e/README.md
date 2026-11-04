@@ -1,19 +1,21 @@
-# End-to-end tests (the three scenarios)
+# Browser end-to-end tests
 
-Placeholder for automated browser tests of the three key scenarios
-(plan.md §1), e.g. with Playwright:
+`test_app.py` uses Python Playwright against a running full stack. It covers:
 
-1. **Discover & Listen**: search, open a song, playback starts, lyrics and
-   waveform load.
-2. **Upload & Process**: upload a song, and lyrics and waveform reach
-   `READY` within a time limit.
-3. **Create & Synchronise a Jam**: two browser contexts join one Jam and
-   both receive the same `PLAY_AT(T)`.
+1. Discover, Search, song details, media playback and processed assets.
+2. A real browser upload followed through to Catalogue `READY`.
+3. Two independent browser contexts joining the same Jam.
+4. Desktop and mobile navigation, screenshots, overflow and browser errors.
 
-To plug into CI, add an executable `tests/e2e/run.sh` that takes the stack's
-host as its first argument (`docker` in CI, `localhost` locally). The
-staging `integration` job runs it automatically once the file exists.
+Run locally after `docker compose up -d --build --wait`:
 
-Automated e2e testing of the scenarios is listed in the brief as an
-eligible self-directed research item. Agree with the team before
-committing to it.
+```powershell
+python -m pip install playwright
+python -m playwright install chromium
+python tests/e2e/test_app.py
+```
+
+Screenshots are written to `tests/e2e/artifacts/`. The test is intentionally
+not wired into `run.sh` yet: the current `docker:29-cli` integration runner has
+no browser runtime. CI should use a pinned Playwright image or a separate
+browser job instead of downloading Chromium during every integration job.
