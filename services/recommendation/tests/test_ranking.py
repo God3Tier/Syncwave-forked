@@ -40,6 +40,30 @@ def test_clear_weather_prefers_upbeat_songs() -> None:
     assert titles(result) == ["Upbeat", "Mellow"]
 
 
+def test_moods_the_catalogue_derives_also_match_the_weather() -> None:
+    songs = [
+        song("Romantic", "romantic"),
+        song("Chill", "chill"),
+        song("Melancholy", "melancholy"),
+        song("Energetic", "energetic"),
+    ]
+
+    assert titles(rank(songs, Weather("RAIN", 24.0), limit=10)) == [
+        "Chill",
+        "Melancholy",
+        "Romantic",
+        "Energetic",
+    ]
+    assert titles(rank(songs, Weather("CLEAR", 31.0), limit=10))[0] == "Energetic"
+    assert titles(rank(songs, Weather("FOG", 20.0), limit=10))[:2] == ["Romantic", "Chill"]
+
+
+def test_mood_matching_ignores_case_and_spaces() -> None:
+    result = rank([song("A", " Chill ")], Weather("RAIN", 24.0), limit=10)
+
+    assert [item.reason for item in result] == [WEATHER_MATCH]
+
+
 def test_songs_without_a_mood_never_match() -> None:
     result = rank([song("No mood")], Weather("RAIN", 24.0), limit=10)
 

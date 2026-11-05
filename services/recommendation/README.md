@@ -39,13 +39,17 @@ browser ──> gateway /api/recommendation/recommendations?lat=&lon= ──> re
 3. Songs whose `mood` suits the weather come first (`reason: WEATHER_MATCH`),
    then the rest in the Catalogue's order (`reason: GENERAL`).
 
-| Weather               | Suitable moods         |
-|-----------------------|------------------------|
-| RAIN, STORM           | mellow, calm           |
-| CLOUDY                | mellow                 |
-| FOG, SNOW             | calm                   |
-| CLEAR                 | upbeat, energetic      |
-| OTHER                 | none                   |
+| Weather               | Suitable moods                         |
+|-----------------------|----------------------------------------|
+| RAIN, STORM           | mellow, calm, chill, melancholy        |
+| CLOUDY                | mellow, chill, focus                   |
+| FOG, SNOW             | calm, chill, ambient, romantic         |
+| CLEAR                 | upbeat, energetic                      |
+| OTHER                 | none                                   |
+
+Both mood vocabularies work: the four a user can pick on upload (calm, mellow,
+upbeat, energetic) and the ones the Catalogue derives on its own (chill,
+melancholy, romantic, focus, ambient, energetic). Matching ignores case.
 
 `weather_used` is `true` only if the weather actually changed the result (some
 song is a `WEATHER_MATCH`). The logic is plain functions in `ranking.py`.

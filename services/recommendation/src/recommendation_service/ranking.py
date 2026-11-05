@@ -12,12 +12,15 @@ WEATHER_MATCH = "WEATHER_MATCH"
 GENERAL = "GENERAL"
 
 # Which song moods suit which weather. A song without a mood never matches.
+# Two vocabularies are accepted: the labels a user can pick on upload (calm,
+# mellow, upbeat, energetic) and the labels the Catalogue derives on its own
+# (chill, melancholy, romantic, focus, ambient, energetic).
 MOODS_FOR_WEATHER: dict[str, frozenset[str]] = {
-    "RAIN": frozenset({"mellow", "calm"}),
-    "STORM": frozenset({"mellow", "calm"}),
-    "CLOUDY": frozenset({"mellow"}),
-    "FOG": frozenset({"calm"}),
-    "SNOW": frozenset({"calm"}),
+    "RAIN": frozenset({"mellow", "calm", "chill", "melancholy"}),
+    "STORM": frozenset({"mellow", "calm", "chill", "melancholy"}),
+    "CLOUDY": frozenset({"mellow", "chill", "focus"}),
+    "FOG": frozenset({"calm", "chill", "ambient", "romantic"}),
+    "SNOW": frozenset({"calm", "chill", "ambient", "romantic"}),
     "CLEAR": frozenset({"upbeat", "energetic"}),
     "OTHER": frozenset(),
 }
@@ -26,6 +29,10 @@ MOODS_FOR_WEATHER: dict[str, frozenset[str]] = {
 def rank(songs: list[Song], weather: Weather | None, limit: int) -> list[Recommendation]:
     """At most `limit` recommendations, best match first."""
     suits = MOODS_FOR_WEATHER.get(weather.condition, frozenset()) if weather else frozenset()
-    matching = [Recommendation(song, WEATHER_MATCH) for song in songs if song.mood in suits]
-    others = [Recommendation(song, GENERAL) for song in songs if song.mood not in suits]
+
+    def suited(song: Song) -> bool:
+        return song.mood is not None and song.mood.strip().lower() in suits
+
+    matching = [Recommendation(song, WEATHER_MATCH) for song in songs if suited(song)]
+    others = [Recommendation(song, GENERAL) for song in songs if not suited(song)]
     return (matching + others)[:limit]
