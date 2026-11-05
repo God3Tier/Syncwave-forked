@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 Json = dict[str, Any]
+BACKEND_FIXTURE_DURATION_MS = 15_000
 
 
 class FlowError(Exception):
@@ -317,6 +318,10 @@ async def playback(
                     rejoined["payload"]["participant_id"] == member,
                     "Reconnect attached the wrong participant",
                 )
+                report["reconnect"] = {
+                    "participant_id": member,
+                    "joined_state": rejoined["payload"]["state"],
+                }
                 prepare = await clients[1].receive("PREPARE")
                 await clients[1].send(
                     "READY",
@@ -337,11 +342,10 @@ async def playback(
                     payload["start_position_ms"] > first["start_position_ms"],
                     "Reconnect reset playback to the beginning",
                 )
-                report["reconnect"] = {
-                    "participant_id": member,
-                    "play_at": payload,
-                    "recovery_seconds": round(time.monotonic() - reconnect_started, 3),
-                }
+                report["reconnect"].update(
+                    play_at=payload,
+                    recovery_seconds=round(time.monotonic() - reconnect_started, 3),
+                )
                 await asyncio.sleep(1)
                 stop_monitor.set()
                 await monitor
@@ -439,7 +443,11 @@ def main() -> int:
                 upload.Api(api.base_url, args.request_timeout),
                 args.timeout,
                 song,
-                audio=upload.audio_fixture(frequency_hz=frequency),
+                audio=upload.audio_fixture(
+                    frequency_hz=frequency,
+                    duration_ms=BACKEND_FIXTURE_DURATION_MS,
+                ),
+                expected_duration_ms=BACKEND_FIXTURE_DURATION_MS,
             )
             song["result"] = "PASS"
         passed(
