@@ -76,6 +76,8 @@ async def test_asks_for_the_location_and_the_current_fields() -> None:
         (71, "SNOW"),
         (86, "SNOW"),
         (95, "STORM"),
+        (96, "STORM"),
+        (97, "STORM"),
         (99, "STORM"),
         (4, "OTHER"),  # not a defined WMO code
     ],

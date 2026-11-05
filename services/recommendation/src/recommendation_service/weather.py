@@ -52,7 +52,7 @@ def condition_from_wmo_code(code: int) -> str:
         return "RAIN"
     if code in (71, 73, 75, 77, 85, 86):
         return "SNOW"
-    if code in (95, 96, 99):
+    if code in (95, 96, 97, 99):
         return "STORM"
     return "OTHER"
 
