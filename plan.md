@@ -36,7 +36,7 @@ communication patterns:
 
 ## 2. Team and Service Ownership
 
-The project has six team members and ten primary microservices.
+The project has six team members, ten scenario services, and a cross-cutting Auth Service.
 
   -----------------------------------------------------------------------
   Person                  Primary Microservices   Main Responsibilities
@@ -261,6 +261,29 @@ playback drift - Issue synchronization corrections when required
 The detailed implementation backlog, protocol decisions, test strategy,
 and completion criteria for this service are in
 [Section 24](#24-azeez--sync-service-detailed-implementation-plan).
+
+------------------------------------------------------------------------
+
+### 11. Auth Service --- Cross-cutting
+
+Owns username/password accounts and browser sessions. Usernames are
+case-normalized and unique; passwords are stored as Argon2id hashes. The
+service issues 12-hour RS256 JWTs in an HttpOnly, SameSite=Lax cookie and
+publishes the matching public signing key at `/.well-known/jwks.json`.
+
+Example API:
+
+``` text
+POST /signup
+POST /login
+POST /logout
+GET  /me
+GET  /.well-known/jwks.json
+```
+
+Playlist and Jam verify the JWT against Auth's JWKS. Playlist mutations and
+Jam hosting require an account; shared playlist playback and Jam guest
+membership remain available without signup.
 
 ------------------------------------------------------------------------
 
@@ -1261,10 +1284,15 @@ implementation:
    `GET /api/sync/ws?jam_id={jamId}`. Clients only need this connection
    while synchronized playback is active. Jam should send clients the Sync
    session information when the hand-off occurs.
-4. The first version uses mock users and a short-lived mock Jam/Sync token.
-   Jam validates membership and owner permissions before starting Sync;
-   Sync validates the handed-off session/token rather than trusting a role
-   supplied directly by the browser.
+4. Auth owns username/password accounts, Argon2id password hashes, and
+   RS256-signed JWT sessions exposed through a JWKS endpoint. Usernames are
+   normalized and unique. Browsing, searching, and playback remain available
+   without an account; saving or changing playlists and hosting a Jam require
+   sign-in. Jam invites admit guests with a room-scoped membership token, so
+   guests can join and add queue items without receiving owner controls. Jam
+   and Playlist derive account identity from verified JWTs rather than browser
+   supplied owner or actor IDs. Sync continues to validate the internal
+   session handed off by Jam.
 5. All protocol timestamps use integer Unix epoch milliseconds.
    Durations and playback positions use integer milliseconds.
 6. Every message contains `type`, `jam_id`, `seq`, `sent_at_ms`, and

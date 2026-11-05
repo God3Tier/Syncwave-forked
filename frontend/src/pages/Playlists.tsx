@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { createPlaylist, deletePlaylist, getPlaylist, renamePlaylist } from '../api/playlist';
 import type { PlaylistSummary } from '../api/types';
 import { Page } from '../components/Layout';
@@ -8,7 +8,7 @@ import { errorMessage } from '../errors';
 import { relativeTime } from '../format';
 import { useAsync } from '../hooks/useAsync';
 import { refreshPlaylists, usePlaylists } from '../hooks/usePlaylists';
-import { userId } from '../identity';
+import { useAuth } from '../auth/AuthProvider';
 
 export function Mosaic({ songIds }: { songIds: string[] }) {
   const tiles = songIds.slice(0, 4);
@@ -25,7 +25,7 @@ export function Mosaic({ songIds }: { songIds: string[] }) {
   );
 }
 
-function PlaylistCard({ playlist }: { playlist: PlaylistSummary }) {
+function PlaylistCard({ playlist, ownerId }: { playlist: PlaylistSummary; ownerId: string }) {
   // Summaries carry no songs; fetch the first few for the mosaic.
   const detail = useAsync((signal) => getPlaylist(playlist.playlist_id, signal), [playlist.playlist_id, playlist.updated_at]);
   const [menu, setMenu] = useState(false);
@@ -35,14 +35,14 @@ function PlaylistCard({ playlist }: { playlist: PlaylistSummary }) {
     setMenu(false);
     if (name && name !== playlist.name) {
       await renamePlaylist(playlist.playlist_id, name.slice(0, 100));
-      void refreshPlaylists();
+      void refreshPlaylists(ownerId);
     }
   };
   const remove = async () => {
     setMenu(false);
     if (window.confirm(`Delete “${playlist.name}”?`)) {
       await deletePlaylist(playlist.playlist_id);
-      void refreshPlaylists();
+      void refreshPlaylists(ownerId);
     }
   };
 
@@ -73,19 +73,31 @@ function PlaylistCard({ playlist }: { playlist: PlaylistSummary }) {
 }
 
 export function Playlists() {
-  const playlists = usePlaylists();
+  const { account, loading: authLoading } = useAuth();
+  const playlists = usePlaylists(account?.id ?? null);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const createIntentHandled = useRef(false);
   const [creating, setCreating] = useState(false);
+  const createIntent = account && searchParams.get('intent') === 'create-playlist';
   const [name, setName] = useState('');
   const [error, setError] = useState<unknown>();
+
+  useEffect(() => {
+    if (account && searchParams.get('intent') === 'create-playlist' && !createIntentHandled.current) {
+      createIntentHandled.current = true;
+      navigate('/playlists', { replace: true });
+    }
+  }, [account, navigate, searchParams]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
     setError(undefined);
     try {
-      await createPlaylist(userId, name.trim());
+      await createPlaylist(name.trim());
       setName('');
       setCreating(false);
-      await refreshPlaylists();
+      await refreshPlaylists(account?.id ?? null);
     } catch (cause) {
       setError(cause);
     }
@@ -98,9 +110,15 @@ export function Playlists() {
           <h1 className="text-3xl font-extrabold tracking-[-0.035em]">Your library</h1>
           <p className="mt-2 text-sm text-on-surface-variant">Build the set, change the order, then take it into a Jam.</p>
         </div>
-        <Button variant="primary" icon="add" onClick={() => setCreating(true)}>New playlist</Button>
+        <Button variant="primary" icon="add" onClick={() => account ? setCreating(true) : navigate('/signup?returnTo=%2Fplaylists%3Fintent%3Dcreate-playlist')}>New playlist</Button>
       </header>
-      {creating && (
+      {!account && !authLoading && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-l-2 border-primary bg-surface-container-low px-4 py-3">
+          <p className="text-sm text-on-surface-variant">Sign in to build a library. You can still listen to any playlist shared with you.</p>
+          <Link to="/signup?returnTo=%2Fplaylists%3Fintent%3Dcreate-playlist" className="shrink-0 text-sm font-bold text-primary underline-offset-4 hover:underline">Create an account</Link>
+        </div>
+      )}
+      {(creating || createIntent) && (
         <form onSubmit={(event) => void create(event)} className="mb-8 flex max-w-xl flex-wrap gap-2 rounded-2xl bg-surface-container-low p-4 ring-1 ring-outline-variant/45">
           <input
             autoFocus
@@ -121,10 +139,11 @@ export function Playlists() {
         </form>
       )}
       {error !== undefined && <Notice tone="error">{errorMessage(error)}</Notice>}
-      {playlists === null && <Spinner label="Loading playlists" />}
-      {playlists?.length === 0 && <p className="py-8 text-on-surface-variant">No playlists yet. Create one, or add songs from Discover or Search.</p>}
+      {authLoading && <Spinner label="Checking account" />}
+      {account && playlists === null && <Spinner label="Loading playlists" />}
+      {account && playlists?.length === 0 && <p className="py-8 text-on-surface-variant">No playlists yet. Create one, or add songs from Discover or Search.</p>}
       <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {playlists?.map((playlist) => <PlaylistCard key={playlist.playlist_id} playlist={playlist} />)}
+        {account && playlists?.map((playlist) => <PlaylistCard key={playlist.playlist_id} playlist={playlist} ownerId={account.id} />)}
       </div>
     </Page>
   );

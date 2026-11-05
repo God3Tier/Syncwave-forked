@@ -2,6 +2,7 @@ import os
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,11 @@ os.environ["PLAYLIST_GRPC_TARGET"] = ""
 from jam_service.main import app, manager, playlist_client  # noqa: E402
 
 
+class FakeAuthVerifier:
+    def account(self, token: str) -> UUID:
+        return UUID(token)
+
+
 @pytest.fixture(autouse=True)
 def clear_jams() -> Iterator[None]:
     manager._jams.clear()
@@ -23,7 +29,8 @@ def clear_jams() -> Iterator[None]:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(app, headers={"x-jam-token": "local-jam-member-token"}) as value:
+    with TestClient(app) as value:
+        app.state.auth_verifier = FakeAuthVerifier()
         yield value
 
 

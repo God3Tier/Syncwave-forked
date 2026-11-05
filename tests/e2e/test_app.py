@@ -16,12 +16,13 @@ def watch_errors(page: Page, errors: list[str]) -> None:
     page.on("pageerror", lambda error: errors.append(f"page: {error}"))
 
     def record_response(response) -> None:
+        expected_guest_session_check = response.status == 401 and "/api/auth/me" in response.url
         expected_upload_poll = (
             response.status == 404
             and "/api/catalogue/songs/" in response.url
             and page.url.endswith("/upload")
         )
-        if response.status >= 400 and not expected_upload_poll:
+        if response.status >= 400 and not expected_upload_poll and not expected_guest_session_check:
             errors.append(f"HTTP {response.status}: {response.url}")
 
     page.on(
@@ -73,10 +74,26 @@ def run(base_url: str) -> None:
         print("PASS upload and process")
 
         owner.goto(f"{base_url}/jam", wait_until="networkidle")
-        owner.get_by_role("button", name="Create Jam").click()
+        owner.get_by_role("button", name="Sign in to host a Jam").click()
+        expect(owner).to_have_url(re.compile(r"/signup\?returnTo=.*intent=host"))
+        owner.screenshot(path=ARTIFACTS / "signup-desktop.png", full_page=True)
+        username = f"browser_{int(time.time())}"
+        password = "syncwave-browser-password"
+        owner.get_by_label("Username").fill(username)
+        owner.get_by_label("Password", exact=True).fill(password)
+        owner.get_by_label("Confirm password").fill(password)
+        owner.get_by_role("button", name="Create account").click()
         owner.wait_for_url(re.compile(r"/jam/[0-9a-f-]{36}$"))
         expect(owner.get_by_text("OWNER", exact=True)).to_be_visible()
+        print("PASS signup and authenticated Jam hosting")
         jam_url = owner.url
+        owner.goto(f"{base_url}/playlists", wait_until="networkidle")
+        owner.get_by_role("button", name="New playlist").click()
+        owner.get_by_label("Playlist name").fill(f"E2E {title}")
+        owner.get_by_role("button", name="Create", exact=True).click()
+        expect(owner.get_by_text(f"E2E {title}", exact=True)).to_be_visible()
+        print("PASS authenticated playlist creation")
+        owner.goto(jam_url, wait_until="networkidle")
         owner.get_by_role("searchbox", name="Search songs to add").fill(title)
         owner.get_by_role("button", name="Add", exact=True).click()
         expect(owner.get_by_text(title, exact=True).first).to_be_visible()
@@ -84,6 +101,10 @@ def run(base_url: str) -> None:
         member_context = browser.new_context(viewport={"width": 390, "height": 844})
         member = member_context.new_page()
         watch_errors(member, errors)
+        member.goto(f"{base_url}/signup", wait_until="networkidle")
+        expect(member.get_by_role("heading", name="Create your account")).to_be_visible()
+        assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        member.screenshot(path=ARTIFACTS / "signup-mobile.png", full_page=True)
         member.goto(f"{jam_url}?user=new", wait_until="networkidle")
         expect(member.get_by_text("MEMBER", exact=True)).to_be_visible()
         member.get_by_role("tab", name="People").click()
@@ -109,6 +130,14 @@ def run(base_url: str) -> None:
         assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         member.screenshot(path=ARTIFACTS / "discover-tablet.png", full_page=True)
         print("PASS tablet layout")
+
+        owner.get_by_role("button", name="Log out").click()
+        owner.goto(f"{base_url}/login", wait_until="networkidle")
+        owner.get_by_label("Username").fill(username)
+        owner.get_by_label("Password", exact=True).fill(password)
+        owner.get_by_role("button", name="Log in").click()
+        expect(owner.get_by_title(username)).to_be_visible()
+        print("PASS login and logout")
 
         member_context.close()
         owner_context.close()

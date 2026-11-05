@@ -1,0 +1,44 @@
+services:
+  auth-db-init:
+    image: postgres:17-alpine
+    environment:
+      PGPASSWORD: postgres
+      POSTGRES_ADMIN_URL: postgres://postgres:postgres@postgres:5432/postgres
+    volumes:
+      - ./create-db.sql:/create-db.sql:ro
+    entrypoint: ["sh", "-c"]
+    command: ["psql \"$$POSTGRES_ADMIN_URL\" -v ON_ERROR_STOP=1 -f /create-db.sql"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  auth:
+    build: .
+    image: ${IMAGE_REGISTRY:-syncwave}/auth:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: auth
+      DATABASE_URL: postgresql+asyncpg://auth:auth@postgres:5432/auth
+      JWT_PRIVATE_KEY_PATH: /var/lib/auth/private.pem
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+    volumes:
+      - auth-signing-key:/var/lib/auth
+    depends_on:
+      auth-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 5
+
+volumes:
+  auth-signing-key:

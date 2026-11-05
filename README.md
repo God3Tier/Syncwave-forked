@@ -60,13 +60,13 @@ All three run in the browser at <http://localhost:8080>.
    and optionally an `.lrc` file and a mood. The processing panel shows
    Lyrics and Waveform working in parallel until the song is READY; it then
    appears in Search and Discover.
-3. **Create & Synchronise a Jam.** Create a playlist and choose "Start Jam
-   with this playlist", or use the Jam page. Open the invite link in a
-   second tab with `?user=new` added, to join as another listener, or on
-   another device on the same network. Tap "enable audio" on every device,
-   then press Play as the owner. Each device buffers the song and starts it
-   at the same server time. The Sync stats panel shows the clock offset and
-   start error.
+3. **Create & Synchronise a Jam.** Listening stays open to guests. Create an
+   account with a username and password to save playlists or host a Jam. Open
+   the invite link in a second tab or on another device to join as a guest;
+   guests can add songs to the shared queue. Tap "enable audio" on every
+   device, then press Play as the owner. Each device buffers the song and
+   starts it at the same server time. The Sync stats panel shows the clock
+   offset and start error.
 
 Stop with `docker compose down`, and add `-v` to also delete all local
 data (databases, queues, uploaded audio).

@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useAuth } from '../auth/AuthProvider';
 import { createJam, rememberJam } from '../api/jam';
 import { addSong, deletePlaylist, getPlaylist, removeSong, renamePlaylist, reorderSongs, shufflePlaylist } from '../api/playlist';
 import { searchSongs } from '../api/search';
@@ -12,13 +13,16 @@ import { useAsync, useDebounced } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { refreshPlaylists } from '../hooks/usePlaylists';
 import { useSongs } from '../hooks/useSongs';
-import { userId } from '../identity';
 import { usePlayer } from '../player/context';
 import { Mosaic } from './Playlists';
 
 export function PlaylistDetail() {
   const { playlistId = '' } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { account, loading: authLoading } = useAuth();
+  const hostIntentHandled = useRef(false);
   const player = usePlayer();
   const playlist = useAsync((signal) => getPlaylist(playlistId, signal), [playlistId]);
   const [error, setError] = useState<unknown>();
@@ -30,7 +34,7 @@ export function PlaylistDetail() {
     try {
       const result = await action();
       if (result) playlist.setData(result);
-      void refreshPlaylists();
+      void refreshPlaylists(account?.id ?? null);
     } catch (cause) {
       setError(cause);
     }
@@ -38,11 +42,33 @@ export function PlaylistDetail() {
 
   const drag = useDragReorder((from, to) => void apply(() => reorderSongs(playlistId, moveItem(ids, from, to))));
 
+  const startJam = useCallback(async () => {
+    if (authLoading) return;
+    if (!account) {
+      navigate(`/signup?returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}&intent=host`);
+      return;
+    }
+    try {
+      const jam = await createJam(playlistId);
+      rememberJam(jam.jam_id, true);
+      navigate(`/jam/${jam.jam_id}`);
+    } catch (cause) {
+      setError(cause);
+    }
+  }, [account, authLoading, location.pathname, location.search, navigate, playlistId]);
+
+  useEffect(() => {
+    if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
+      hostIntentHandled.current = true;
+      void startJam();
+    }
+  }, [account, authLoading, searchParams, startJam]);
+
   if (playlist.loading && !playlist.data) return <Page><Spinner label="Loading playlist" /></Page>;
   if (!playlist.data) return <Page><Notice tone="error">{errorMessage(playlist.error)}</Notice></Page>;
   const data = playlist.data;
+  const isOwner = account?.id === data.owner_id;
   const totalMs = ids.reduce((sum, id) => sum + (songs.get(id)?.duration_ms ?? 0), 0);
-
   const rename = () => {
     const name = window.prompt('Rename playlist', data.name)?.trim();
     if (name && name !== data.name) void apply(() => renamePlaylist(playlistId, name.slice(0, 100)));
@@ -51,15 +77,6 @@ export function PlaylistDetail() {
     if (!window.confirm(`Delete “${data.name}”?`)) return;
     await apply(() => deletePlaylist(playlistId));
     navigate('/playlists');
-  };
-  const startJam = async () => {
-    try {
-      const jam = await createJam(userId, playlistId);
-      rememberJam(jam.jam_id, true);
-      navigate(`/jam/${jam.jam_id}`);
-    } catch (cause) {
-      setError(cause);
-    }
   };
 
   return (
@@ -74,7 +91,7 @@ export function PlaylistDetail() {
               <p className="text-xs font-bold text-secondary">Playlist</p>
               <h1 className="mt-2 flex items-center gap-2 text-3xl font-extrabold tracking-[-0.035em] md:text-4xl">
                 <span className="truncate">{data.name}</span>
-                <IconButton icon="edit" label="Rename playlist" onClick={rename} />
+                {isOwner && <IconButton icon="edit" label="Rename playlist" onClick={rename} />}
               </h1>
               <p className="mt-2 text-sm text-on-surface-variant">
                 {data.song_count} song{data.song_count === 1 ? '' : 's'} · {Math.round(totalMs / 60000)} min
@@ -83,13 +100,15 @@ export function PlaylistDetail() {
                 <Button variant="primary" icon="play_arrow" disabled={!ids.length} onClick={() => player.playQueue(ids)} className="px-6">
                   Play
                 </Button>
-                <Button icon="shuffle" disabled={ids.length < 2} onClick={() => void apply(() => shufflePlaylist(playlistId))}>
-                  Shuffle
-                </Button>
+                {isOwner && (
+                  <Button icon="shuffle" disabled={ids.length < 2} onClick={() => void apply(() => shufflePlaylist(playlistId))}>
+                    Shuffle
+                  </Button>
+                )}
                 <Button variant="cyan" icon="sensors" onClick={() => void startJam()}>
-                  Start a Jam
+                  {account ? 'Start a Jam' : 'Sign in to host'}
                 </Button>
-                <IconButton icon="delete" label="Delete playlist" onClick={() => void remove()} className="ml-auto hover:text-error" />
+                {isOwner && <IconButton icon="delete" label="Delete playlist" onClick={() => void remove()} className="ml-auto hover:text-error" />}
               </div>
             </div>
           </header>
@@ -103,10 +122,10 @@ export function PlaylistDetail() {
                 const song = songs.get(id);
                 const current = player.currentId === id;
                 return (
-                  <li key={id} {...drag.rowProps(i)} className={`relative ${drag.dragging === i ? 'opacity-40' : ''}`}>
+                  <li key={id} {...(isOwner ? drag.rowProps(i) : {})} className={`relative ${isOwner && drag.dragging === i ? 'opacity-40' : ''}`}>
                     {drag.gap === i && <DropLine />}
                     <div className={`group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-outline-variant/25 px-2 py-2.5 hover:bg-surface-container/55 md:grid-cols-[auto_2rem_minmax(0,1fr)_5rem_7rem_auto] ${current ? 'bg-surface-container/70' : ''}`}>
-                      <Icon name="drag_indicator" className="cursor-grab text-lg text-outline" />
+                      {isOwner ? <Icon name="drag_indicator" className="cursor-grab text-lg text-outline" /> : <span aria-hidden="true" />}
                       <span className="hidden font-mono text-xs text-outline md:block">{current && player.playing ? <EqualizerIcon /> : String(i + 1).padStart(2, '0')}</span>
                       <button type="button" onClick={() => player.playQueue(ids, i)} className="flex min-w-0 items-center gap-3 text-left">
                         <SongArt id={id} size="sm" />
@@ -117,7 +136,7 @@ export function PlaylistDetail() {
                       </button>
                       <span className="hidden font-mono text-xs text-on-surface-variant md:block">{formatDuration(song?.duration_ms)}</span>
                       <span className="hidden md:block">{song && <StatusChip status={song.processing_status} />}</span>
-                      <IconButton icon="close" label="Remove from playlist" onClick={() => void apply(() => removeSong(playlistId, id))} />
+                      {isOwner && <IconButton icon="close" label="Remove from playlist" onClick={() => void apply(() => removeSong(playlistId, id))} />}
                     </div>
                     {drag.gap === ids.length && i === ids.length - 1 && <DropLine bottom />}
                   </li>
@@ -127,7 +146,11 @@ export function PlaylistDetail() {
           </section>
         </div>
 
-        <AddSongsPanel existing={new Set(ids)} onAdd={(songId) => void apply(() => addSong(playlistId, songId))} />
+        {isOwner ? (
+          <AddSongsPanel existing={new Set(ids)} onAdd={(songId) => void apply(() => addSong(playlistId, songId))} />
+        ) : (
+          <p className="border-l-2 border-secondary px-4 py-3 text-sm text-on-surface-variant">You can play this shared playlist. Only its owner can change the track list.</p>
+        )}
       </div>
     </Page>
   );

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate two songs, verify ingestion, then test Playlist -> Jam -> Sync.
+"""Generate two songs, verify ingestion, then test Auth -> Playlist -> Jam -> Sync.
 
-Run inside the Jam container with upload-flow.py alongside this file.
+Run inside the Jam container or from a host against a deployed gateway.
 Clients exercise the backend protocol; they do not play audible browser audio.
 """
 
@@ -14,11 +14,12 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 Json = dict[str, Any]
 
@@ -47,7 +48,7 @@ class Api:
     def __init__(self, base_url: str, timeout: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.jam_token = os.getenv("MOCK_JAM_TOKEN", "local-jam-member-token")
+        self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
 
     def call(
         self,
@@ -55,19 +56,16 @@ class Api:
         path: str,
         data: Json | None = None,
         *,
-        jam: bool = False,
         expected: int = 200,
     ) -> Json | None:
         headers = {"Accept": "application/json"}
-        if jam:
-            headers["X-Jam-Token"] = self.jam_token
         body = None
         if data is not None:
             body = json.dumps(data).encode()
             headers["Content-Type"] = "application/json"
         request = Request(self.base_url + path, data=body, headers=headers, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with self.opener.open(request, timeout=self.timeout) as response:
                 require(response.status == expected, f"{method} {path}: HTTP {response.status}")
                 raw = response.read(1_000_001)
                 require(len(raw) <= 1_000_000, f"{path}: unexpectedly large response")
@@ -171,14 +169,13 @@ def passed(report: Json, label: str) -> None:
 async def playback(
     api: Api, sdk, client_wait_seconds: float, report: Json, check_reconnect: bool = False
 ) -> None:
-    owner, member = str(uuid.uuid4()), str(uuid.uuid4())
-    report.update(owner_id=owner, member_id=member)
+    owner = report["account_id"]
     song_ids = [song["song_id"] for song in report["songs"]]
     playlist = await asyncio.to_thread(
         api.call,
         "POST",
         "/api/playlist/playlists",
-        {"owner_id": owner, "name": f"backend-flow-{report['run_id']}"},
+        {"name": f"backend-flow-{report['run_id']}"},
         expected=201,
     )
     playlist_id = str(uuid.UUID(playlist["playlist_id"]))
@@ -197,29 +194,29 @@ async def playback(
         api.call,
         "POST",
         "/api/jam/jams",
-        {"owner_id": owner, "playlist_id": playlist_id},
-        jam=True,
+        {"playlist_id": playlist_id},
         expected=201,
     )
     jam_id = str(uuid.UUID(jam["jam_id"]))
     report["jam_id"] = jam_id
-    if jam.get("member_token"):
-        api.jam_token = jam["member_token"]
+    require(str(jam["owner_id"]) == owner, "Jam owner differs from signed-in account")
     require([item["song_id"] for item in jam["queue"]] == order, "Jam changed playlist order")
     require([item["position"] for item in jam["queue"]] == [0, 1], "Invalid Jam queue positions")
     queue_item_id = jam["queue"][0]["queue_item_id"]
     passed(report, "Jam imports the exact playlist order")
+    guest_api = Api(api.base_url, api.timeout)
     joined = await asyncio.to_thread(
-        api.call, "POST", f"/api/jam/jams/{jam_id}/members", {"participant_id": member}, jam=True
+        guest_api.call, "POST", f"/api/jam/jams/{jam_id}/members"
     )
+    member = str(uuid.UUID(joined["member_id"]))
+    report.update(owner_id=owner, member_id=member)
     require(set(joined["participant_ids"]) == {owner, member}, "Jam membership differs")
 
     started = await asyncio.to_thread(
         api.call,
         "POST",
         f"/api/jam/jams/{jam_id}/playback/start",
-        {"actor_id": owner, "request_id": str(uuid.uuid4())},
-        jam=True,
+        {"request_id": str(uuid.uuid4())},
     )
     require(started["state"] == "PREPARING", "Jam did not enter PREPARING")
     generation = started["sync_generation"]
@@ -388,7 +385,9 @@ def main() -> int:
         "songs": [],
         "cleanup": {"playlist_deleted": None},
         "scope": "Backend protocol and media bytes; no audible browser playback measurement",
-        "retained_data": "Generated songs/S3 objects, Jam and Sync session; no deletion API",
+        "retained_data": (
+            "Generated account, songs/S3 objects, Jam and Sync session; no deletion API"
+        ),
     }
     started = time.monotonic()
     api = Api(args.base_url, args.request_timeout)
@@ -396,10 +395,25 @@ def main() -> int:
         try:
             import websockets
         except ImportError as exc:
-            raise FlowError("Run inside the Jam container, which provides websockets") from exc
+            raise FlowError("Install websockets (`python -m pip install websockets`) to run this test") from exc
         upload = load_upload_flow()
-        for path in ("/api/playlist/health", "/api/jam/ready", "/api/sync/health"):
+        for path in (
+            "/api/auth/health",
+            "/api/playlist/health",
+            "/api/jam/ready",
+            "/api/sync/health",
+        ):
             api.call("GET", path)
+        username = f"e2e_{report['run_id'][:16]}"
+        account = api.call(
+            "POST",
+            "/api/auth/signup",
+            {"username": username, "password": f"E2e-{report['run_id']}"},
+            expected=201,
+        )
+        report["account_id"] = str(uuid.UUID(account["id"]))
+        report["username"] = username
+        passed(report, "disposable account signs in through the deployed Auth service")
         for number in (1, 2):
             frequency = 440 if number == 1 else 660
             song: Json = {

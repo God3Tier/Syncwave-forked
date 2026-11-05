@@ -242,36 +242,54 @@ and Compose logs/status are retained for one week with `when: always`.
 Other branches keep the existing pipeline rules. Live GitLab execution still
 requires an authorized push/merge and a successful staging pipeline.
 
-## Self-contained backend scenario
+## Self-contained backend/deployed scenario
 
-`backend-flow.py` combines the generated upload/processing checks with
-Playlist -> Jam -> Sync. It creates two new songs on every run, so it does not
-need any pre-existing READY songs. The WAV tones have different frequencies
-(440 and 660 Hz); a wrong-song audio response therefore fails the byte check.
-It reuses `upload-flow.py`, which must be copied alongside it.
+`backend-flow.py` combines the generated upload/processing checks with Auth ->
+Playlist -> Jam -> Sync. It creates a disposable signed-in account and two new
+songs on every run, so it does not need pre-existing users or READY songs. The
+WAV tones have different frequencies (440 and 660 Hz); a wrong-song audio
+response therefore fails the byte check. It reuses `upload-flow.py`, which must
+be alongside it.
 
 The scenario checks:
 
 1. Both songs pass upload, confirmed event delivery, Catalogue readiness,
    lyrics/waveform retrieval, measured duration and exact audio-byte checks.
-2. A new playlist contains the two songs in their inserted order.
-3. Jam imports that exact order and admits the independent owner/member IDs.
-4. Both Sync clients receive `JOINED` and `PREPARE` for the correct first
+2. Auth signs up the owner and its session cookie authorizes Playlist and Jam.
+3. A new playlist contains the two songs in their inserted order.
+4. Jam imports that exact order and admits an independent guest member.
+5. Both Sync clients receive `JOINED` and `PREPARE` for the correct first
    song, queue item, media URL and generation.
-5. Both clients complete five clock exchanges and report readiness using the
+6. Both clients complete five clock exchanges and report readiness using the
    actual fixture duration.
-6. Both receive identical `PLAY_AT` payloads, with a future server timestamp,
+7. Both receive identical `PLAY_AT` payloads, with a future server timestamp,
    the same generation, position zero and normal playback rate.
 
 These are protocol clients: no frontend or audible playback is exercised.
 The test does not start/stop shared services or test outage/restart scenarios.
+
+### Run against a deployed environment
+
+Run from the repository root after deployment. Use the Sync participant token
+configured in that environment; do not print or commit it:
+
+```powershell
+python -m pip install websockets
+$env:SYNC_PARTICIPANT_TOKEN = '<deployed token>'
+python tests/integration/backend-flow.py --base-url https://your-syncwave-host --check-reconnect --report tests/integration/deployed-backend-flow-report.json
+```
+
+The command exits nonzero on a wrong audio byte, wrong `PREPARE` song/URL,
+authentication failure, WebSocket failure, or mismatched playback schedule.
+Use a disposable test deployment because the generated account, songs, audio
+objects, Jam and Sync session are retained; only the playlist is deleted.
 
 ### Run from Windows PowerShell
 
 From the repository root, build and start the required backend services:
 
 ```powershell
-docker compose build upload catalogue lyrics waveform playlist audio_transmitter sync jam
+docker compose build auth upload catalogue lyrics waveform playlist audio_transmitter sync jam
 docker compose up -d --wait --wait-timeout 180 gateway upload upload-publisher catalogue catalogue-worker lyrics lyrics-worker waveform waveform-worker playlist audio_transmitter sync jam
 ```
 

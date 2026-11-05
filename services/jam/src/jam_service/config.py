@@ -11,7 +11,9 @@ class Settings:
     internal_service_token: str = "local-jam-to-sync-token"
     playlist_grpc_target: str = ""
     playlist_internal_token: str = "local-playlist-internal-token"
-    mock_jam_token: str = "local-jam-member-token"
+    auth_jwks_url: str = "http://auth:8080/.well-known/jwks.json"
+    jam_member_token_secret: str = "local-room-token-secret-replace-before-deploy"
+    app_origin: str = "http://localhost:8080"
     sync_timeout_ms: int = 1_000
     playlist_timeout_ms: int = 750
 
@@ -30,7 +32,11 @@ def get_settings() -> Settings:
         playlist_internal_token=os.getenv(
             "PLAYLIST_INTERNAL_TOKEN", "local-playlist-internal-token"
         ),
-        mock_jam_token=os.getenv("MOCK_JAM_TOKEN", "local-jam-member-token"),
+        auth_jwks_url=os.getenv("AUTH_JWKS_URL", "http://auth:8080/.well-known/jwks.json"),
+        jam_member_token_secret=os.getenv(
+            "JAM_MEMBER_TOKEN_SECRET", "local-room-token-secret-replace-before-deploy"
+        ),
+        app_origin=os.getenv("APP_ORIGIN", "http://localhost:8080").rstrip("/"),
         sync_timeout_ms=int(os.getenv("SYNC_TIMEOUT_MS", "1000")),
         playlist_timeout_ms=int(os.getenv("PLAYLIST_TIMEOUT_MS", "750")),
     )

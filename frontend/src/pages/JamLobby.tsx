@@ -1,18 +1,21 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { createJam, recentJams, rememberJam } from '../api/jam';
+import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/Layout';
 import { Button, Icon, Notice, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
 import { relativeTime, shortId } from '../format';
 import { usePlaylists } from '../hooks/usePlaylists';
-import { userId } from '../identity';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 export function JamLobby() {
   const navigate = useNavigate();
-  const playlists = usePlaylists();
+  const [searchParams] = useSearchParams();
+  const hostIntentHandled = useRef(false);
+  const { account, loading: authLoading } = useAuth();
+  const playlists = usePlaylists(account?.id ?? null);
   const [playlistId, setPlaylistId] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -20,11 +23,15 @@ export function JamLobby() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const recent = recentJams();
 
-  const create = async () => {
+  const create = useCallback(async () => {
+    if (!account) {
+      navigate('/signup?returnTo=%2Fjam&intent=host');
+      return;
+    }
     setBusy(true);
     setError(undefined);
     try {
-      const jam = await createJam(userId, playlistId || null);
+      const jam = await createJam(playlistId || null);
       rememberJam(jam.jam_id, true);
       navigate(`/jam/${jam.jam_id}`);
     } catch (cause) {
@@ -32,7 +39,14 @@ export function JamLobby() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [account, navigate, playlistId]);
+
+  useEffect(() => {
+    if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
+      hostIntentHandled.current = true;
+      void create();
+    }
+  }, [account, authLoading, create, searchParams]);
 
   const join = (event: FormEvent) => {
     event.preventDefault();
@@ -65,6 +79,7 @@ export function JamLobby() {
             <span className="text-xs text-on-surface-variant">Seed the queue from a playlist (optional)</span>
             <select
               value={playlistId}
+              disabled={!account}
               onChange={(event) => setPlaylistId(event.target.value)}
               className="min-h-11 w-full rounded-xl bg-surface-container px-3 py-2.5 text-sm ring-1 ring-outline-variant/45 focus:ring-secondary focus:outline-none"
             >
@@ -76,8 +91,8 @@ export function JamLobby() {
               ))}
             </select>
           </label>
-          <Button variant="primary" icon="add_circle" onClick={() => void create()} disabled={busy} className="mt-5 py-3">
-            {busy ? 'Creating…' : 'Create Jam'}
+          <Button variant="primary" icon="add_circle" onClick={() => void create()} disabled={busy || authLoading} className="mt-5 py-3">
+            {busy ? 'Creating…' : authLoading ? 'Checking account…' : account ? 'Create Jam' : 'Sign in to host a Jam'}
           </Button>
           <p className="mt-3 text-xs leading-5 text-on-surface-variant">As owner, only you can start, pause, seek, or skip.</p>
           {error !== undefined && (
@@ -90,7 +105,7 @@ export function JamLobby() {
         <section className="flex flex-col border-t border-outline-variant/35 p-6 md:border-l md:border-t-0 md:p-8">
           <Icon name="group_add" className="mb-5 text-2xl text-secondary" />
           <h2 className="text-xl font-extrabold">Join a Jam</h2>
-          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. No account setup needed for this demo.</p>
+          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Join as a guest and add songs to the queue.</p>
           <form onSubmit={join} className="mt-4 flex gap-2">
             <input
               value={code}
@@ -108,7 +123,7 @@ export function JamLobby() {
           </form>
           {joinError && <p className="mt-2 text-xs text-error">{joinError}</p>}
           <p className="mt-auto pt-6 text-xs text-on-surface-variant">
-            Testing on one machine? Open the invite link in another tab with <code className="font-mono text-secondary">?user=new</code> to join as a different listener.
+            You can join an invite without creating an account.
           </p>
         </section>
       </div>

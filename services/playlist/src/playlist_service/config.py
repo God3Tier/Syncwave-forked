@@ -22,6 +22,8 @@ class Settings:
     catalogue_timeout_seconds: float
     grpc_port: int  # 0 turns the gRPC server off
     internal_service_token: str
+    auth_jwks_url: str = "http://auth:8080/.well-known/jwks.json"
+    app_origin: str = "http://localhost:8080"
 
 
 def database_url() -> str:
@@ -60,6 +62,8 @@ def get_settings() -> Settings:
         catalogue_timeout_seconds=float(os.getenv("CATALOGUE_TIMEOUT_SECONDS", "3")),
         grpc_port=int(os.getenv("GRPC_PORT", "50051")),
         internal_service_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
+        auth_jwks_url=os.getenv("AUTH_JWKS_URL", "http://auth:8080/.well-known/jwks.json"),
+        app_origin=os.getenv("APP_ORIGIN", "http://localhost:8080").rstrip("/"),
     )
 
 

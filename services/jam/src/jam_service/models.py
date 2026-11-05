@@ -33,35 +33,27 @@ class JamResponse(StrictModel):
     sync_generation: int | None
     state: JamState
     member_token: str | None = None
+    member_id: UUID | None = None
 
 
 class CreateJamRequest(StrictModel):
-    owner_id: UUID
     playlist_id: UUID | None = None
 
 
-class MemberRequest(StrictModel):
-    participant_id: UUID
-
-
-class ActorRequest(StrictModel):
-    actor_id: UUID
-
-
-class AddQueueItemRequest(ActorRequest):
+class AddQueueItemRequest(StrictModel):
     song_id: UUID
 
 
-class ReorderQueueRequest(ActorRequest):
+class ReorderQueueRequest(StrictModel):
     queue_item_ids: list[UUID] = Field(min_length=1)
 
 
-class StartPlaybackRequest(ActorRequest):
+class StartPlaybackRequest(StrictModel):
     request_id: UUID
     queue_item_id: UUID | None = None
 
 
-class PlaybackCommandRequest(ActorRequest):
+class PlaybackCommandRequest(StrictModel):
     request_id: UUID
 
 

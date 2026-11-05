@@ -6,10 +6,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/http';
+import { useAuth } from '../auth/AuthProvider';
 import {
   decideReadiness,
   getJam,
   getReadiness,
+  jamMemberId,
   jamSocketUrl,
   joinJam,
   leaveJam,
@@ -28,7 +30,6 @@ import { formatDuration, formatMs, initials, parseTimestamp, shortId } from '../
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { useSongs } from '../hooks/useSongs';
-import { userId } from '../identity';
 import { usePlayer, usePosition } from '../player/context';
 import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
@@ -40,7 +41,7 @@ const JAM_CLOSE_REASONS: Record<number, string> = {
 };
 
 /** Keeps the Jam state live through the Jam room WebSocket, reconnecting after drops. */
-function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void) {
+function useJamSocket(jamId: string, participantId: string | null, enabled: boolean, onJam: (jam: Jam) => void) {
   const [closeCode, setCloseCode] = useState<number | null>(null);
   const onJamRef = useRef(onJam);
   useEffect(() => {
@@ -48,12 +49,12 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
   }, [onJam]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !participantId) return;
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     const open = () => {
-      socket = new WebSocket(jamSocketUrl(jamId, userId));
+      socket = new WebSocket(jamSocketUrl(jamId, participantId));
       socket.onopen = () => setCloseCode(null);
       socket.onmessage = (event) => onJamRef.current(JSON.parse(String(event.data)) as Jam);
       socket.onclose = (event) => {
@@ -68,7 +69,7 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
       clearTimeout(retry);
       socket?.close(1000);
     };
-  }, [jamId, enabled]);
+  }, [jamId, participantId, enabled]);
 
   return closeCode;
 }
@@ -76,8 +77,10 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
 export function JamRoom() {
   const { jamId = '' } = useParams();
   const navigate = useNavigate();
+  const { account, loading: authLoading } = useAuth();
   const personalPlayer = usePlayer();
   const [jam, setJam] = useState<Jam | null>(null);
+  const [participantId, setParticipantId] = useState<string | null>(jamMemberId(jamId, account?.id));
   const [loadError, setLoadError] = useState<unknown>();
   const [actionError, setActionError] = useState<unknown>();
   const [audio, setAudio] = useState<AudioContext | null>(null);
@@ -88,20 +91,23 @@ export function JamRoom() {
 
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
   useEffect(() => {
+    if (authLoading) return;
     const controller = new AbortController();
-    joinJam(jamId, userId)
+    joinJam(jamId)
       .then((value) => {
         if (controller.signal.aborted) return;
+        const joinedAs = value.member_id ?? account?.id ?? jamMemberId(jamId);
+        setParticipantId(joinedAs);
         setJam(value);
-        rememberJam(jamId, value.owner_id === userId);
+        rememberJam(jamId, value.owner_id === joinedAs);
       })
       .catch((error: unknown) => !controller.signal.aborted && setLoadError(error));
     return () => controller.abort();
-  }, [jamId]);
+  }, [account?.id, authLoading, jamId]);
 
-  const member = Boolean(jam?.participant_ids.includes(userId));
-  const jamCloseCode = useJamSocket(jamId, member, setJam);
-  const owner = jam?.owner_id === userId;
+  const member = Boolean(participantId && jam?.participant_ids.includes(participantId));
+  const jamCloseCode = useJamSocket(jamId, participantId, member, setJam);
+  const owner = Boolean(account && jam?.owner_id === account.id);
   const active = Boolean(jam && jam.state !== 'IDLE' && jam.sync_generation !== null);
 
   // One Sync connection per room; reconnect only if it closed (e.g. it was
@@ -111,11 +117,12 @@ export function JamRoom() {
     const current = sessionRef.current;
     if (current && current.state.phase !== 'CLOSED') return;
     current?.close();
-    const next = new SyncSession({ jamId, participantId: userId, context: audio, onChange: setSync });
+    if (!participantId) return;
+    const next = new SyncSession({ jamId, participantId, context: audio, onChange: setSync });
     sessionRef.current = next;
-    setSession(next);
+    queueMicrotask(() => setSession((current) => current === null ? next : current));
     next.connect();
-  }, [audio, active, member, jamId, jam?.sync_generation]);
+  }, [audio, active, member, participantId, jamId, jam?.sync_generation]);
 
   useEffect(
     () => () => {
@@ -160,7 +167,7 @@ export function JamRoom() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   useInterval(
     () => {
-      void getReadiness(jamId, userId)
+      void getReadiness(jamId)
         .then(setReadiness)
         .catch(() => setReadiness(null));
     },
@@ -186,7 +193,7 @@ export function JamRoom() {
   const copyInvite = () => void navigator.clipboard?.writeText(`${window.location.origin}/jam/${jamId}`);
   const leave = async () => {
     sessionRef.current?.close();
-    if (!owner) await leaveJam(jamId, userId).catch(() => undefined);
+    if (!owner && participantId) await leaveJam(jamId, participantId).catch(() => undefined);
     navigate('/jam');
   };
 
@@ -250,19 +257,19 @@ export function JamRoom() {
             songId={currentSongId}
             sync={sync}
             session={session}
-            onControl={(action, extra) => void run(() => playback(jamId, userId, action, extra))}
+            onControl={(action, extra) => void run(() => playback(jamId, action, extra))}
           />
         </div>
         <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
-          <Queue jam={jam} owner={owner} playingSongId={currentSongId} run={run} />
+          <Queue jam={jam} memberId={participantId} owner={owner} playingSongId={currentSongId} run={run} />
           <AddSongsPanel
             title="Add to the shared queue"
             existing={new Set()}
-            onAdd={(songId) => void run(() => queueSong(jamId, userId, songId))}
+            onAdd={(songId) => void run(() => queueSong(jamId, songId))}
           />
         </div>
         <div className={`${mobilePanel === 'people' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-3`}>
-          <Participants jam={jam} sync={sync} readiness={readiness} />
+          <Participants jam={jam} memberId={participantId} sync={sync} readiness={readiness} />
           <SyncStats sync={sync} audioEnabled={Boolean(audio)} />
         </div>
       </div>
@@ -270,14 +277,15 @@ export function JamRoom() {
       {showReadiness && readiness && (
         <ReadinessModal
           readiness={readiness}
-          onDecide={(decision) => void run(() => decideReadiness(jamId, userId, decision)).then(() => setReadiness(null))}
+          participantId={participantId}
+          onDecide={(decision) => void run(() => decideReadiness(jamId, decision)).then(() => setReadiness(null))}
         />
       )}
     </div>
   );
 }
 
-type ControlAction = Parameters<typeof playback>[2];
+type ControlAction = Parameters<typeof playback>[1];
 
 function Deck({
   jam,
@@ -381,10 +389,10 @@ function Deck({
   );
 }
 
-function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; playingSongId: string | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
+function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberId: string | null; owner: boolean; playingSongId: string | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
   const songs = useSongs(jam.queue.map((item) => item.song_id));
   const ids = jam.queue.map((item) => item.queue_item_id);
-  const drag = useDragReorder((from, to) => void run(() => reorderQueue(jam.jam_id, userId, moveItem(ids, from, to))), owner);
+  const drag = useDragReorder((from, to) => void run(() => reorderQueue(jam.jam_id, moveItem(ids, from, to))), owner);
 
   return (
     <Card>
@@ -411,13 +419,13 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
                   </div>
                   <p className="truncate text-xs text-on-surface-variant">{song?.artist ?? ''}</p>
                   <p className="mt-0.5 font-mono text-[10px] text-outline">
-                    added by {item.added_by === userId ? 'you' : shortId(item.added_by)} · {formatDuration(song?.duration_ms)}
+                    added by {item.added_by === memberId ? 'you' : shortId(item.added_by)} · {formatDuration(song?.duration_ms)}
                   </p>
                 </div>
                 {owner && (
                   <div className="flex items-center">
-                    <IconButton icon="play_circle" label="Play this now" onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))} />
-                    {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, userId, item.queue_item_id))} />}
+                    <IconButton icon="play_circle" label="Play this now" onClick={() => void run(() => playback(jam.jam_id, 'start', { queue_item_id: item.queue_item_id }))} />
+                    {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, item.queue_item_id))} />}
                   </div>
                 )}
               </div>
@@ -430,7 +438,7 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
   );
 }
 
-function Participants({ jam, sync, readiness }: { jam: Jam; sync: SyncSnapshot | null; readiness: Readiness | null }) {
+function Participants({ jam, memberId, sync, readiness }: { jam: Jam; memberId: string | null; sync: SyncSnapshot | null; readiness: Readiness | null }) {
   return (
     <Card className="p-4">
       <h4 className="mb-3 flex items-center gap-1.5 font-headline text-xs font-bold uppercase tracking-wider">
@@ -441,13 +449,13 @@ function Participants({ jam, sync, readiness }: { jam: Jam; sync: SyncSnapshot |
           const state = sync?.participants[id];
           const ready = state?.ready ?? readiness?.ready_participant_ids.includes(id) ?? false;
           // Sync only reports others' presence on changes; this device knows its own socket state.
-          const connected = state?.connected ?? (id === userId && Boolean(sync) && sync?.phase !== 'CONNECTING' && sync?.phase !== 'CLOSED');
+          const connected = state?.connected ?? (id === memberId && Boolean(sync) && sync?.phase !== 'CONNECTING' && sync?.phase !== 'CLOSED');
           return (
             <li key={id} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/20 bg-surface-container p-2">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/15 font-mono text-[10px] font-bold text-primary">{initials(id)}</span>
                 <span className="truncate font-mono text-xs">{shortId(id)}</span>
-                {id === userId && <span className="rounded bg-secondary/15 px-1 font-mono text-[9px] uppercase text-secondary">you</span>}
+                {id === memberId && <span className="rounded bg-secondary/15 px-1 font-mono text-[9px] uppercase text-secondary">you</span>}
                 {id === jam.owner_id && <span className="rounded bg-primary/20 px-1 font-mono text-[9px] uppercase text-primary">owner</span>}
               </div>
               <div className="flex items-center gap-2 font-mono text-[10px]">
@@ -517,7 +525,7 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
   );
 }
 
-function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecide: (decision: 'CONTINUE' | 'WAIT' | 'CANCEL') => void }) {
+function ReadinessModal({ readiness, participantId, onDecide }: { readiness: Readiness; participantId: string | null; onDecide: (decision: 'CONTINUE' | 'WAIT' | 'CANCEL') => void }) {
   const count = readiness.unready_participant_ids.length;
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -543,7 +551,7 @@ function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecid
           {readiness.unready_participant_ids.map((id) => (
             <li key={id} className="flex items-center gap-2 font-mono text-xs">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-tertiary/20 text-[9px] font-bold text-tertiary">{initials(id)}</span>
-              {shortId(id)} {id === userId && '(you)'}
+              {shortId(id)} {id === participantId && '(you)'}
             </li>
           ))}
         </ul>

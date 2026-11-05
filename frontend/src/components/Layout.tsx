@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { shortId } from '../format';
-import { switchIdentity, userId } from '../identity';
+import { userId } from '../identity';
+import { useAuth } from '../auth/AuthProvider';
 import { PlayerBar } from './PlayerBar';
 import { Icon } from './ui';
 
@@ -56,6 +57,7 @@ function NavigationLink({ item }: { item: (typeof primaryNav)[number] }) {
 export function Layout() {
   const { pathname } = useLocation();
   const inJamRoom = /^\/jam\/[^/]+/.test(pathname);
+  const { account, loading, logOut } = useAuth();
 
   return (
     <div className="flex h-full flex-col bg-background lg:flex-row">
@@ -89,22 +91,41 @@ export function Layout() {
 
         <div className="mt-auto flex items-center gap-3 border-t border-outline-variant/35 px-1 pt-4">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary/15 text-xs font-extrabold text-secondary">
-            {userId.slice(0, 2).toUpperCase()}
+            {(account?.username ?? userId).slice(0, 2).toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold" title={userId}>Listener {shortId(userId)}</p>
-            <button type="button" onClick={switchIdentity} className="mt-0.5 text-xs text-on-surface-variant underline-offset-4 hover:text-on-surface hover:underline">
-              Switch demo identity
-            </button>
+            <p className="truncate text-xs font-semibold" title={account?.username ?? userId}>
+              {loading ? 'Checking account…' : account?.username ?? `Guest ${shortId(userId)}`}
+            </p>
+            {account ? (
+              <button type="button" onClick={() => void logOut().catch(() => undefined)} className="mt-0.5 text-xs text-on-surface-variant underline-offset-4 hover:text-on-surface hover:underline">
+                Log out
+              </button>
+            ) : (
+              <Link to={`/login?returnTo=${encodeURIComponent(pathname)}`} className="mt-0.5 inline-block text-xs text-primary underline-offset-4 hover:underline">
+                Log in
+              </Link>
+            )}
           </div>
         </div>
       </aside>
 
       <header className="flex h-16 items-center justify-between border-b border-outline-variant/35 bg-surface-container-lowest px-4 lg:hidden">
         <Brand />
-        <Link to="/upload" aria-label="Upload music" className="flex size-10 items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface">
-          <Icon name="upload" className="text-xl" />
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link to="/upload" aria-label="Upload music" className="flex size-10 items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface">
+            <Icon name="upload" className="text-xl" />
+          </Link>
+          {account ? (
+            <button type="button" onClick={() => void logOut().catch(() => undefined)} aria-label={`Log out ${account.username}`} className="rounded-xl px-2.5 py-2 text-xs font-bold text-secondary hover:bg-surface-container-high">
+              {account.username}
+            </button>
+          ) : (
+            <Link to={`/login?returnTo=${encodeURIComponent(pathname)}`} className="rounded-xl px-2.5 py-2 text-xs font-bold text-primary hover:bg-surface-container-high">
+              Log in
+            </Link>
+          )}
+        </div>
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

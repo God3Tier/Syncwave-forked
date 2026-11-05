@@ -25,7 +25,7 @@ def test_health(client: TestClient) -> None:
 
 
 def test_create_returns_an_empty_playlist(client: TestClient) -> None:
-    response = client.post("/playlists", json={"owner_id": OWNER_ID, "name": "Rainy day"})
+    response = client.post("/playlists", json={"name": "Rainy day"})
 
     assert response.status_code == 201
     body = response.json()
@@ -38,19 +38,19 @@ def test_create_returns_an_empty_playlist(client: TestClient) -> None:
 
 
 def test_create_trims_the_name(client: TestClient) -> None:
-    response = client.post("/playlists", json={"owner_id": OWNER_ID, "name": "  Chill  "})
+    response = client.post("/playlists", json={"name": "  Chill  "})
     assert response.json()["name"] == "Chill"
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"owner_id": OWNER_ID, "name": ""},
-        {"owner_id": OWNER_ID, "name": "   "},
-        {"owner_id": OWNER_ID, "name": "x" * 101},
-        {"owner_id": OWNER_ID},
-        {"name": "No owner"},
-        {"owner_id": "not-a-uuid", "name": "Bad owner"},
+        {"name": ""},
+        {"name": "   "},
+        {"name": "x" * 101},
+        {},
+        {"name": "No owner", "owner_id": OWNER_ID},
+        {"name": "Bad owner", "owner_id": "not-a-uuid"},
     ],
 )
 def test_create_rejects_an_invalid_body(client: TestClient, body: dict[str, Any]) -> None:
@@ -128,8 +128,24 @@ def test_list_pages_through_every_playlist(client: TestClient, create_playlist: 
     assert seen == list(reversed(created))
 
 
-def test_list_requires_an_owner(client: TestClient) -> None:
-    assert client.get("/playlists").status_code == 400
+def test_list_requires_an_account(client: TestClient) -> None:
+    from playlist_service.auth import current_account
+
+    client.app.dependency_overrides.pop(current_account)
+    assert client.get("/playlists").status_code == 401
+
+
+def test_playlist_mutations_require_the_owner_account(
+    client: TestClient, create_playlist: Create
+) -> None:
+    from playlist_service.auth import Account, current_account
+
+    playlist = create_playlist()
+    client.app.dependency_overrides[current_account] = lambda: Account(uuid.uuid4())
+    response = client.patch(f"/playlists/{playlist['playlist_id']}", json={"name": "Not yours"})
+
+    assert response.status_code == 404
+    assert client.get(f"/playlists/{playlist['playlist_id']}").json()["name"] == "Rainy day"
 
 
 @pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 101}, {"cursor": "!!!"}])

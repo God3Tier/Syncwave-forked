@@ -166,6 +166,7 @@ export interface Jam {
   sync_generation: number | null;
   state: JamState;
   member_token: string | null;
+  member_id: string | null;
 }
 
 export interface Readiness {

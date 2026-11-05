@@ -99,6 +99,16 @@ contracts:schemas:
   trigger:
     strategy: depend      # this job, and the MR, fail if the child pipeline fails
 
+auth:
+  extends: .service-trigger
+  variables:
+    CONTRACT_PATHS: contracts/api
+  trigger:
+    include: services/auth/.gitlab-ci.yml
+  rules:
+    - exists: [services/auth/.gitlab-ci.yml]
+      changes: [services/auth/**/*, contracts/api/auth.openapi.yaml, ci/**/*]
+
 catalogue:
   extends: .service-trigger
   variables:

@@ -141,8 +141,9 @@ including actionable errors when a dependency or processing stage fails.
   Live staging execution and a successful pipeline link remain pending under
   item 1; configuring the job does not establish that GitLab has run it.
 - [ ] Wire the Playwright browser test into staging. `tests/e2e/test_app.py`
-  passes locally for Discover & Listen, Upload & Process, a two-browser Jam
-  playback flow, and desktop/tablet/mobile layout at 1440px, 768px, and 390px. The
+  passes locally for guest listening, signup, login/logout, playlist creation,
+  Upload & Process, two-browser guest Jam playback, and desktop/tablet/mobile
+  layouts at 1440px, 768px, and 390px. The
   current `docker:29-cli` integration
   image has no browser runtime, so a pinned Playwright job or image is still
   required before adding `tests/e2e/run.sh`.
@@ -173,8 +174,14 @@ not satisfy this gate.
 
 ## 5. Prepare for deployment and update the runbooks
 
-- [ ] Replace development member/participant tokens with the agreed identity
-  flow, and verify authorization from the browser through every protected API.
+- [x] Add the local account and guest identity flow. The Auth Service normalizes
+  unique usernames, hashes passwords with Argon2id, issues RS256 JWT session
+  cookies, and serves JWKS. Playlist mutations and Jam hosting/controls verify
+  account ownership; invitees can join as guests with a room-scoped membership
+  token, queue songs, and listen without signup. Auth/Jam/Playlist suites passed
+  locally (8/8, 9/9, and 95/95), and the browser flow passed signup, login,
+  logout, guest playback, and two-browser Jam playback. Production signing-key
+  management and live deployment verification remain under the next item.
 - [ ] Configure production secrets, internal service authentication, HTTPS/WSS,
   service discovery, storage access, database migrations, and rollback steps.
 - [ ] Define the supported Jam/Sync replica topology before scaling; account

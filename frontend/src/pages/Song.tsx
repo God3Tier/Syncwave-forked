@@ -1,6 +1,8 @@
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { getSong } from '../api/catalogue';
 import { ApiError } from '../api/http';
+import { useAuth } from '../auth/AuthProvider';
 import { getLyrics, getWaveform } from '../api/media';
 import { createJam, queueSong, rememberJam } from '../api/jam';
 import { formatDuration } from '../format';
@@ -12,7 +14,6 @@ import { Button, Card, Icon, Notice, SongArt, Spinner, StatusChip } from '../com
 import { errorMessage } from '../errors';
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { rememberSong, useSongs } from '../hooks/useSongs';
-import { userId } from '../identity';
 import { usePlayer, usePosition, type BufferState } from '../player/context';
 import { bufferSlots } from '../player/chunkBuffer';
 
@@ -27,6 +28,10 @@ function optional<T>(promise: Promise<T>): Promise<T | null> {
 export function SongPage() {
   const { songId = '' } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { account, loading: authLoading } = useAuth();
+  const hostIntentHandled = useRef(false);
+  const [jamError, setJamError] = useState<unknown>();
   const player = usePlayer();
 
   const song = useAsync(async (signal) => {
@@ -57,6 +62,29 @@ export function SongPage() {
     if (isCurrent) player.seek(ms);
   };
 
+  const startJam = useCallback(async () => {
+    if (authLoading) return;
+    if (!account) {
+      navigate(`/signup?returnTo=${encodeURIComponent(`/songs/${songId}`)}&intent=host`);
+      return;
+    }
+    try {
+      const jam = await createJam();
+      await queueSong(jam.jam_id, songId);
+      rememberJam(jam.jam_id, true);
+      navigate(`/jam/${jam.jam_id}`);
+    } catch (cause) {
+      setJamError(cause);
+    }
+  }, [account, authLoading, navigate, songId]);
+
+  useEffect(() => {
+    if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
+      hostIntentHandled.current = true;
+      void startJam();
+    }
+  }, [account, authLoading, searchParams, startJam]);
+
   if (song.loading && !song.data) return <Page><Spinner label="Loading song" /></Page>;
   if (song.error !== undefined && !song.data) {
     return (
@@ -67,13 +95,6 @@ export function SongPage() {
   }
   const data = song.data!;
   const playable = data.processing_status === 'READY' || data.processing_status === 'PARTIAL';
-
-  const startJam = async () => {
-    const jam = await createJam(userId);
-    await queueSong(jam.jam_id, userId, songId);
-    rememberJam(jam.jam_id, true);
-    navigate(`/jam/${jam.jam_id}`);
-  };
 
   return (
     <Page wide>
@@ -99,13 +120,15 @@ export function SongPage() {
             >
               {isCurrent && player.playing ? 'Pause' : 'Play'}
             </Button>
-            <Button variant="cyan" icon="sensors" disabled={!playable} onClick={() => void startJam()}>
-              Start a Jam with this song
+            <Button variant="cyan" icon="sensors" disabled={!playable || authLoading} onClick={() => void startJam()}>
+              {account ? 'Start a Jam with this song' : 'Sign in to host this song'}
             </Button>
             <AddToPlaylist songId={songId} />
           </div>
         </div>
       </header>
+
+      {jamError !== undefined && <Notice tone="error">{errorMessage(jamError)}</Notice>}
 
       <section className="mb-8 rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
         {waveform.data?.status === 'READY' ? (
