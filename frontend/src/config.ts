@@ -13,6 +13,4 @@ export const config = {
   syncStatusIntervalMs: 2000,
   /** Sync closes idle sockets after 45 s; a TIME_PING keeps it alive and refreshes the offset. */
   syncHeartbeatMs: 15000,
-  /** How many songs after the current one the player pre-buffers. */
-  prefetchAhead: 2,
 };

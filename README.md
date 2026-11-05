@@ -5,6 +5,13 @@ A browser-based social music streaming platform built as microservices
 are **Discover & Listen**, **Upload & Process** (event-driven
 choreography) and **Create & Synchronise a Jam** (orchestration).
 See [plan.md](plan.md) for the architecture and service ownership.
+See [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) for verified integration status,
+remaining work, and acceptance criteria.
+See [DESIGN.md](DESIGN.md) for the implemented visual system and
+[FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the implemented nine-slot audio buffer,
+usability requirements, and Playwright coverage.
+See [infrastructure/aws/DEPLOYMENT.md](infrastructure/aws/DEPLOYMENT.md) for
+the AWS deployment sequence, current gaps, and production readiness gates.
 
 ## Run it locally
 
@@ -55,13 +62,13 @@ All three run in the browser at <http://localhost:8080>.
    and optionally an `.lrc` file and a mood. The processing panel shows
    Lyrics and Waveform working in parallel until the song is READY; it then
    appears in Search and Discover.
-3. **Create & Synchronise a Jam.** Create a playlist and choose "Start Jam
-   with this playlist", or use the Jam page. Open the invite link in a
-   second tab with `?user=new` added, to join as another listener, or on
-   another device on the same network. Press "Join Jam (Enable Audio)" on every device,
-   then press Play as the owner. Each device buffers the song and starts it
-   at the same server time. The Sync stats panel shows the clock offset and
-   start error.
+3. **Create & Synchronise a Jam.** Listening stays open to guests. Create an
+   account with a username and password to save playlists or host a Jam. Open
+   the invite link in a second tab or on another device to join as a guest;
+   guests can add songs to the shared queue. Tap "enable audio" on every
+   device, then press Play as the owner. Each device buffers the song and
+   starts it at the same server time. The Sync stats panel shows the clock
+   offset and start error.
 
 Stop with `docker compose down`, and add `-v` to also delete all local
 data (databases, queues, uploaded audio).

@@ -1,9 +1,10 @@
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { getSong } from '../api/catalogue';
 import { ApiError } from '../api/http';
+import { useAuth } from '../auth/AuthProvider';
 import { getLyrics, getWaveform } from '../api/media';
 import { createJam, queueSong, rememberJam } from '../api/jam';
-import { config } from '../config';
 import { formatDuration } from '../format';
 import { AddToPlaylist } from '../components/AddToPlaylist';
 import { Page } from '../components/Layout';
@@ -14,8 +15,8 @@ import { Button, Card, Icon, Notice, SongArt, Spinner, StatusChip } from '../com
 import { errorMessage } from '../errors';
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { rememberSong, useSongs } from '../hooks/useSongs';
-import { userId } from '../identity';
 import { usePlayer, usePosition, type BufferState } from '../player/context';
+import { bufferSlots } from '../player/chunkBuffer';
 
 function optional<T>(promise: Promise<T>): Promise<T | null> {
   return promise.catch((error: unknown) => {
@@ -28,6 +29,10 @@ function optional<T>(promise: Promise<T>): Promise<T | null> {
 export function SongPage() {
   const { songId = '' } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { account, loading: authLoading } = useAuth();
+  const hostIntentHandled = useRef(false);
+  const [jamError, setJamError] = useState<unknown>();
   const player = usePlayer();
 
   const song = useAsync(async (signal) => {
@@ -58,6 +63,29 @@ export function SongPage() {
     if (isCurrent) player.seek(ms);
   };
 
+  const startJam = useCallback(async () => {
+    if (authLoading) return;
+    if (!account) {
+      navigate(`/signup?returnTo=${encodeURIComponent(`/songs/${songId}`)}&intent=host`);
+      return;
+    }
+    try {
+      const jam = await createJam();
+      await queueSong(jam.jam_id, songId);
+      rememberJam(jam.jam_id, true);
+      navigate(`/jam/${jam.jam_id}`);
+    } catch (cause) {
+      setJamError(cause);
+    }
+  }, [account, authLoading, navigate, songId]);
+
+  useEffect(() => {
+    if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
+      hostIntentHandled.current = true;
+      void startJam();
+    }
+  }, [account, authLoading, searchParams, startJam]);
+
   if (song.loading && !song.data) return <Page><Spinner label="Loading song" /></Page>;
   if (song.error !== undefined && !song.data) {
     return (
@@ -69,20 +97,12 @@ export function SongPage() {
   const data = song.data!;
   const playable = data.processing_status === 'READY' || data.processing_status === 'PARTIAL';
 
-  const startJam = async () => {
-    const jam = await createJam(userId);
-    await queueSong(jam.jam_id, userId, songId);
-    rememberJam(jam.jam_id, true);
-    navigate(`/jam/${jam.jam_id}`);
-  };
-
   return (
     <Page wide>
-      <header className="mb-8 flex flex-col gap-6 md:flex-row md:items-end">
+      <header className="mb-8 flex flex-col gap-7 border-b border-outline-variant/35 pb-8 md:flex-row md:items-end">
         <SongArt id={songId} size="xl" />
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-xs uppercase tracking-widest text-secondary">Song</p>
-          <h1 className="mt-1 font-headline text-3xl font-bold tracking-tight md:text-5xl">{data.title}</h1>
+          <h1 className="text-3xl font-extrabold tracking-[-0.04em] md:text-5xl">{data.title}</h1>
           <p className="mt-2 text-lg text-on-surface-variant">
             {data.artist} <span className="font-mono text-sm text-outline">· {formatDuration(data.duration_ms)}</span>
           </p>
@@ -101,15 +121,17 @@ export function SongPage() {
             >
               {isCurrent && player.playing ? 'Pause' : 'Play'}
             </Button>
-            <Button variant="cyan" icon="sensors" disabled={!playable} onClick={() => void startJam()}>
-              Start a Jam with this song
+            <Button variant="cyan" icon="sensors" disabled={!playable || authLoading} onClick={() => void startJam()}>
+              {account ? 'Start a Jam with this song' : 'Sign in to host this song'}
             </Button>
             <AddToPlaylist songId={songId} />
           </div>
         </div>
       </header>
 
-      <Card className="mb-6">
+      {jamError !== undefined && <Notice tone="error">{errorMessage(jamError)}</Notice>}
+
+      <section className="mb-8 rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
         {waveform.data?.status === 'READY' ? (
           <>
             <Waveform peaks={waveform.data.peaks} durationMs={durationMs} positionMs={positionMs} onSeek={isCurrent ? seek : undefined} height={140} />
@@ -127,11 +149,11 @@ export function SongPage() {
                 : 'No waveform for this song.'}
           </p>
         )}
-      </Card>
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card>
-          <h2 className="mb-4 flex items-center gap-2 font-headline text-lg font-semibold">
+        <Card className="min-h-80">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
             Lyrics <span className="font-mono text-xs font-normal text-secondary">· synced</span>
           </h2>
           {lyrics.data?.status === 'READY' && lyrics.data.lines.length > 0 ? (
@@ -163,20 +185,19 @@ export function SongPage() {
 
 function BufferWindowCard() {
   const player = usePlayer();
-  const start = Math.max(0, player.index - 1);
-  const ids = player.queue.slice(start, player.index + 1 + config.prefetchAhead);
+  const slots = bufferSlots(player.queue, player.index).filter((slot) => slot.songId !== null);
   const songs = useSongs(player.queue.slice(player.index + 1, player.index + 6));
   const upNext = player.queue.slice(player.index + 1, player.index + 5);
   const fill: Record<BufferState | 'none', string> = { ready: 'w-full bg-secondary', loading: 'w-1/2 animate-pulse bg-secondary/60', error: 'w-full bg-error', none: 'w-0' };
 
   return (
-    <Card>
-      <h2 className="font-headline text-lg font-semibold">Buffer window</h2>
-      <p className="mb-4 mt-1 text-xs text-on-surface-variant">Audio is fetched by the browser; the next songs are pre-buffered and older ones evicted.</p>
-      {ids.length === 0 && <p className="font-mono text-xs text-outline">Queue is empty.</p>}
+    <details className="h-fit rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
+      <summary className="cursor-pointer list-none text-sm font-extrabold">Playback details</summary>
+      <p className="mb-4 mt-2 text-xs leading-5 text-on-surface-variant">SyncWave preloads the next songs in this browser. Open this when playback needs troubleshooting.</p>
+      {slots.length === 0 && <p className="font-mono text-xs text-outline">Queue is empty.</p>}
       <ul className="space-y-2">
-        {ids.map((id, i) => {
-          const offset = start + i - player.index;
+        {slots.map(({ songId: id, offset }) => {
+          if (!id) return null;
           return (
             <BufferRow key={`${id}-${offset}`} id={id} label={offset === 0 ? 'NOW' : offset > 0 ? `+${offset}` : `${offset}`} fill={fill[player.buffers[id] ?? 'none']} />
           );
@@ -184,7 +205,7 @@ function BufferWindowCard() {
       </ul>
       {upNext.length > 0 && (
         <>
-          <h3 className="mb-2 mt-6 font-mono text-[11px] uppercase tracking-wider text-outline">Up next</h3>
+          <h3 className="mb-2 mt-6 text-xs font-bold text-on-surface-variant">Up next</h3>
           <ul className="space-y-1 text-sm">
             {upNext.map((id, i) => (
               <li key={`${id}-${i}`} className="truncate text-on-surface-variant">
@@ -194,7 +215,7 @@ function BufferWindowCard() {
           </ul>
         </>
       )}
-    </Card>
+    </details>
   );
 }
 
@@ -206,7 +227,7 @@ function BufferRow({ id, label, fill }: { id: string; label: string; fill: strin
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{songs.get(id)?.title ?? '…'}</p>
         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
-          <div className={`h-full rounded-full transition-all ${fill}`} />
+          <div className={`h-full rounded-full transition-[width] ${fill}`} />
         </div>
       </div>
       <Icon name={fill.includes('error') ? 'error' : 'graphic_eq'} className={`text-base ${fill.includes('error') ? 'text-error' : 'text-outline'}`} />

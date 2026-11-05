@@ -12,6 +12,8 @@ import { Search } from './pages/Search';
 import { SongPage } from './pages/Song';
 import { Upload } from './pages/Upload';
 import { PlayerProvider } from './player/PlayerProvider';
+import { AuthProvider } from './auth/AuthProvider';
+import { AccountPage } from './pages/Account';
 import './index.css';
 
 const router = createBrowserRouter([
@@ -26,6 +28,8 @@ const router = createBrowserRouter([
       { path: '/playlists/:playlistId', element: <PlaylistDetail /> },
       { path: '/jam', element: <JamLobby /> },
       { path: '/jam/:jamId', element: <JamRoom /> },
+      { path: '/login', element: <AccountPage mode="login" /> },
+      { path: '/signup', element: <AccountPage mode="signup" /> },
       { path: '*', element: <NotFound /> },
     ],
   },
@@ -34,7 +38,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <PlayerProvider>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </PlayerProvider>
   </StrictMode>,
 );

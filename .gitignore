@@ -29,6 +29,7 @@ venv/
 # CI artefacts produced locally
 .m2/
 *.log
+tests/e2e/artifacts/
 
 # IDEs and OS files
 .idea/

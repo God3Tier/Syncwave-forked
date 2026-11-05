@@ -6,3 +6,4 @@ asyncpg==0.30.0
 grpcio==1.75.1
 protobuf==6.32.1
 uvicorn[standard]==0.37.0
+PyJWT[crypto]==2.10.1

@@ -6,10 +6,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/http';
+import { useAuth } from '../auth/AuthProvider';
 import {
   decideReadiness,
   getJam,
   getReadiness,
+  jamMemberId,
   jamSocketUrl,
   joinJam,
   leaveJam,
@@ -29,7 +31,6 @@ import { formatDuration, formatMs, initials, parseTimestamp, shortId } from '../
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { useSongs } from '../hooks/useSongs';
-import { userId } from '../identity';
 import { usePlayer, usePosition } from '../player/context';
 import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
@@ -41,7 +42,7 @@ const JAM_CLOSE_REASONS: Record<number, string> = {
 };
 
 /** Keeps the Jam state live through the Jam room WebSocket, reconnecting after drops. */
-function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void) {
+function useJamSocket(jamId: string, participantId: string | null, enabled: boolean, onJam: (jam: Jam) => void) {
   const [closeCode, setCloseCode] = useState<number | null>(null);
   const onJamRef = useRef(onJam);
   useEffect(() => {
@@ -49,12 +50,12 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
   }, [onJam]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !participantId) return;
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     const open = () => {
-      socket = new WebSocket(jamSocketUrl(jamId, userId));
+      socket = new WebSocket(jamSocketUrl(jamId, participantId));
       socket.onopen = () => setCloseCode(null);
       socket.onmessage = (event) => onJamRef.current(JSON.parse(String(event.data)) as Jam);
       socket.onclose = (event) => {
@@ -69,7 +70,7 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
       clearTimeout(retry);
       socket?.close(1000);
     };
-  }, [jamId, enabled]);
+  }, [jamId, participantId, enabled]);
 
   return closeCode;
 }
@@ -77,32 +78,38 @@ function useJamSocket(jamId: string, enabled: boolean, onJam: (jam: Jam) => void
 export function JamRoom() {
   const { jamId = '' } = useParams();
   const navigate = useNavigate();
+  const { account, loading: authLoading } = useAuth();
   const personalPlayer = usePlayer();
   const [jam, setJam] = useState<Jam | null>(null);
+  const [participantId, setParticipantId] = useState<string | null>(jamMemberId(jamId, account?.id));
   const [loadError, setLoadError] = useState<unknown>();
   const [actionError, setActionError] = useState<unknown>();
   const [audio, setAudio] = useState<AudioContext | null>(null);
   const [sync, setSync] = useState<SyncSnapshot | null>(null);
   const [session, setSession] = useState<SyncSession | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'queue' | 'people'>('queue');
   const sessionRef = useRef<SyncSession | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
   useEffect(() => {
+    if (authLoading) return;
     const controller = new AbortController();
-    joinJam(jamId, userId)
+    joinJam(jamId)
       .then((value) => {
         if (controller.signal.aborted) return;
+        const joinedAs = value.member_id ?? account?.id ?? jamMemberId(jamId);
+        setParticipantId(joinedAs);
         setJam(value);
-        rememberJam(jamId, value.owner_id === userId);
+        rememberJam(jamId, value.owner_id === joinedAs);
       })
       .catch((error: unknown) => !controller.signal.aborted && setLoadError(error));
     return () => controller.abort();
-  }, [jamId]);
+  }, [account?.id, authLoading, jamId]);
 
-  const member = Boolean(jam?.participant_ids.includes(userId));
-  const jamCloseCode = useJamSocket(jamId, member, setJam);
-  const owner = jam?.owner_id === userId;
+  const member = Boolean(participantId && jam?.participant_ids.includes(participantId));
+  const jamCloseCode = useJamSocket(jamId, participantId, member, setJam);
+  const owner = Boolean(account && jam?.owner_id === account.id);
   const active = Boolean(jam && jam.state !== 'IDLE' && jam.sync_generation !== null);
 
   // One Sync connection per room; reconnect only if it closed (e.g. it was
@@ -112,11 +119,12 @@ export function JamRoom() {
     const current = sessionRef.current;
     if (current && current.state.phase !== 'CLOSED') return;
     current?.close();
-    const next = new SyncSession({ jamId, participantId: userId, context: audio, onChange: setSync });
+    if (!participantId) return;
+    const next = new SyncSession({ jamId, participantId, context: audio, onChange: setSync });
     sessionRef.current = next;
-    setSession(next);
+    queueMicrotask(() => setSession((current) => current === null ? next : current));
     next.connect();
-  }, [audio, active, member, jamId, jam?.sync_generation]);
+  }, [audio, active, member, participantId, jamId, jam?.sync_generation]);
 
   useEffect(
     () => () => {
@@ -161,7 +169,7 @@ export function JamRoom() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   useInterval(
     () => {
-      void getReadiness(jamId, userId)
+      void getReadiness(jamId)
         .then(setReadiness)
         .catch(() => setReadiness(null));
     },
@@ -195,16 +203,17 @@ export function JamRoom() {
   };
   const leave = async () => {
     sessionRef.current?.close();
-    if (!owner) await leaveJam(jamId, userId).catch(() => undefined);
+    if (!owner && participantId) await leaveJam(jamId, participantId).catch(() => undefined);
     navigate('/jam');
   };
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/20 bg-surface/80 px-4 py-3 backdrop-blur md:px-6">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 bg-surface-container-lowest px-4 py-3 md:px-6">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-headline text-lg font-bold">Jam</h1>
-          <button type="button" onClick={() => void copyInvite()} title="Copy invite link" className="flex items-center gap-1.5 rounded border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 font-mono text-xs text-secondary">
+          <span className="size-2 animate-pulse-glow rounded-full bg-secondary" aria-label="Live room" />
+          <h1 className="text-lg font-extrabold">Jam</h1>
+          <button type="button" onClick={() => void copyInvite()} title="Copy Jam ID link" className="flex items-center gap-1.5 rounded-lg bg-surface-container px-2.5 py-1.5 text-xs font-semibold text-secondary">
             {shortId(jamId)} <Icon name="content_copy" className="text-sm text-outline" />
           </button>
           <StatusChip status={owner ? 'OWNER' : 'MEMBER'} />
@@ -243,6 +252,13 @@ export function JamRoom() {
         )}
       </div>
 
+      <div className="px-4 pt-4 md:hidden">
+        <div className="grid grid-cols-2 rounded-xl bg-surface-container p-1" role="tablist" aria-label="Jam room panels">
+          <button type="button" role="tab" aria-selected={mobilePanel === 'queue'} onClick={() => setMobilePanel('queue')} className={`min-h-10 rounded-lg text-sm font-bold ${mobilePanel === 'queue' ? 'bg-on-surface text-background' : 'text-on-surface-variant'}`}>Queue</button>
+          <button type="button" role="tab" aria-selected={mobilePanel === 'people'} onClick={() => setMobilePanel('people')} className={`min-h-10 rounded-lg text-sm font-bold ${mobilePanel === 'people' ? 'bg-on-surface text-background' : 'text-on-surface-variant'}`}>People</button>
+        </div>
+      </div>
+
       <div className="grid flex-1 gap-5 p-4 md:p-6 lg:grid-cols-12">
         <div className="lg:col-span-4">
           <Deck
@@ -251,19 +267,19 @@ export function JamRoom() {
             songId={currentSongId}
             sync={sync}
             session={session}
-            onControl={(action, extra) => void run(() => playback(jamId, userId, action, extra))}
+            onControl={(action, extra) => void run(() => playback(jamId, action, extra))}
           />
         </div>
-        <div className="space-y-5 lg:col-span-5">
-          <Queue jam={jam} owner={owner} playingSongId={currentSongId} run={run} />
+        <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
+          <Queue jam={jam} memberId={participantId} owner={owner} playingSongId={currentSongId} run={run} />
           <AddSongsPanel
             title="Add to the shared queue"
             existing={new Set()}
-            onAdd={(songId) => void run(() => queueSong(jamId, userId, songId))}
+            onAdd={(songId) => void run(() => queueSong(jamId, songId))}
           />
         </div>
-        <div className="space-y-5 lg:col-span-3">
-          <Participants jam={jam} sync={sync} readiness={readiness} />
+        <div className={`${mobilePanel === 'people' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-3`}>
+          <Participants jam={jam} memberId={participantId} sync={sync} readiness={readiness} />
           <SyncStats sync={sync} audioEnabled={Boolean(audio)} />
         </div>
       </div>
@@ -271,14 +287,15 @@ export function JamRoom() {
       {showReadiness && readiness && (
         <ReadinessModal
           readiness={readiness}
-          onDecide={(decision) => void run(() => decideReadiness(jamId, userId, decision)).then(() => setReadiness(null))}
+          participantId={participantId}
+          onDecide={(decision) => void run(() => decideReadiness(jamId, decision)).then(() => setReadiness(null))}
         />
       )}
     </div>
   );
 }
 
-type ControlAction = Parameters<typeof playback>[2];
+type ControlAction = Parameters<typeof playback>[1];
 
 function Deck({
   jam,
@@ -314,11 +331,10 @@ function Deck({
   const hasNext = jam.queue.findIndex((item) => item.queue_item_id === jam.current_queue_item_id) < jam.queue.length - 1;
 
   return (
-    <Card className="relative h-full overflow-hidden border-primary/25">
-      <div className="pointer-events-none absolute -left-24 -top-24 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
+    <Card className="relative h-full overflow-hidden p-4 md:p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${sync?.phase === 'PLAYING' ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
-        <span className="font-mono text-xs uppercase tracking-wider text-secondary">Synchronised deck</span>
+        <span className="text-xs font-bold text-secondary">Now playing together</span>
       </div>
       {songId ? <SongArt id={songId} size="lg" className="mx-auto max-w-72" /> : (
         <div className="mx-auto flex aspect-square max-w-72 items-center justify-center rounded-xl border border-dashed border-outline-variant/50 text-on-surface-variant">
@@ -339,7 +355,7 @@ function Deck({
       </div>
 
       {/* Phones: a large drift read-out (Stitch mobile Jam room). */}
-      <div className="mt-4 rounded-xl border border-secondary/30 bg-secondary/5 p-3 text-center lg:hidden">
+      <div className="mt-4 rounded-xl bg-secondary/5 p-3 text-center ring-1 ring-secondary/25 lg:hidden">
         <p className="font-mono text-[11px] uppercase text-secondary">{sync?.phase === 'PLAYING' ? 'In sync' : sync?.phase ?? 'Not connected'}</p>
         <p className="font-mono text-3xl font-semibold tabular-nums">{formatMs(sync?.lastDriftMs ?? sync?.startErrorMs ?? null)}</p>
         <p className="font-mono text-[11px] text-on-surface-variant">
@@ -376,17 +392,17 @@ function Deck({
       ) : (
         <p className="mt-5 border-t border-outline-variant/20 pt-4 font-mono text-[11px] text-outline">Only the owner can control playback.</p>
       )}
-      <p className="mt-4 truncate font-mono text-[10px] text-outline">
+      <p className="mt-4 hidden truncate font-mono text-[10px] text-outline lg:block">
         Generation {jam.sync_generation ?? '—'} · target {sync?.targetServerMs ? new Date(sync.targetServerMs).toISOString().slice(11, 23) : '—'}
       </p>
     </Card>
   );
 }
 
-function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; playingSongId: string | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
+function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberId: string | null; owner: boolean; playingSongId: string | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
   const songs = useSongs(jam.queue.map((item) => item.song_id));
   const ids = jam.queue.map((item) => item.queue_item_id);
-  const drag = useDragReorder((from, to) => void run(() => reorderQueue(jam.jam_id, userId, moveItem(ids, from, to))), owner);
+  const drag = useDragReorder((from, to) => void run(() => reorderQueue(jam.jam_id, moveItem(ids, from, to))), owner);
 
   return (
     <Card>
@@ -413,7 +429,7 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
                   </div>
                   <p className="truncate text-xs text-on-surface-variant">{song?.artist ?? ''}</p>
                   <p className="mt-0.5 font-mono text-[10px] text-outline">
-                    added by {item.added_by === userId ? 'you' : shortId(item.added_by)} · {formatDuration(song?.duration_ms)}
+                    added by {item.added_by === memberId ? 'you' : shortId(item.added_by)} · {formatDuration(song?.duration_ms)}
                   </p>
                 </div>
                 {owner && (
@@ -422,10 +438,10 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
                       icon="play_circle"
                       label={jam.state === 'PREPARING' ? 'Wait until the current song is ready' : 'Play this now'}
                       disabled={jam.state === 'PREPARING'}
-                      onClick={() => void run(() => playback(jam.jam_id, userId, 'start', { queue_item_id: item.queue_item_id }))}
+                      onClick={() => void run(() => playback(jam.jam_id, 'start', { queue_item_id: item.queue_item_id }))}
                       className="disabled:cursor-not-allowed"
                     />
-                    {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, userId, item.queue_item_id))} />}
+                    {!current && <IconButton icon="close" label="Remove from queue" onClick={() => void run(() => removeQueueItem(jam.jam_id, item.queue_item_id))} />}
                   </div>
                 )}
               </div>
@@ -438,7 +454,7 @@ function Queue({ jam, owner, playingSongId, run }: { jam: Jam; owner: boolean; p
   );
 }
 
-function Participants({ jam, sync, readiness }: { jam: Jam; sync: SyncSnapshot | null; readiness: Readiness | null }) {
+function Participants({ jam, memberId, sync, readiness }: { jam: Jam; memberId: string | null; sync: SyncSnapshot | null; readiness: Readiness | null }) {
   return (
     <Card className="p-4">
       <h4 className="mb-3 flex items-center gap-1.5 font-headline text-xs font-bold uppercase tracking-wider">
@@ -449,13 +465,13 @@ function Participants({ jam, sync, readiness }: { jam: Jam; sync: SyncSnapshot |
           const state = sync?.participants[id];
           const ready = state?.ready ?? readiness?.ready_participant_ids.includes(id) ?? false;
           // Sync only reports others' presence on changes; this device knows its own socket state.
-          const connected = state?.connected ?? (id === userId && Boolean(sync) && sync?.phase !== 'CONNECTING' && sync?.phase !== 'CLOSED');
+          const connected = state?.connected ?? (id === memberId && Boolean(sync) && sync?.phase !== 'CONNECTING' && sync?.phase !== 'CLOSED');
           return (
             <li key={id} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/20 bg-surface-container p-2">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/15 font-mono text-[10px] font-bold text-primary">{initials(id)}</span>
                 <span className="truncate font-mono text-xs">{shortId(id)}</span>
-                {id === userId && <span className="rounded bg-secondary/15 px-1 font-mono text-[9px] uppercase text-secondary">you</span>}
+                {id === memberId && <span className="rounded bg-secondary/15 px-1 font-mono text-[9px] uppercase text-secondary">you</span>}
                 {id === jam.owner_id && <span className="rounded bg-primary/20 px-1 font-mono text-[9px] uppercase text-primary">owner</span>}
               </div>
               <div className="flex items-center gap-2 font-mono text-[10px]">
@@ -525,11 +541,17 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
   );
 }
 
-function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecide: (decision: 'CONTINUE' | 'WAIT' | 'CANCEL') => void }) {
+function ReadinessModal({ readiness, participantId, onDecide }: { readiness: Readiness; participantId: string | null; onDecide: (decision: 'CONTINUE' | 'WAIT' | 'CANCEL') => void }) {
   const count = readiness.unready_participant_ids.length;
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="readiness-title">
-      <div className="w-full max-w-md rounded-2xl border border-primary/40 bg-surface-container p-6 shadow-2xl shadow-black/80">
+    <dialog ref={dialog} aria-labelledby="readiness-title" onCancel={(event) => event.preventDefault()} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-surface-container p-0 text-on-surface shadow-[0_24px_80px_rgb(0_0_0/0.55)] backdrop:bg-black/75">
+      <div className="p-6 ring-1 ring-inset ring-outline-variant/55">
         <div className="mb-4 flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-tertiary/40 bg-tertiary/10 text-tertiary">
             <Icon name="sync_problem" className="text-2xl" />
@@ -545,7 +567,7 @@ function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecid
           {readiness.unready_participant_ids.map((id) => (
             <li key={id} className="flex items-center gap-2 font-mono text-xs">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-tertiary/20 text-[9px] font-bold text-tertiary">{initials(id)}</span>
-              {shortId(id)} {id === userId && '(you)'}
+              {shortId(id)} {id === participantId && '(you)'}
             </li>
           ))}
         </ul>
@@ -561,6 +583,6 @@ function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecid
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

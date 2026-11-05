@@ -1,7 +1,7 @@
 // Lyrics, Waveform and Streaming: the per-song media APIs used while listening.
 
 import { request } from './http';
-import type { Lyrics, StreamInfo, Waveform, WaveformBands } from './types';
+import type { Lyrics, StreamInfo, StreamManifest, Waveform, WaveformBands } from './types';
 
 export function getLyrics(songId: string, signal?: AbortSignal): Promise<Lyrics> {
   return request(`/api/lyrics/songs/${encodeURIComponent(songId)}/lyrics`, { signal });
@@ -17,6 +17,10 @@ export function getWaveformBands(songId: string, signal?: AbortSignal): Promise<
 
 export function getStreamInfo(songId: string, signal?: AbortSignal): Promise<StreamInfo> {
   return request(`/api/streaming/tracks/${encodeURIComponent(songId)}/stream-info`, { signal });
+}
+
+export function getStreamManifest(songId: string, signal?: AbortSignal): Promise<StreamManifest> {
+  return request(`/api/streaming/tracks/${encodeURIComponent(songId)}/manifest`, { signal });
 }
 
 /** Index of the lyric line being sung at positionMs, or -1 before the first line. */

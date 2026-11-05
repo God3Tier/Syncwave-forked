@@ -48,8 +48,14 @@ services:
     image: ${IMAGE_REGISTRY:-syncwave}/search:${IMAGE_TAG:-local}
     command: ["python", "-m", "search_service.worker"]
     environment: *search-environment
+    volumes:
+      - ../../infrastructure/health/check-consumers.py:/app/check-consumers.py:ro
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "/app/check-consumers.py", "search.song-ready"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
     restart: on-failure
     depends_on:
       search:

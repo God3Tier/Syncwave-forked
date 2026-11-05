@@ -32,12 +32,12 @@ export function LyricsView({ lines, positionMs, onSeek }: { lines: LyricLine[]; 
               type="button"
               onClick={() => onSeek?.(line.time_ms)}
               aria-current={state === 'current' ? 'true' : undefined}
-              className={`flex w-full items-baseline gap-4 rounded-lg border-l-2 px-3 py-1.5 text-left transition-colors ${
+              className={`flex w-full items-baseline gap-4 rounded-lg px-3 py-1.5 text-left transition-colors ${
                 state === 'current'
-                  ? 'border-primary bg-primary/10 text-on-surface'
+                  ? 'bg-primary/10 text-on-surface'
                   : state === 'past'
-                    ? 'border-transparent text-on-surface-variant/50 hover:text-on-surface-variant'
-                    : 'border-transparent text-on-surface-variant hover:text-on-surface'
+                    ? 'text-on-surface-variant/50 hover:text-on-surface-variant'
+                    : 'text-on-surface-variant hover:text-on-surface'
               }`}
             >
               <span className="w-16 shrink-0 font-mono text-[11px] tabular-nums text-outline">{stamp(line.time_ms)}</span>

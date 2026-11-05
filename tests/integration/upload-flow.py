@@ -23,6 +23,7 @@ from urllib.request import Request, urlopen
 
 Json = dict[str, Any]
 DURATION_MS = 4000
+LYRICS_FIXTURE = b"[00:00.00]Integration line one\n[00:02.00]Integration line two\n"
 EXPECTED_LINES = [
     {"time_ms": 0, "text": "Integration line one"},
     {"time_ms": 2000, "text": "Integration line two"},
@@ -85,10 +86,10 @@ class Api:
         return value
 
 
-def audio_fixture() -> bytes:
+def audio_fixture(frequency_hz: float = 440) -> bytes:
     rate = 22050
     pcm = b"".join(
-        struct.pack("<h", round(8000 * math.sin(2 * math.pi * 440 * sample / rate)))
+        struct.pack("<h", round(8000 * math.sin(2 * math.pi * frequency_hz * sample / rate)))
         for sample in range(rate * DURATION_MS // 1000)
     )
     buffer = io.BytesIO()
@@ -100,7 +101,9 @@ def audio_fixture() -> bytes:
     return buffer.getvalue()
 
 
-def multipart(title: str, audio: bytes) -> tuple[bytes, str]:
+def multipart(
+    title: str, audio: bytes, *, lyrics: bytes = LYRICS_FIXTURE, mood: str | None = None
+) -> tuple[bytes, str]:
     boundary = "syncwave-" + uuid.uuid4().hex
     fields = [
         ("title", None, "text/plain", title.encode()),
@@ -110,9 +113,11 @@ def multipart(title: str, audio: bytes) -> tuple[bytes, str]:
             "lyrics",
             "fixture.lrc",
             "text/plain; charset=utf-8",
-            b"[00:00.00]Integration line one\n[00:02.00]Integration line two\n",
+            lyrics,
         ),
     ]
+    if mood is not None:
+        fields.append(("mood", None, "text/plain", mood.encode()))
     parts = []
     for name, filename, content_type, value in fields:
         disposition = f'Content-Disposition: form-data; name="{name}"'
@@ -148,7 +153,9 @@ def wait_for(api: Api, path: str, key: str, target: str, deadline: float) -> Jso
     raise FlowError(f"{path}: timed out waiting for {target}; last response: {last_response}")
 
 
-def run(api: Api, timeout: float, report: Json) -> None:
+def run(
+    api: Api, timeout: float, report: Json, *, audio: bytes | None = None, mood: str | None = None
+) -> None:
     print("Checking required services through the gateway...", flush=True)
     for path in (
         "/api/upload/ready",
@@ -160,9 +167,9 @@ def run(api: Api, timeout: float, report: Json) -> None:
         api.request(path)
         print(f"PASS {path}", flush=True)
 
-    audio = audio_fixture()
+    audio = audio_fixture() if audio is None else audio
     title = f"upload-flow-{report['run_id']}"
-    body, content_type = multipart(title, audio)
+    body, content_type = multipart(title, audio, mood=mood)
     receipt = api.json(
         "/api/upload/uploads", data=body, content_type=content_type, expected_status=202
     )
@@ -178,6 +185,16 @@ def run(api: Api, timeout: float, report: Json) -> None:
         audio_reference=receipt["audio_reference"],
         lyrics_reference=receipt["lyrics_reference"],
     )
+    if mood is not None:
+        require(receipt.get("mood") == mood.strip().lower(), "Upload mood was not normalized")
+    verify(api, timeout, report, audio=audio, mood=mood)
+
+
+def verify(
+    api: Api, timeout: float, report: Json, *, audio: bytes, mood: str | None = None
+) -> None:
+    """Check an already submitted fixture, including one recovered from a failure."""
+    song_id, event_id, title = report["song_id"], report["event_id"], report["title"]
 
     # All asynchronous stages share one deadline; missing rows are normal while
     # the event works through the independent consumers.
@@ -192,7 +209,10 @@ def run(api: Api, timeout: float, report: Json) -> None:
     require(song.get("song_id") == song_id, "Catalogue returned the wrong song")
     require(song.get("title") == title, "Catalogue title does not match upload")
     require(song.get("artist") == "Integration test", "Catalogue artist does not match upload")
-    require(song.get("audio_reference") == receipt["audio_reference"], "Catalogue S3 key differs")
+    require(song.get("audio_reference") == report["audio_reference"], "Catalogue S3 key differs")
+    if mood is not None:
+        require(song.get("mood") == mood.strip().lower(), "Catalogue lost the uploaded mood")
+        report["mood"] = song["mood"]
     for field in ("lyrics_status", "waveform_status"):
         require(song.get(field) == "READY", f"Catalogue {field} is not READY")
     duration = song.get("duration_ms")

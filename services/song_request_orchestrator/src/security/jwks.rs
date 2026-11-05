@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::security::errors::AuthError;
 
-/// A single JSON Web Key from Cognito's JWKS endpoint.
+/// A single JSON Web Key from SyncWave Auth's JWKS endpoint.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Jwk {
     pub kty: String,
@@ -19,13 +19,13 @@ pub struct Jwk {
     pub e: String,
 }
 
-/// The Cognito `.well-known/jwks.json` response.
+/// The SyncWave Auth `.well-known/jwks.json` response.
 #[derive(Debug, Deserialize)]
 pub struct JwksResponse {
     pub keys: Vec<Jwk>,
 }
 
-/// In-memory cache of Cognito RSA public keys indexed by `kid`.
+/// In-memory cache of SyncWave Auth RSA public keys indexed by `kid`.
 ///
 /// [`refresh`](JwksCache::refresh) fetches the JWKS and rebuilds the cache;
 /// token verification then reads keys from memory. Call it at startup and
@@ -45,7 +45,7 @@ impl JwksCache {
         }
     }
 
-    /// Fetch the JWKS from Cognito and rebuild the key cache.
+    /// Fetch the JWKS from SyncWave Auth and rebuild the key cache.
     pub async fn refresh(&self) -> Result<(), AuthError> {
         let resp = self
             .http
@@ -68,7 +68,7 @@ impl JwksCache {
 
         let mut keys = HashMap::with_capacity(jwks.keys.len());
         for jwk in jwks.keys {
-            // Cognito signs tokens with RSA-256 signature keys.
+            // SyncWave Auth signs session tokens with RSA-256 signature keys.
             if jwk.kty != "RSA" || jwk.alg != "RS256" || jwk.key_use != "sig" {
                 continue;
             }

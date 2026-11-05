@@ -34,21 +34,29 @@ export function initials(id: string): string {
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (!Number.isFinite(diff)) return '';
+  const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
   const minutes = Math.round(diff / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1) return relative.format(0, 'minute');
+  if (minutes < 60) return relative.format(-minutes, 'minute');
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
+  if (hours < 24) return relative.format(-hours, 'hour');
+  return relative.format(-Math.round(hours / 24), 'day');
 }
 
 /** Stable hue pair per song so its gradient tile looks the same everywhere. */
 export function gradientFor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  const from = 250 + (hash % 70); // violet → magenta
-  const to = 180 + ((hash >>> 8) % 50); // cyan → blue
-  const angle = 120 + ((hash >>> 16) % 90);
-  return `linear-gradient(${angle}deg, hsl(${from} 75% 55%), hsl(${to} 85% 45%))`;
+  const palettes = [
+    ['#f26b49', '#6e2b1d', '#f2c75b'],
+    ['#75d8bd', '#173f38', '#f0eee4'],
+    ['#e39b62', '#4c2c22', '#84d9bf'],
+    ['#d8c76d', '#35452f', '#f57552'],
+    ['#8abf9f', '#263d33', '#dda05f'],
+    ['#e07b78', '#4d2d31', '#e7d9ad'],
+  ] as const;
+  const [accent, base, detail] = palettes[hash % palettes.length];
+  const x = 22 + ((hash >>> 8) % 56);
+  const y = 18 + ((hash >>> 16) % 62);
+  return `radial-gradient(circle at ${x}% ${y}%, ${detail} 0 11%, transparent 11.5%), linear-gradient(135deg, ${accent} 0 46%, ${base} 46% 100%)`;
 }

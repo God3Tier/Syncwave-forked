@@ -7,11 +7,11 @@ use actix_web::{
 };
 use futures_util::future::LocalBoxFuture;
 
-use crate::security::claims::CognitoClaims;
-use crate::security::client::CognitoClient;
+use crate::security::claims::AuthClaims;
+use crate::security::client::AuthClient;
 use crate::security::errors::AuthError;
 
-/// Middleware factory that verifies Cognito JWTs on incoming requests
+/// Middleware factory that verifies SyncWave Auth JWTs on incoming requests
 /// (a `Transform` in actix-web terms).
 ///
 /// The middleware is registered on the app with
@@ -19,16 +19,16 @@ use crate::security::errors::AuthError;
 ///
 /// ```ignore
 /// App::new()
-///     .wrap(CognitoAuth::new(cognito_client).exclude("/health"))
+///     .wrap(SessionAuth::new(auth_client).exclude("/health"))
 ///     .configure(configure_routes)
 /// ```
 ///
-/// Every request that is not excluded must carry an
-/// `Authorization: Bearer <token>` header. The token is verified against
-/// Cognito's JWKS (signature, issuer, audience, expiration). On success the
-/// verified [`CognitoClaims`] are stored in the request extensions, where
+/// Every request that is not excluded must carry the `syncwave_session`
+/// cookie or an `Authorization: Bearer <token>` header. The token is verified
+/// against SyncWave Auth's JWKS. On success the verified [`AuthClaims`] are stored
+/// in the request extensions, where
 /// handlers pick them up as parameters through the [`UserId`] and
-/// [`CognitoClaims`] extractors:
+/// [`AuthClaims`] extractors:
 ///
 /// ```ignore
 /// async fn handler(user_id: UserId) -> impl Responder {
@@ -36,19 +36,19 @@ use crate::security::errors::AuthError;
 /// }
 /// ```
 ///
-/// When no [`CognitoClient`] is configured (`None`) authentication is
+/// When no [`AuthClient`] is configured (`None`) authentication is
 /// disabled and every request passes through unauthenticated, which keeps
 /// local development working.
 ///
 /// [`UserId`]: crate::security::UserId
 #[derive(Clone)]
-pub struct CognitoAuth {
-    client: Option<Arc<CognitoClient>>,
+pub struct SessionAuth {
+    client: Option<Arc<AuthClient>>,
     exclude: Vec<String>,
 }
 
-impl CognitoAuth {
-    pub fn new(client: Option<Arc<CognitoClient>>) -> Self {
+impl SessionAuth {
+    pub fn new(client: Option<Arc<AuthClient>>) -> Self {
         Self {
             client,
             exclude: Vec::new(),
@@ -66,7 +66,7 @@ impl CognitoAuth {
 // 1. middleware initialization: the factory (`Transform`) is called with the
 //    next service in the chain as a parameter;
 // 2. `Service::call` is invoked for every request.
-impl<S, B> Transform<S, ServiceRequest> for CognitoAuth
+impl<S, B> Transform<S, ServiceRequest> for SessionAuth
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
@@ -75,11 +75,11 @@ where
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
-    type Transform = CognitoAuthMiddleware<S>;
+    type Transform = SessionAuthMiddleware<S>;
     type Future = std::future::Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        std::future::ready(Ok(CognitoAuthMiddleware {
+        std::future::ready(Ok(SessionAuthMiddleware {
             service,
             client: self.client.clone(),
             exclude: self.exclude.clone(),
@@ -87,16 +87,16 @@ where
     }
 }
 
-/// Service produced by [`CognitoAuth`]: verifies the request's bearer token,
+/// Service produced by [`SessionAuth`]: verifies the request's session token,
 /// stores the verified claims in the request extensions and then calls the
 /// inner service.
-pub struct CognitoAuthMiddleware<S> {
+pub struct SessionAuthMiddleware<S> {
     service: S,
-    client: Option<Arc<CognitoClient>>,
+    client: Option<Arc<AuthClient>>,
     exclude: Vec<String>,
 }
 
-impl<S, B> Service<ServiceRequest> for CognitoAuthMiddleware<S>
+impl<S, B> Service<ServiceRequest> for SessionAuthMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
@@ -109,7 +109,7 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        // No Cognito configuration, or a public path: hand the request to the
+        // No Auth configuration, or a public path: hand the request to the
         // inner service unauthenticated.
         let excluded = self.is_excluded_for(&req);
         let Some(client) = self.client.as_deref().filter(|_| !excluded) else {
@@ -131,7 +131,7 @@ where
     }
 }
 
-impl<S> CognitoAuthMiddleware<S> {
+impl<S> SessionAuthMiddleware<S> {
     /// Returns `true` if the request path is public.
     fn is_excluded_for(&self, req: &ServiceRequest) -> bool {
         let path = req.path();
@@ -142,18 +142,25 @@ impl<S> CognitoAuthMiddleware<S> {
 }
 
 /// Extracts the bearer token from the request and verifies it.
-fn authenticate(req: &ServiceRequest, client: &CognitoClient) -> Result<CognitoClaims, Error> {
-    let header = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| AuthError::MissingToken.into_actix_error())?;
-
-    let token = header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| AuthError::InvalidHeader.into_actix_error())?;
+fn authenticate(req: &ServiceRequest, client: &AuthClient) -> Result<AuthClaims, Error> {
+    let cookie_token = req
+        .cookie("syncwave_session")
+        .map(|cookie| cookie.value().to_owned());
+    let bearer_token = req.headers().get(header::AUTHORIZATION).map(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|header| header.strip_prefix("Bearer "))
+            .map(str::to_owned)
+            .ok_or_else(|| AuthError::InvalidHeader.into_actix_error())
+    });
+    let token = match (cookie_token, bearer_token) {
+        (Some(token), _) => token,
+        (None, Some(result)) => result?,
+        (None, None) => return Err(AuthError::MissingToken.into_actix_error()),
+    };
 
     client
-        .verify_token(token)
+        .verify_token(&token)
         .map_err(AuthError::into_actix_error)
 }

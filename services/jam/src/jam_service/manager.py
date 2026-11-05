@@ -46,12 +46,10 @@ class JamManager:
         repository: JamRepository,
         sync: SyncClient,
         playlist: PlaylistClient,
-        member_token: str,
     ) -> None:
         self._repository = repository
         self._sync = sync
         self._playlist = playlist
-        self._member_token = member_token
         self._jams: dict[UUID, Jam] = {}
         self._connections: dict[UUID, dict[WebSocket, UUID]] = {}
         self._lock = asyncio.Lock()
@@ -73,7 +71,7 @@ class JamManager:
         await self._playlist.close()
         await self._repository.close()
 
-    def get(self, jam_id: UUID, include_token: bool = False) -> JamResponse:
+    def get(self, jam_id: UUID) -> JamResponse:
         jam = self._find(jam_id)
         return JamResponse(
             jam_id=jam.jam_id,
@@ -83,7 +81,7 @@ class JamManager:
             current_queue_item_id=jam.current_queue_item_id,
             sync_generation=jam.sync_generation,
             state=jam.state,
-            member_token=self._member_token if include_token else None,
+            member_token=None,
         )
 
     async def create(self, owner_id: UUID, playlist_id: UUID | None = None) -> JamResponse:
@@ -105,7 +103,7 @@ class JamManager:
             )
             self._jams[jam.jam_id] = jam
             await self._save(jam)
-        return self.get(jam.jam_id, include_token=True)
+        return self.get(jam.jam_id)
 
     async def refresh(self, jam_id: UUID) -> JamResponse:
         async with self._lock:
@@ -133,7 +131,7 @@ class JamManager:
                 jam.participant_ids.append(participant_id)
                 await self._save(jam)
         await self.broadcast(jam_id)
-        return self.get(jam_id, include_token=True)
+        return self.get(jam_id)
 
     async def leave(self, jam_id: UUID, participant_id: UUID) -> None:
         async with self._lock:

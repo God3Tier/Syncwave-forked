@@ -4,12 +4,12 @@ import type { Page, Playlist, PlaylistSummary } from './types';
 const BASE = '/api/playlist/playlists';
 const one = (id: string) => `${BASE}/${encodeURIComponent(id)}`;
 
-export function listPlaylists(ownerId: string, cursor: string | null = null): Promise<Page<PlaylistSummary>> {
-  return request(BASE, { query: { owner_id: ownerId, limit: 100, cursor } });
+export function listPlaylists(cursor: string | null = null): Promise<Page<PlaylistSummary>> {
+  return request(BASE, { query: { limit: 100, cursor } });
 }
 
-export function createPlaylist(ownerId: string, name: string): Promise<Playlist> {
-  return request(BASE, { method: 'POST', json: { owner_id: ownerId, name } });
+export function createPlaylist(name: string): Promise<Playlist> {
+  return request(BASE, { method: 'POST', json: { name } });
 }
 
 export function getPlaylist(id: string, signal?: AbortSignal): Promise<Playlist> {

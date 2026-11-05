@@ -34,10 +34,14 @@ services:
       # x-internal-token header. Local development value, never a real secret.
       GRPC_PORT: "50051"
       INTERNAL_SERVICE_TOKEN: local-playlist-internal-token
+      AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
     expose:
       - "50051"
     depends_on:
       postgres:
+        condition: service_healthy
+      auth:
         condition: service_healthy
     healthcheck:
       test:

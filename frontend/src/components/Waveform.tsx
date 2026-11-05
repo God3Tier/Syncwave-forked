@@ -9,9 +9,9 @@ interface WaveformProps {
   className?: string;
 }
 
-const PLAYED = '#ba9eff';
-const UNPLAYED = 'rgba(58, 223, 250, 0.35)';
-const PLAYHEAD = '#eae7f1';
+const PLAYED = '#ff7350';
+const UNPLAYED = 'rgba(121, 227, 195, 0.32)';
+const PLAYHEAD = '#f3f0e8';
 
 /** Canvas waveform from the Waveform Service's peaks, with played portion and a playhead. */
 export function Waveform({ peaks, durationMs, positionMs, onSeek, height = 120, className = '' }: WaveformProps) {

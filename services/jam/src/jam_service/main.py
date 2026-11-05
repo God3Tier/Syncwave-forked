@@ -1,20 +1,26 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from hmac import compare_digest
-from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
-    Depends,
     FastAPI,
-    Header,
     HTTPException,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse
 
+from jam_service.auth import (
+    AuthVerifier,
+    actor_for_request,
+    check_request_origin,
+    issue_member_token,
+    member_actor,
+    optional_account,
+    owner_for_request,
+)
 from jam_service.config import get_settings
 from jam_service.manager import (
     JamConflictError,
@@ -23,11 +29,9 @@ from jam_service.manager import (
     JamPermissionError,
 )
 from jam_service.models import (
-    ActorRequest,
     AddQueueItemRequest,
     CreateJamRequest,
     JamResponse,
-    MemberRequest,
     PlaybackCommandRequest,
     ReadinessDecisionRequest,
     ReadinessStatusResponse,
@@ -47,11 +51,13 @@ settings = get_settings()
 repository = JamRepository(settings.database_url)
 sync_client = create_sync_client(settings)
 playlist_client = create_playlist_client(settings)
-manager = JamManager(repository, sync_client, playlist_client, settings.mock_jam_token)
+manager = JamManager(repository, sync_client, playlist_client)
+auth_verifier = AuthVerifier(settings.auth_jwks_url)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    app.state.auth_verifier = auth_verifier
     await repository.initialize()
     await manager.initialize()
     yield
@@ -59,14 +65,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="SyncWave Jam Service", version="1.0.0", lifespan=lifespan)
-
-
-def require_token(x_jam_token: Annotated[str | None, Header()] = None) -> None:
-    if x_jam_token is None or not compare_digest(x_jam_token, settings.mock_jam_token):
-        raise HTTPException(status_code=401, detail="invalid Jam token")
-
-
-Authenticated = Annotated[None, Depends(require_token)]
 
 
 @app.exception_handler(JamNotFoundError)
@@ -108,83 +106,121 @@ async def ready() -> dict[str, str]:
 
 
 @app.post("/jams", response_model=JamResponse, status_code=201)
-async def create_jam(request: CreateJamRequest, _: Authenticated) -> JamResponse:
-    return await manager.create(request.owner_id, request.playlist_id)
+async def create_jam(request: CreateJamRequest, http_request: Request) -> JamResponse:
+    check_request_origin(http_request)
+    owner_id = optional_account(http_request)
+    if owner_id is None:
+        raise HTTPException(status_code=401, detail="Sign in to host a Jam")
+    jam = await manager.create(owner_id, request.playlist_id)
+    return jam.model_copy(update={"member_id": owner_id})
 
 
 @app.get("/jams/{jam_id}", response_model=JamResponse)
-async def get_jam(jam_id: UUID, _: Authenticated) -> JamResponse:
+async def get_jam(jam_id: UUID, request: Request) -> JamResponse:
+    actor_for_request(request, jam_id, manager)
     return await manager.refresh(jam_id)
 
 
 @app.post("/jams/{jam_id}/members", response_model=JamResponse)
-async def join_jam(jam_id: UUID, request: MemberRequest, _: Authenticated) -> JamResponse:
-    return await manager.join(jam_id, request.participant_id)
+async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
+    check_request_origin(request)
+    token = request.headers.get("x-jam-token")
+    account_id = optional_account(request) if not token else None
+    if token:
+        participant_id = member_actor(token, jam_id, settings)
+        jam = manager.get(jam_id)
+        if participant_id == jam.owner_id or participant_id not in jam.participant_ids:
+            raise HTTPException(status_code=403, detail="You are not a member of this Jam")
+    elif account_id is not None:
+        participant_id = account_id
+    else:
+        participant_id = uuid4()
+    joined = await manager.join(jam_id, participant_id)
+    member_token = (
+        None if account_id is not None else issue_member_token(settings, jam_id, participant_id)
+    )
+    return joined.model_copy(update={"member_id": participant_id, "member_token": member_token})
 
 
 @app.delete("/jams/{jam_id}/members/{participant_id}", status_code=204)
-async def leave_jam(jam_id: UUID, participant_id: UUID, _: Authenticated) -> Response:
-    await manager.leave(jam_id, participant_id)
+async def leave_jam(jam_id: UUID, participant_id: UUID, request: Request) -> Response:
+    check_request_origin(request)
+    actor = actor_for_request(request, jam_id, manager)
+    jam = manager.get(jam_id)
+    if actor.user_id != participant_id and not (actor.account and actor.user_id == jam.owner_id):
+        raise HTTPException(status_code=403, detail="You can only leave as yourself")
+    await manager.leave(jam_id, actor.user_id)
     return Response(status_code=204)
 
 
 @app.post("/jams/{jam_id}/queue", response_model=JamResponse)
 async def add_queue_item(
-    jam_id: UUID, request: AddQueueItemRequest, _: Authenticated
+    jam_id: UUID, request: AddQueueItemRequest, http_request: Request
 ) -> JamResponse:
-    return await manager.add(jam_id, request.actor_id, request.song_id)
+    check_request_origin(http_request)
+    actor = actor_for_request(http_request, jam_id, manager)
+    return await manager.add(jam_id, actor.user_id, request.song_id)
 
 
 @app.delete("/jams/{jam_id}/queue/{queue_item_id}", response_model=JamResponse)
-async def remove_queue_item(
-    jam_id: UUID, queue_item_id: UUID, request: ActorRequest, _: Authenticated
-) -> JamResponse:
-    return await manager.remove(jam_id, request.actor_id, queue_item_id)
+async def remove_queue_item(jam_id: UUID, queue_item_id: UUID, request: Request) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.remove(jam_id, owner_id, queue_item_id)
 
 
 @app.put("/jams/{jam_id}/queue", response_model=JamResponse)
-async def reorder_queue(
-    jam_id: UUID, request: ReorderQueueRequest, _: Authenticated
-) -> JamResponse:
-    return await manager.reorder(jam_id, request.actor_id, request.queue_item_ids)
+async def reorder_queue(jam_id: UUID, body: ReorderQueueRequest, request: Request) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.reorder(jam_id, owner_id, body.queue_item_ids)
 
 
 @app.post("/jams/{jam_id}/playback/start", response_model=JamResponse)
-async def start_playback(
-    jam_id: UUID, request: StartPlaybackRequest, _: Authenticated
-) -> JamResponse:
-    return await manager.start(jam_id, request.actor_id, request.request_id, request.queue_item_id)
+async def start_playback(jam_id: UUID, body: StartPlaybackRequest, request: Request) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.start(jam_id, owner_id, body.request_id, body.queue_item_id)
 
 
 @app.post("/jams/{jam_id}/playback/pause", response_model=JamResponse)
 async def pause_playback(
-    jam_id: UUID, request: PlaybackCommandRequest, _: Authenticated
+    jam_id: UUID, body: PlaybackCommandRequest, request: Request
 ) -> JamResponse:
-    return await manager.command(jam_id, request.actor_id, request.request_id, Command.PAUSE)
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.command(jam_id, owner_id, body.request_id, Command.PAUSE)
 
 
 @app.post("/jams/{jam_id}/playback/resume", response_model=JamResponse)
 async def resume_playback(
-    jam_id: UUID, request: PlaybackCommandRequest, _: Authenticated
+    jam_id: UUID, body: PlaybackCommandRequest, request: Request
 ) -> JamResponse:
-    return await manager.command(jam_id, request.actor_id, request.request_id, Command.RESUME)
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.command(jam_id, owner_id, body.request_id, Command.RESUME)
 
 
 @app.post("/jams/{jam_id}/playback/seek", response_model=JamResponse)
-async def seek_playback(jam_id: UUID, request: SeekRequest, _: Authenticated) -> JamResponse:
-    return await manager.seek(jam_id, request.actor_id, request.request_id, request.position_ms)
+async def seek_playback(jam_id: UUID, body: SeekRequest, request: Request) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.seek(jam_id, owner_id, body.request_id, body.position_ms)
 
 
 @app.post("/jams/{jam_id}/playback/skip", response_model=JamResponse)
 async def skip_playback(
-    jam_id: UUID, request: PlaybackCommandRequest, _: Authenticated
+    jam_id: UUID, body: PlaybackCommandRequest, request: Request
 ) -> JamResponse:
-    return await manager.skip(jam_id, request.actor_id, request.request_id)
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.skip(jam_id, owner_id, body.request_id)
 
 
 @app.get("/jams/{jam_id}/playback/readiness", response_model=ReadinessStatusResponse)
-async def readiness(jam_id: UUID, actor_id: UUID, _: Authenticated) -> ReadinessStatusResponse:
-    status = await manager.readiness(jam_id, actor_id)
+async def readiness(jam_id: UUID, request: Request) -> ReadinessStatusResponse:
+    owner_id = owner_for_request(request, jam_id, manager)
+    status = await manager.readiness(jam_id, owner_id)
     return ReadinessStatusResponse(
         **{field: getattr(status, field) for field in ReadinessStatusResponse.model_fields}
     )
@@ -192,20 +228,39 @@ async def readiness(jam_id: UUID, actor_id: UUID, _: Authenticated) -> Readiness
 
 @app.post("/jams/{jam_id}/playback/readiness-decision", response_model=JamResponse)
 async def readiness_decision(
-    jam_id: UUID, request: ReadinessDecisionRequest, _: Authenticated
+    jam_id: UUID, body: ReadinessDecisionRequest, request: Request
 ) -> JamResponse:
-    return await manager.decide(jam_id, request.actor_id, request.request_id, request.decision)
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.decide(jam_id, owner_id, body.request_id, body.decision)
 
 
 @app.websocket("/jams/{jam_id}/ws")
 async def jam_websocket(
-    websocket: WebSocket, jam_id: UUID, participant_id: UUID, token: str
+    websocket: WebSocket,
+    jam_id: UUID,
+    participant_id: UUID | None = None,
+    token: str | None = None,
 ) -> None:
-    if not compare_digest(token, settings.mock_jam_token):
-        await websocket.close(code=4401, reason="invalid Jam token")
+    try:
+        if token:
+            actor_id = member_actor(token, jam_id, settings)
+            jam = manager.get(jam_id)
+            if actor_id == jam.owner_id or actor_id not in jam.participant_ids:
+                raise HTTPException(status_code=403, detail="not a Jam member")
+        else:
+            actor_id = optional_account(websocket)
+            if actor_id is None or actor_id not in manager.get(jam_id).participant_ids:
+                raise HTTPException(status_code=401, detail="sign in or join this Jam")
+        if participant_id is not None and actor_id != participant_id:
+            raise HTTPException(status_code=403, detail="participant identity does not match")
+    except HTTPException as error:
+        await websocket.close(
+            code=4401 if error.status_code == 401 else 4403, reason=str(error.detail)
+        )
         return
     try:
-        await manager.connect(jam_id, participant_id, websocket)
+        await manager.connect(jam_id, actor_id, websocket)
     except JamNotFoundError:
         await websocket.close(code=4404, reason="Jam not found")
         return
