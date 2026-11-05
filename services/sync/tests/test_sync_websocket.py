@@ -406,10 +406,7 @@ def test_reconnect_receives_existing_schedule_and_can_restart_sequence(client: T
     assert joined["payload"]["state"] == "SCHEDULED"
     assert prepare["type"] == "PREPARE"
     assert replayed_play_at["type"] == "PLAY_AT"
-    assert (
-        replayed_play_at["payload"]["generation"]
-        == original_play_at["payload"]["generation"]
-    )
+    assert replayed_play_at["payload"]["generation"] == original_play_at["payload"]["generation"]
     assert (
         replayed_play_at["payload"]["target_server_time_ms"]
         >= original_play_at["payload"]["target_server_time_ms"]

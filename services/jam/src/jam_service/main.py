@@ -131,9 +131,7 @@ async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
         return joined.model_copy(update={"member_id": account.user_id, "member_token": None})
 
     participant_id = uuid4()
-    joined = await manager.join(
-        jam_id, participant_id, f"Guest {str(participant_id)[:8]}"
-    )
+    joined = await manager.join(jam_id, participant_id, f"Guest {str(participant_id)[:8]}")
     return joined.model_copy(
         update={
             "member_id": participant_id,

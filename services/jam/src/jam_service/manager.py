@@ -384,9 +384,7 @@ class JamManager:
             if jam.lifecycle_state is JamLifecycle.ENDED:
                 return self.get(jam_id)
             if jam.sync_generation is not None:
-                await self._sync.update_participants(
-                    uuid4(), jam.jam_id, jam.sync_generation, []
-                )
+                await self._sync.update_participants(uuid4(), jam.jam_id, jam.sync_generation, [])
             jam.lifecycle_state = JamLifecycle.ENDED
             jam.state = JamState.ENDED
             jam.ended_at = datetime.now(UTC)
