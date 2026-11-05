@@ -27,3 +27,9 @@ build:
 
 deploy:
   extends: .deploy-ecs
+  # Auth does not yet have an infrastructure/aws/services/auth stack. Running
+  # the generic deploy before that stack exists fails while copying to the
+  # absent syncwave/auth ECR repository (and would next lack an ECS task
+  # definition). Enable this only after Terraform has provisioned both.
+  rules:
+    - if: $PARENT_SOURCE != "merge_request_event" && $CI_COMMIT_REF_NAME == "main" && $AWS_ROLE_ARN && $AUTH_AWS_READY == "true"
