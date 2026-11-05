@@ -227,7 +227,7 @@ sync:
     include: services/sync/.gitlab-ci.yml
   rules:
     - exists: [services/sync/.gitlab-ci.yml]
-      changes: [services/sync/**/*, contracts/websocket/**/*, contracts/grpc/**/*, ci/**/*]
+      changes: [.gitlab-ci.yml, services/sync/**/*, contracts/websocket/**/*, contracts/grpc/**/*, tests/integration/backend-flow.py, ci/**/*]
 
 frontend:
   extends: .service-trigger
