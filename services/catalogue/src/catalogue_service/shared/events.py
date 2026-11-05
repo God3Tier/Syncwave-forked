@@ -33,12 +33,15 @@ WAVEFORM_PROCESSED_EVENT = "WaveformProcessed"
 WAVEFORM_PROCESSED_ROUTING_KEY = "waveform.processed"
 WAVEFORM_FAILED_EVENT = "WaveformProcessingFailed"
 WAVEFORM_FAILED_ROUTING_KEY = "waveform.failed"
+MOOD_PROCESSED_EVENT = "MoodProcessed"
+MOOD_PROCESSED_ROUTING_KEY = "mood.processed"
 
 PROCESSING_EVENT_TYPES = {
     PROCESSED_EVENT,
     FAILED_EVENT,
     WAVEFORM_PROCESSED_EVENT,
     WAVEFORM_FAILED_EVENT,
+    MOOD_PROCESSED_EVENT,
 }
 
 
@@ -79,6 +82,57 @@ class ProcessingEvent:
     song_id: uuid.UUID
     payload: dict[str, Any]
     correlation_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class MoodProcessed:
+    event_id: str
+    song_id: uuid.UUID
+    mood: str
+
+
+def parse_mood_processed(body: bytes) -> MoodProcessed:
+    """Reads a MoodProcessed event: song_id + mood payload."""
+    try:
+        event = json.loads(body)
+    except ValueError as exc:
+        raise InvalidEvent(f"body is not JSON: {exc}") from exc
+    if not isinstance(event, dict):
+        raise InvalidEvent("body is not a JSON object")
+
+    song_id = _uuid(event.get("song_id"))
+    if song_id is None:
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            song_id = _uuid(payload.get("song_id"))
+    if song_id is None:
+        raise InvalidEvent("song_id is missing or not a UUID")
+
+    event_uuid = _uuid(event.get("event_id"))
+    if event_uuid is None:
+        raise InvalidEvent("event_id is missing or not a UUID", song_id=song_id)
+    event_id = str(event_uuid)
+
+    if event.get("event_type") != MOOD_PROCESSED_EVENT:
+        raise InvalidEvent(
+            f"unexpected event_type {event.get('event_type')!r}",
+            song_id=song_id,
+            event_id=event_id,
+        )
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        raise InvalidEvent(
+            "payload is missing or not an object", song_id=song_id, event_id=event_id
+        )
+    mood = payload.get("mood")
+    if not isinstance(mood, str) or not mood:
+        raise InvalidEvent(
+            "payload.mood must be a non-empty string",
+            song_id=song_id,
+            event_id=event_id,
+        )
+
+    return MoodProcessed(event_id=event_id, song_id=song_id, mood=mood)
 
 
 def parse_song_uploaded(body: bytes) -> SongUploaded:

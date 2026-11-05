@@ -45,6 +45,7 @@ A per-event schema reuses the envelope and constrains the payload:
 | `LyricsProcessingFailed`   | `lyrics.failed`      | Lyrics    | Catalogue                             |
 | `WaveformProcessed`        | `waveform.processed` | Waveform  | Catalogue                             |
 | `WaveformProcessingFailed` | `waveform.failed`    | Waveform  | Catalogue                             |
+| `MoodProcessed`            | `mood.processed`     | Catalogue | Catalogue                             |
 | `SongReady`                | `song.ready`         | Catalogue | Search                                |
 
 Catalogue publishes `SongReady` once `processing_status` becomes `READY`
@@ -57,10 +58,11 @@ The per-event schemas are the source of truth; this is a summary.
 | `event_type`               | Schema                                     | `payload`                                              |
 |----------------------------|--------------------------------------------|--------------------------------------------------------|
 | `SongUploaded`             | `song-uploaded.schema.json` (**proposal**) | `audio_reference` (S3 key), optional `lyrics_reference` (S3 key of an `.lrc` file; absent/null = no lyrics) |
-| `LyricsProcessed`          | `lyrics-processed.schema.json`             | `line_count`                                           |
+| `LyricsProcessed`          | `lyrics-processed.schema.json`             | `line_count`, optional `mood`                          |
 | `LyricsProcessingFailed`   | `lyrics-processing-failed.schema.json`     | `error_code`, `message`, `attempts`                    |
 | `WaveformProcessed`        | `waveform-processed.schema.json`           | `points`, `duration_ms`                                |
 | `WaveformProcessingFailed` | `waveform-processing-failed.schema.json`   | `error_code`, `message`, `attempts`                    |
+| `MoodProcessed`            | `mood-processed.schema.json`               | `song_id`, `mood`                                      |
 
 `song-uploaded.schema.json` was written by the Lyrics/Waveform owner so the consumers could be built before the Upload Service. It now also carries the canonical song metadata (`title`, `artist`) so 
 Catalogue can create the initial Song record. 

@@ -21,6 +21,7 @@
         "LyricsProcessingFailed",
         "WaveformProcessed",
         "WaveformProcessingFailed",
+        "MoodProcessed",
         "SongReady"
       ]
     },

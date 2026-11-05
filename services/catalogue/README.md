@@ -25,6 +25,7 @@ Defined in [`contracts/README.md`](../../contracts/README.md):
 song_id            UUID
 title              string
 artist             string
+mood               string (optional)
 duration_ms        integer
 audio_reference    string    S3 object key, e.g. "audio/<song_id>.mp3"
 lyrics_status      PENDING | PROCESSING | READY | FAILED
@@ -57,6 +58,8 @@ SongUploaded ──> Waveform Service ──> WaveformProcessed ──┘
                       READY ──> SongReady (song.ready) ──> Search indexes it
 ```
 
+Catalogue derives `mood` from `SongUploaded` metadata (title/artist/duration)
+or uses the mood supplied at upload, then publishes `MoodProcessed`.
 Catalogue consumes each processing result, updates the matching stage
 status, recomputes `processing_status`, and — only when it becomes `READY`
 — publishes `SongReady` so Search can make the song discoverable. Duplicate
@@ -73,6 +76,7 @@ Table `songs` in this service's own `catalogue` database (migrations in
 | `song_id`         | primary key, UUID v4                                       |
 | `title`           | song title                                                 |
 | `artist`          | artist name                                                |
+| `mood`            | optional mood label, derived from metadata or supplied at upload |
 | `duration_ms`     | audio duration in milliseconds                             |
 | `audio_reference` | S3 object key, e.g. `audio/<song_id>.mp3`                  |
 | `lyrics_status`   | `PENDING`, `PROCESSING`, `READY` or `FAILED`               |
