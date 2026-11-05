@@ -1,0 +1,40 @@
+# Environment files: real secrets never go into git (each service's
+# .env.example documents its variables)
+.env
+.env.*
+!.env.example
+
+# Java
+target/
+*.class
+.gradle/
+build/
+.mvn/wrapper/maven-wrapper.jar
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+.npm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# CI artefacts produced locally
+.m2/
+*.log
+tests/e2e/artifacts/
+
+# IDEs and OS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

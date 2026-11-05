@@ -1,0 +1,41 @@
+services:
+  audio_transmitter:
+    build: .
+    image: ${IMAGE_REGISTRY:-syncwave}/audio_transmitter:${IMAGE_TAG:-local}
+    ports:
+      - "8081:8081"
+    # Song metadata comes from the Catalogue Service (no database of its own).
+    # The root stack supplies Catalogue and the shared S3-compatible store.
+    environment:
+      CATALOGUE_URL: ${CATALOGUE_URL:-http://catalogue:8080}
+      CATALOGUE_TIMEOUT_SECONDS: ${CATALOGUE_TIMEOUT_SECONDS:-3}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://s3:9000}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-syncwave}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-syncwave-secret}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_ALLOW_HTTP: "true"
+      S3_BUCKET: ${S3_BUCKET:-syncwave-audio}
+    networks:
+      default:
+        aliases:
+          - streaming
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # The tests need no database or running Catalogue: both are faked in the tests.
+  test-audio:
+    build:
+      context: .
+      target: builder
+    profiles: ["test"]
+    volumes:
+      - audio_cargo_target:/app/target
+    command: ["cargo", "test", "--locked"]
+
+volumes:
+  audio_cargo_target:

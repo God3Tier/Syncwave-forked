@@ -1,0 +1,54 @@
+# Child pipeline for the Playlist Service (see ci/service.yml). The root
+# .gitlab-ci.yml starts it when this folder, contracts/grpc or ci/ changes.
+#
+# The contract test reads ../../contracts/api/playlist.openapi.yaml, so it
+# runs from the repository checkout. Changes to that file alone do not start
+# this pipeline; the OpenAPI file is linted by the root `contracts:schemas` job.
+
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: playlist               # = folder name = compose service name = image name
+  SERVICE_DIR: services/playlist
+
+.python:
+  image: python:3.12-slim
+  variables:
+    PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  cache:
+    key: pip-$SERVICE
+    paths:
+      - .cache/pip
+
+lint:
+  extends: [.lint, .python]
+  script:
+    - pip install --quiet "$(grep '^ruff==' requirements-dev.txt)"
+    - ruff check src tests migrations
+    - ruff format --check src tests migrations
+
+contracts:
+  extends: [.lint, .python]
+  script:
+    - pip install --quiet --requirement requirements-dev.txt
+    - >-
+      python ../../ci/scripts/check-python-grpc-bindings.py
+      --proto-root ../../contracts/grpc
+      --output src
+      syncwave/playlist/v1/playlist.proto
+
+test:
+  extends: [.test, .python]
+  variables:
+    TEST_REPORTS: report.xml
+  script:
+    - pip install --quiet --requirement requirements-dev.txt
+    - pytest --junitxml=report.xml
+
+build:
+  extends: .build-image
+
+deploy:
+  extends: .deploy-ecs

@@ -1,0 +1,169 @@
+# SyncWave local development environment (plan.md §17 "Local").
+#
+#   docker compose up -d --build     start everything (first run pulls images)
+#   docker compose ps                every long-running container should be "healthy"
+#   docker compose down -v           stop and DELETE all local data
+#
+# This file contains the shared infrastructure only. Each service has its own
+# compose fragment at services/<name>/compose.yaml, and its owner adds one line
+# to `include:` below (copy services/_template/ to start).
+# Requires Docker Compose v2.24 or newer (`docker compose version`).
+#
+# Local credentials are fixed development values (see README.md). No service
+# needs a third-party secret: the weather API (Open-Meteo) takes no key.
+
+name: syncwave
+
+include:
+  - services/auth/compose.yaml
+  - services/sync/compose.yaml
+  - services/catalogue/compose.yaml
+  - services/search/compose.yaml
+  - services/audio_transmitter/compose.yaml
+  - services/jam/compose.yaml
+  - services/waveform/compose.yaml
+  - services/recommendation/compose.yaml
+  - services/lyrics/compose.yaml
+  - services/playlist/compose.yaml
+  - services/upload/compose.yaml
+  - services/song_request_orchestrator/compose.yaml
+  - frontend/compose.yaml
+
+services:
+  # Single browser-facing entry point: http://localhost:8080
+  # Starts last, once the shared infrastructure has been initialised, so
+  # `docker compose up --wait` returns only when the platform is usable.
+  gateway:
+    image: nginx:1.30-alpine
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infrastructure/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # AMQP broker for the Upload & Process choreography (Scenario 2).
+  # Management UI: http://localhost:15672 (syncwave / syncwave)
+  rabbitmq:
+    image: rabbitmq:4.3-management-alpine
+    hostname: rabbitmq          # RabbitMQ keys its data by node name; a fixed hostname keeps it across restarts
+    environment:
+      RABBITMQ_DEFAULT_USER: syncwave
+      RABBITMQ_DEFAULT_PASS: syncwave
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # One-shot: loads exchanges, queues, retry queues and DLQs from the shared
+  # AMQP contract. Safe to re-run; declarations are idempotent.
+  rabbitmq-init:
+    image: curlimages/curl:8.22.0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/rabbitmq/definitions.json:/definitions.json:ro
+    command: >-
+      --fail-with-body --silent --show-error
+      --retry 10 --retry-all-errors --retry-delay 2
+      --user syncwave:syncwave
+      --header content-type:application/json
+      --data-binary @/definitions.json
+      http://rabbitmq:15672/api/definitions
+    restart: "no"
+
+  # One database per service, see infrastructure/postgres/init.sql.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # Checking over TCP rather than the socket means "healthy" only after
+      # init.sql has finished; during init, Postgres listens on the socket only.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # S3-compatible object storage (RustFS), so nobody needs an AWS account
+  # locally. Services reach it at http://s3:9000 with path-style addressing.
+  # Console: http://localhost:9001/rustfs/console/ (syncwave / syncwave-secret)
+  s3:
+    image: rustfs/rustfs:1.0.1
+    environment:
+      RUSTFS_ACCESS_KEY: syncwave
+      RUSTFS_SECRET_KEY: syncwave-secret
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_OBS_LOG_DIRECTORY: ""   # log to stdout so `docker compose logs s3` works
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: creates the audio bucket (idempotent).
+  s3-init:
+    image: curlimages/curl:8.22.0
+    depends_on:
+      s3:
+        condition: service_healthy
+    command: >-
+      --fail-with-body --silent --show-error
+      --retry 5 --retry-all-errors --retry-delay 2
+      --request PUT
+      --aws-sigv4 aws:amz:us-east-1:s3
+      --user syncwave:syncwave-secret
+      http://s3:9000/syncwave-audio
+    restart: "no"
+
+  # Loads a public-domain demo song so the UI has something to play
+  # (infrastructure/seed/README.md). It publishes SongUploaded like the Upload
+  # Service would; the consumers process it whenever they are up. Re-running
+  # it is harmless, and it never fails the stack.
+  seed:
+    image: curlimages/curl:8.22.0
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./infrastructure/seed:/seed:ro
+      - ./tests/integration/publish-song-uploaded.sh:/scripts/publish-song-uploaded.sh:ro
+    entrypoint: ["sh", "/seed/seed.sh"]
+    restart: "no"
+
+volumes:
+  rabbitmq-data:
+  postgres-data:
+  s3-data:

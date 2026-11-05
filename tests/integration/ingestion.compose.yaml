@@ -1,0 +1,8 @@
+# Layer over root Compose for deterministic item 2 checks. All media, storage,
+# queues, consumers and Catalogue are real; only the external weather is fixed.
+services:
+  recommendation:
+    environment:
+      CATALOGUE_MODE: http
+      WEATHER_MODE: stub
+      WEATHER_STUB_CONDITION: RAIN

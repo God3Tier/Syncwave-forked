@@ -1,0 +1,66 @@
+# Lyrics Service (README.md), included from the root docker-compose.yml.
+# One image runs as two containers: the API behind the gateway, and the AMQP
+# worker, which has no port.
+
+x-lyrics-environment: &lyrics-environment
+  SERVICE_NAME: lyrics
+  PORT: "8080"
+  LOG_LEVEL: INFO
+  # RabbitMQ (topology: contracts/events/README.md). Separate variables, never
+  # a URL with the password inside: in production the password is injected on
+  # its own from AWS Secrets Manager.
+  AMQP_HOST: rabbitmq
+  AMQP_PORT: "5672"
+  AMQP_USER: syncwave
+  AMQP_PASSWORD: syncwave
+  AMQP_PREFETCH: "10"
+  # Postgres: this service's own database (infrastructure/postgres/init.sql)
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: lyrics
+  DB_USER: lyrics
+  DB_PASSWORD: lyrics
+  # S3: RustFS locally. In production the endpoint/path-style/key variables
+  # are not set: the SDK talks to real S3 with the ECS task role's credentials.
+  S3_ENDPOINT_URL: http://s3:9000
+  S3_FORCE_PATH_STYLE: "true"
+  AWS_ACCESS_KEY_ID: syncwave
+  AWS_SECRET_ACCESS_KEY: syncwave-secret
+  AWS_REGION: us-east-1
+  S3_BUCKET: syncwave-audio
+  LYRICS_MAX_BYTES: "262144"
+
+services:
+  lyrics:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/lyrics:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/lyrics:${IMAGE_TAG:-local}
+    environment: *lyrics-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  lyrics-worker:
+    image: ${IMAGE_REGISTRY:-syncwave}/lyrics:${IMAGE_TAG:-local}
+    command: ["python", "-m", "lyrics_service.worker"]
+    environment: *lyrics-environment
+    volumes:
+      - ../../infrastructure/health/check-consumers.py:/app/check-consumers.py:ro
+    healthcheck:
+      test: ["CMD", "python", "/app/check-consumers.py", "lyrics.song-uploaded"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
+    restart: on-failure
+    depends_on:
+      lyrics:
+        condition: service_healthy   # its start-up has applied the migrations
+      rabbitmq-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully

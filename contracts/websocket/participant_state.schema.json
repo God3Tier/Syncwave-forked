@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/participant_state.schema.json",
+  "title": "PARTICIPANT_STATE",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "PARTICIPANT_STATE" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_id", "generation", "connected", "ready"],
+      "properties": {
+        "participant_id": { "type": "string", "format": "uuid" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "connected": { "type": "boolean" },
+        "ready": { "type": "boolean" }
+      }
+    }
+  }
+}

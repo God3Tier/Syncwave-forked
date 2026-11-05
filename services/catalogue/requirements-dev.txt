@@ -1,0 +1,8 @@
+-r requirements.txt
+aiosqlite==0.22.1
+httpx2==2.13.1
+grpcio-tools==1.75.1
+pytest==9.1.1
+pytest-asyncio==1.4.0
+jsonschema==4.26.0
+ruff==0.17.1

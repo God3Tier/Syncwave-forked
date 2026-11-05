@@ -1,0 +1,76 @@
+# Audio Sampler (audio_transmitter)
+
+The streaming HTTP service listens on port `8081` and exposes `GET /health`,
+`GET /cache`, `GET /tracks/{track_id}/stream-info`, `GET /tracks/{track_id}/audio`,
+and a versioned chunk API for browser-owned playback buffers.
+
+`GET /cache` lists the cached songs as `[{"song_id": "...", "bytes": 123}]`; it
+never returns the audio itself.
+
+It has **no database of its own**. Song metadata (the S3 key and the duration)
+comes from the Catalogue Service, which owns it, through `GET /songs/{song_id}`.
+AWS settings are passed through to the service.
+
+## Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CATALOGUE_URL` | `http://catalogue:8080` in Compose | Catalogue Service base URL |
+| `CATALOGUE_TIMEOUT_SECONDS` | `3` | how long to wait for the Catalogue before giving up |
+| `S3_BUCKET` | `syncwave-audio` | bucket containing uploaded audio |
+| `AWS_REGION` and credentials | see `compose.yaml` | S3 access |
+
+Sync calls `stream-info` before preparing playback. The response contains the
+browser-facing `/api/streaming/tracks/{song_id}/audio` URL; Jam continues to
+call Sync and does not depend on Streaming directly.
+
+## Chunk playback and the Catalogue
+
+`GET /tracks/{track_id}/manifest` returns exact sample boundaries and URLs for
+independently decodable ten-second PCM WAV chunks. `GET
+/tracks/{track_id}/chunks/{index}?version=...` generates the derivative with
+FFmpeg on first use, caches it, and limits the process to two concurrent
+conversions. The final chunk may be shorter than ten seconds.
+
+The legacy `GET /tracks/{track_id}/audio/range?start=&end=` endpoint remains for
+the standalone song-request orchestrator. It proportionally slices stored bytes
+and must not be used for browser playback or seeking. It asks the Catalogue for
+the song first:
+
+| Catalogue answers | This endpoint returns |
+|---|---|
+| the song | the audio bytes for the range, read from the Catalogue's `audio_reference` |
+| song does not exist | `404` |
+| unreachable, too slow, an error, or an unreadable answer | `502` (the song may exist; we could not find out) |
+| the song, but `duration_ms` is `null` (Waveform has not measured it yet) | `409` |
+
+## Run
+
+From this directory:
+
+```sh
+make up
+make status
+make logs
+make down
+```
+
+The root Compose stack includes this service as `audio_transmitter`, gives it
+the network alias `streaming`, connects it to the shared S3-compatible store,
+and routes it through the gateway. The alias keeps the public service name
+clear without breaking existing internal callers.
+
+The image name is `${IMAGE_REGISTRY:-syncwave}/audio_transmitter:${IMAGE_TAG:-local}`.
+The service pipeline runs the Rust tests, then uses `ci/service.yml` to build
+and publish a content-tagged image. Branch pipelines for `dev`, `staging`, and
+`main` also promote the corresponding image tag. Staging can therefore use
+the root stack's `--no-build --pull always` command with the registry variables.
+
+## Test
+
+```sh
+make test
+```
+
+This runs the Rust test suite in Docker. It needs no database and no running
+Catalogue: both are faked in the tests. `make clean` removes the cached build volume.

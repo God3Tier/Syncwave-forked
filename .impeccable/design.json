@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T00:00:00+08:00",
+  "title": "Design System: SyncWave",
+  "extensions": {
+    "colorMeta": {
+      "signal-coral": { "role": "primary", "displayName": "Signal Coral", "canonical": "#ff7350", "tonalRamp": ["#38150d", "#6d2819", "#a73e27", "#dd5534", "#ff7350", "#ff9b80", "#ffc1b0", "#ffe5dd"] },
+      "live-mint": { "role": "secondary", "displayName": "Live Mint", "canonical": "#79e3c3", "tonalRamp": ["#0d3127", "#175c4c", "#26866f", "#4dbf9f", "#79e3c3", "#a6edd8", "#cef6ea", "#effcf8"] },
+      "ink": { "role": "neutral", "displayName": "Listening Room Ink", "canonical": "#0b0f0d", "tonalRamp": ["#070a08", "#0b0f0d", "#101512", "#151c18", "#1c2520", "#27332c", "#adb7b0", "#f3f0e8"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page-defining consumer messages." },
+      "headline": { "displayName": "Headline", "purpose": "Page and section hierarchy." },
+      "body": { "displayName": "Body", "purpose": "Descriptions and interface copy." },
+      "label": { "displayName": "Label", "purpose": "Controls, navigation, and status." }
+    },
+    "shadows": [
+      { "name": "action-low", "value": "0 7px 24px rgb(255 115 80 / 0.16)", "purpose": "Primary action and app-mark lift." },
+      { "name": "overlay", "value": "0 24px 80px rgb(0 0 0 / 0.55)", "purpose": "Protected modal focus." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "150ms ease", "purpose": "Hover, focus, and control feedback." },
+      { "name": "page-settle", "value": "220ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Single subtle route-entry settle." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action with coral signal color.",
+      "html": "<button class=\"ds-btn-primary\">Start a Jam</button>",
+      "css": ".ds-btn-primary{min-height:40px;padding:8px 16px;border:0;border-radius:12px;background:#ff7350;color:#0b0f0d;font:700 14px/1.25 'Manrope Variable',sans-serif;box-shadow:0 7px 24px rgb(255 115 80/.16);transition:background-color 150ms,transform 150ms}.ds-btn-primary:hover{background:#ff8a69}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:focus-visible{outline:2px solid #79e3c3;outline-offset:3px}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Large catalogue search field.",
+      "html": "<input class=\"ds-search\" aria-label=\"Search songs or artists\" placeholder=\"Search songs or artists…\">",
+      "css": ".ds-search{height:56px;width:100%;padding:12px 16px;border:1px solid #37443c;border-radius:16px;background:#101512;color:#f3f0e8;font:400 14px/1.5 'Manrope Variable',sans-serif}.ds-search::placeholder{color:#7b887f}.ds-search:focus-visible{outline:2px solid #79e3c3;outline-offset:3px}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "description": "Compact semantic state for ready, live, processing, or failed.",
+      "html": "<span class=\"ds-chip\"><span></span>READY</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid rgb(121 227 195/.25);border-radius:6px;background:rgb(121 227 195/.1);color:#79e3c3;font:700 11px/1.25 'Manrope Variable',sans-serif}.ds-chip span{width:6px;height:6px;border-radius:999px;background:currentColor}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Grouped task or protected contextual surface.",
+      "html": "<section class=\"ds-panel\"><strong>Shared queue</strong><p>Friends can add songs here.</p></section>",
+      "css": ".ds-panel{padding:20px;border:1px solid rgb(55 68 60/.45);border-radius:16px;background:#101512;color:#f3f0e8;font:400 14px/1.5 'Manrope Variable',sans-serif}.ds-panel strong{font-weight:800}.ds-panel p{margin:8px 0 0;color:#adb7b0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Shared Listening Desk",
+    "overview": "SyncWave feels like friends gathered around one carefully made playback surface: immediate, tactile, and focused on the current track and the people sharing it. Familiar streaming conventions make the product understandable on first contact.",
+    "keyCharacteristics": ["Dark ink field with warm type", "Coral action and mint live state", "Deterministic record-sleeve artwork", "Compact lists with restrained tonal containers", "Responsive rail and bottom navigation"],
+    "rules": [
+      { "name": "The Two Signals Rule", "body": "Coral tells people where they can act; mint tells them what is live or ready.", "section": "colors" },
+      { "name": "The Listener Language Rule", "body": "Use mono only for actual data.", "section": "typography" },
+      { "name": "The Flat Library Rule", "body": "Track rows and library items sit directly on the canvas.", "section": "elevation" }
+    ],
+    "dos": ["Do prioritize the current track, queue, and people.", "Do use coral for action and mint for live state.", "Do use tonal layers and dividers for dense music lists."],
+    "donts": ["Don't reintroduce violet/cyan gradients or decorative grids.", "Don't wrap every track or metric in a card.", "Don't expose synchronization telemetry as primary consumer content."]
+  }
+}

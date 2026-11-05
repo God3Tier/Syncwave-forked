@@ -1,0 +1,12 @@
+{
+  "type": "PLAY_AT",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 8,
+  "sent_at_ms": 1791460001000,
+  "payload": {
+    "generation": 1,
+    "target_server_time_ms": 1791460003000,
+    "start_position_ms": 0,
+    "playback_rate": 1.0
+  }
+}

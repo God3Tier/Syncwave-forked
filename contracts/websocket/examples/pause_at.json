@@ -1,0 +1,11 @@
+{
+  "type": "PAUSE_AT",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 12,
+  "sent_at_ms": 1791460010000,
+  "payload": {
+    "generation": 1,
+    "target_server_time_ms": 1791460010500,
+    "position_ms": 7500
+  }
+}

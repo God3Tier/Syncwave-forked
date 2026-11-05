@@ -1,0 +1,1 @@
+"""Generated media dependency contracts."""

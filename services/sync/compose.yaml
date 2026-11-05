@@ -1,0 +1,55 @@
+services:
+  sync:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    image: ${IMAGE_REGISTRY:-syncwave}/sync:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: sync
+      PORT: "8080"
+      GRPC_PORT: "50051"
+      DEPENDENCY_TIMEOUT_MS: "750"
+      CATALOGUE_GRPC_TARGET: ${CATALOGUE_GRPC_TARGET:-catalogue:50051}
+      CATALOGUE_INTERNAL_TOKEN: ${CATALOGUE_INTERNAL_TOKEN:-local-catalogue-internal-token}
+      STREAMING_GRPC_TARGET: ${STREAMING_GRPC_TARGET:-}
+      STREAMING_HTTP_URL: ${STREAMING_HTTP_URL:-http://streaming:8081}
+      STREAMING_INTERNAL_TOKEN: ${STREAMING_INTERNAL_TOKEN:-local-streaming-internal-token}
+      LOG_LEVEL: INFO
+      INTERNAL_SERVICE_TOKEN: local-jam-to-sync-token
+      MOCK_SYNC_TOKEN: local-sync-participant-token
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: sync
+      DB_USER: sync
+      DB_PASSWORD: sync
+      DATABASE_URL: postgresql+asyncpg://sync:sync@postgres:5432/sync
+      START_LEAD_TIME_MS: "2000"
+      PREPARE_TIMEOUT_MS: "10000"
+      CLOCK_SAMPLE_MAX_AGE_MS: "30000"
+      TARGET_SYNC_TOLERANCE_MS: "100"
+      DRIFT_IGNORE_THRESHOLD_MS: "80"
+      DRIFT_SEEK_THRESHOLD_MS: "250"
+      RATE_CORRECTION_PERCENT: "0.02"
+      CORRECTION_LEAD_TIME_MS: "500"
+    expose:
+      - "50051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      catalogue:
+        condition: service_healthy
+      audio_transmitter:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5

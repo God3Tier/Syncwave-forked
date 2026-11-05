@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Streaming API
+  version: 1.0.0
+servers:
+  - url: http://audio_transmitter:8081
+    description: Inside Docker Compose (the gateway adds the /api/streaming prefix)
+security: []
+paths:
+  /tracks/{track_id}/stream-info:
+    get:
+      operationId: getStreamInfo
+      summary: Resolve the compatible whole-track and chunked playback URLs
+      parameters:
+        - $ref: '#/components/parameters/TrackId'
+      responses:
+        '200':
+          description: Browser-facing playback URLs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StreamInfo' }
+  /tracks/{track_id}/manifest:
+    get:
+      operationId: getTrackManifest
+      summary: Describe independently decodable ten-second chunks
+      parameters:
+        - $ref: '#/components/parameters/TrackId'
+      responses:
+        '200':
+          description: Versioned PCM WAV chunk manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrackManifest' }
+        '409': { description: Track metadata is not ready }
+  /tracks/{track_id}/chunks/{chunk_index}:
+    get:
+      operationId: getTrackChunk
+      summary: Return one independently decodable PCM WAV chunk
+      parameters:
+        - $ref: '#/components/parameters/TrackId'
+        - name: chunk_index
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: version
+          in: query
+          required: true
+          description: media_version from the manifest; stale versions are rejected
+          schema: { type: string }
+      responses:
+        '200':
+          description: 44.1 kHz, stereo, 16-bit PCM WAV
+          headers:
+            Cache-Control:
+              schema: { type: string }
+          content:
+            audio/wav:
+              schema: { type: string, format: binary }
+        '404': { description: Track or chunk does not exist }
+        '409': { description: Track is not ready or the media version is stale }
+components:
+  parameters:
+    TrackId:
+      name: track_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    StreamInfo:
+      type: object
+      required: [song_id, stream_url, supports_ranges, manifest_url]
+      properties:
+        song_id: { type: string, format: uuid }
+        stream_url: { type: string }
+        supports_ranges: { type: boolean, const: false }
+        manifest_url: { type: string }
+    TrackManifest:
+      type: object
+      required: [song_id, media_version, duration_ms, chunk_duration_ms, format, sample_rate_hz, channels, bits_per_sample, chunks]
+      properties:
+        song_id: { type: string, format: uuid }
+        media_version: { type: string }
+        duration_ms: { type: integer, minimum: 1 }
+        chunk_duration_ms: { type: integer, const: 10000 }
+        format: { type: string, const: 'audio/wav; codecs=1' }
+        sample_rate_hz: { type: integer, const: 44100 }
+        channels: { type: integer, const: 2 }
+        bits_per_sample: { type: integer, const: 16 }
+        chunks:
+          type: array
+          items:
+            type: object
+            required: [index, start_ms, duration_ms, start_sample, end_sample, url]
+            properties:
+              index: { type: integer, minimum: 0 }
+              start_ms: { type: integer, minimum: 0 }
+              duration_ms: { type: integer, minimum: 1, maximum: 10000 }
+              start_sample: { type: integer, minimum: 0 }
+              end_sample: { type: integer, minimum: 1 }
+              url: { type: string }
