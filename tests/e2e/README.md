@@ -4,8 +4,8 @@
 
 1. Discover, Search, song details, media playback and processed assets.
 2. A real browser upload followed through to Catalogue `READY`.
-3. Guest sign-up, login/logout, and authenticated playlist creation.
-4. Two independent browser contexts joining the same Jam, including a guest.
+3. Account gates for upload and Jam hosting, plus sign-up, login/logout, and playlist creation.
+4. A signed-in host and account-free guest joining the same Jam.
 5. Desktop, tablet, and mobile layouts, screenshots, overflow and browser errors.
 
 Run locally after `docker compose up -d --build --wait`:

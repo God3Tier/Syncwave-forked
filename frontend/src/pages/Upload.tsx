@@ -69,6 +69,7 @@ const inputClass = 'min-h-11 w-full rounded-xl bg-surface-container px-3 py-2.5 
 /** Upload & Process (Scenario 2): the form plus a live view of the choreography. */
 export function Upload() {
   const [title, setTitle] = useState('');
+  const [titleEdited, setTitleEdited] = useState(false);
   const [artist, setArtist] = useState('');
   const [audio, setAudio] = useState<File | null>(null);
   const [lyrics, setLyrics] = useState<File | null>(null);
@@ -94,6 +95,7 @@ export function Upload() {
       setTrackedId(result.song_id);
       setRecent(saveRecent({ song_id: result.song_id, title: result.title, artist: result.artist, at: result.created_at }));
       setTitle('');
+      setTitleEdited(false);
       setArtist('');
       setAudio(null);
       setLyrics(null);
@@ -121,14 +123,17 @@ export function Upload() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Title</span>
-                <input required name="title" autoComplete="off" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder="Midnight Run" />
+                <input required name="title" autoComplete="off" maxLength={200} value={title} onChange={(e) => { setTitle(e.target.value); setTitleEdited(true); }} className={inputClass} placeholder="Midnight Run" />
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Artist</span>
                 <input required name="artist" autoComplete="off" maxLength={200} value={artist} onChange={(e) => setArtist(e.target.value)} className={inputClass} placeholder="Velvet Synth" />
               </label>
             </div>
-            <FileDrop label="Drop an audio file or browse" hint="MP3, WAV, FLAC or OGG · up to 200 MB" accept="audio/*,.mp3,.wav,.flac,.ogg" file={audio} onFile={setAudio} required />
+            <FileDrop label="Drop an audio file or browse" hint="MP3, WAV, FLAC or OGG · up to 200 MB" accept="audio/*,.mp3,.wav,.flac,.ogg" file={audio} onFile={(file) => {
+              setAudio(file);
+              if (file && !titleEdited) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim());
+            }} required />
             <FileDrop label="Lyrics (optional)" hint=".lrc timestamped lyrics" accept=".lrc,text/plain" file={lyrics} onFile={setLyrics} />
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5">

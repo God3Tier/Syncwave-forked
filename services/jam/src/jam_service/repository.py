@@ -1,11 +1,12 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, delete, select, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from jam_service.models import JamState, QueueItem
+from jam_service.models import JamLifecycle, JamState, QueueItem
 
 
 class Base(DeclarativeBase):
@@ -20,6 +21,8 @@ class JamRecord(Base):
     state: Mapped[str] = mapped_column(String(32))
     current_queue_item_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     sync_generation: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    lifecycle_state: Mapped[str] = mapped_column(String(16), default=JamLifecycle.ACTIVE.value)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class JamMemberRecord(Base):
@@ -29,6 +32,7 @@ class JamMemberRecord(Base):
         ForeignKey("jams.jam_id", ondelete="CASCADE"), primary_key=True
     )
     participant_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str | None] = mapped_column(String(24), nullable=True)
 
 
 class JamQueueRecord(Base):
@@ -49,7 +53,10 @@ class PersistedJam:
     current_queue_item_id: UUID | None
     sync_generation: int | None
     participant_ids: list[UUID]
+    participant_usernames: dict[UUID, str]
     queue: list[QueueItem]
+    lifecycle_state: JamLifecycle = JamLifecycle.ACTIVE
+    ended_at: datetime | None = None
 
 
 class JamRepository:
@@ -89,6 +96,13 @@ class JamRepository:
                 participant_ids=[
                     UUID(member.participant_id) for member in members if member.jam_id == row.jam_id
                 ],
+                participant_usernames={
+                    UUID(member.participant_id): (
+                        member.username or f"Member {member.participant_id[:8]}"
+                    )
+                    for member in members
+                    if member.jam_id == row.jam_id
+                },
                 queue=[
                     QueueItem(
                         queue_item_id=UUID(item.queue_item_id),
@@ -99,6 +113,8 @@ class JamRepository:
                     for item in queue
                     if item.jam_id == row.jam_id
                 ],
+                lifecycle_state=JamLifecycle(row.lifecycle_state),
+                ended_at=row.ended_at,
             )
             for row in jams
         ]
@@ -114,6 +130,8 @@ class JamRepository:
                     str(jam.current_queue_item_id) if jam.current_queue_item_id else None
                 ),
                 "sync_generation": jam.sync_generation,
+                "lifecycle_state": jam.lifecycle_state.value,
+                "ended_at": jam.ended_at,
             }
             if row is None:
                 database.add(JamRecord(jam_id=jam_id, **values))
@@ -124,7 +142,11 @@ class JamRepository:
             await database.execute(delete(JamQueueRecord).where(JamQueueRecord.jam_id == jam_id))
             database.add_all(
                 [
-                    JamMemberRecord(jam_id=jam_id, participant_id=str(member_id))
+                    JamMemberRecord(
+                        jam_id=jam_id,
+                        participant_id=str(member_id),
+                        username=jam.participant_usernames.get(member_id),
+                    )
                     for member_id in jam.participant_ids
                 ]
                 + [

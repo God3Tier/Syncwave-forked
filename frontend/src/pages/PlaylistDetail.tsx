@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
 import { createJam, rememberJam } from '../api/jam';
 import { addSong, deletePlaylist, getPlaylist, removeSong, renamePlaylist, reorderSongs, shufflePlaylist } from '../api/playlist';
@@ -157,7 +157,7 @@ export function PlaylistDetail() {
 }
 
 function DropLine({ bottom = false }: { bottom?: boolean }) {
-  return <div className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary shadow-[0_0_8px_rgb(139_92_246/0.8)] ${bottom ? '-bottom-px' : '-top-px'}`} />;
+  return <div className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-primary shadow-[0_0_8px_rgb(255_115_80/0.55)] ${bottom ? '-bottom-px' : '-top-px'}`} />;
 }
 
 export function AddSongsPanel({ existing, onAdd, title = 'Add songs' }: { existing: Set<string>; onAdd: (songId: string) => void; title?: string }) {
@@ -186,11 +186,13 @@ export function AddSongsPanel({ existing, onAdd, title = 'Add songs' }: { existi
       <ul className="space-y-2">
         {results.data?.items.map((item) => (
           <li key={item.song_id} className="flex items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container p-2">
-            <SongArt id={item.song_id} size="sm" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{item.title}</p>
-              <p className="truncate text-xs text-on-surface-variant">{item.artist}</p>
-            </div>
+            <Link to={`/songs/${item.song_id}`} aria-label={`Open ${item.title}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg">
+              <SongArt id={item.song_id} size="sm" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{item.title}</span>
+                <span className="block truncate text-xs text-on-surface-variant">{item.artist}</span>
+              </span>
+            </Link>
             {existing.has(item.song_id) ? (
               <span className="inline-flex items-center gap-1 rounded-lg border border-secondary/30 px-2 py-1 font-mono text-[11px] text-secondary">
                 <Icon name="done" className="text-sm" /> Added

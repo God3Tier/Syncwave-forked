@@ -53,6 +53,17 @@ def test_upload_stores_media_then_publishes_committed_event(
     assert not run(client, dispatch_one, app.state.database.sessions, publisher)
 
 
+def test_upload_requires_a_signed_in_account(
+    client: TestClient, storage: FakeStorage, wav: bytes
+) -> None:
+    client.cookies.clear()
+    response = submit(client, wav)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "HTTP_ERROR"
+    assert response.json()["error"]["message"] == "Sign in to upload music"
+    assert not storage.objects
+
+
 def test_instrumental_and_optional_duration(client: TestClient, wav: bytes) -> None:
     response = client.post(
         "/uploads",

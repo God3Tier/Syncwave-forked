@@ -46,11 +46,11 @@
     font-feature-settings: 'ss01' 1, 'cv11' 1;
   }
   button, input, select, textarea { font: inherit; }
-  button, a, input, select, textarea { touch-action: manipulation; -webkit-tap-highlight-color: rgb(255 115 80 / 0.18); }
+  button, a, input, select, textarea { touch-action: manipulation; -webkit-tap-highlight-color: color-mix(in srgb, var(--color-primary) 18%, transparent); }
   h1, h2 { text-wrap: balance; }
   dialog { overscroll-behavior: contain; }
   button:not(:disabled), [role='button']:not([aria-disabled='true']) { cursor: pointer; }
-  ::selection { background: rgb(255 115 80 / 0.32); color: var(--color-on-surface); }
+  ::selection { background: color-mix(in srgb, var(--color-primary) 32%, transparent); color: var(--color-on-surface); }
   :focus-visible { outline: 2px solid var(--color-secondary); outline-offset: 3px; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -64,8 +64,8 @@
 
 .app-canvas {
   background:
-    radial-gradient(circle at 86% -10%, rgb(121 227 195 / 0.055), transparent 25rem),
-    linear-gradient(180deg, #0d120f 0%, var(--color-background) 22rem);
+    radial-gradient(circle at 86% -10%, color-mix(in srgb, var(--color-secondary) 5.5%, transparent), transparent 25rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-background) 94%, var(--color-secondary)) 0%, var(--color-background) 22rem);
 }
 .page-enter { animation: page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes page-enter { from { opacity: 0.72; transform: translateY(5px); } }

@@ -34,6 +34,7 @@ class Settings:
     audio_max_bytes: int
     lyrics_max_bytes: int
     poll_seconds: int
+    auth_jwks_url: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -46,4 +47,5 @@ class Settings:
             audio_max_bytes=positive_int("UPLOAD_MAX_AUDIO_BYTES", 190 * 1024 * 1024),
             lyrics_max_bytes=positive_int("UPLOAD_MAX_LYRICS_BYTES", 262144),
             poll_seconds=positive_int("UPLOAD_PUBLISH_POLL_SECONDS", 2),
+            auth_jwks_url=os.getenv("AUTH_JWKS_URL", "http://auth:8080/.well-known/jwks.json"),
         )

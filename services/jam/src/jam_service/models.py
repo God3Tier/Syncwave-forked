@@ -17,6 +17,17 @@ class JamState(StrEnum):
     ENDED = "ENDED"
 
 
+class JamLifecycle(StrEnum):
+    ACTIVE = "ACTIVE"
+    ENDED = "ENDED"
+
+
+class JamParticipant(StrictModel):
+    participant_id: UUID
+    username: str
+    role: str
+
+
 class QueueItem(StrictModel):
     queue_item_id: UUID
     song_id: UUID
@@ -28,10 +39,12 @@ class JamResponse(StrictModel):
     jam_id: UUID
     owner_id: UUID
     participant_ids: list[UUID]
+    participants: list[JamParticipant]
     queue: list[QueueItem]
     current_queue_item_id: UUID | None
     sync_generation: int | None
     state: JamState
+    lifecycle_state: JamLifecycle
     member_token: str | None = None
     member_id: UUID | None = None
 
@@ -78,3 +91,7 @@ class ReadinessStatusResponse(StrictModel):
     decision_required: bool
     ready_participant_ids: list[UUID]
     unready_participant_ids: list[UUID]
+
+
+class TransferOwnershipRequest(StrictModel):
+    participant_id: UUID

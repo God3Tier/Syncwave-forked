@@ -60,7 +60,7 @@ function WeatherToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) 
       aria-checked={on === value}
       onClick={() => onChange(value)}
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-xs transition-colors ${
-        on === value ? 'bg-secondary/15 text-secondary shadow-[0_0_12px_rgb(58_223_250/0.12)]' : 'text-on-surface-variant hover:text-on-surface'
+        on === value ? 'bg-secondary/15 text-secondary shadow-[0_0_12px_rgb(121_227_195/0.12)]' : 'text-on-surface-variant hover:text-on-surface'
       }`}
     >
       <Icon name={icon} className="text-base" />
@@ -109,7 +109,9 @@ function RecommendationCard({ item, queue }: { item: Recommendation; queue: stri
   return (
     <article className="group flex w-44 shrink-0 flex-col gap-3 md:w-48">
       <div className="relative">
-        <SongArt id={item.song_id} size="lg" />
+        <Link to={`/songs/${item.song_id}`} aria-label={`Open ${item.title}`} className="block rounded-2xl">
+          <SongArt id={item.song_id} size="lg" />
+        </Link>
         <button
           type="button"
           onClick={() => (current ? player.toggle() : player.playQueue(queue, queue.indexOf(item.song_id)))}
