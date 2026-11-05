@@ -11,6 +11,6 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl libpq5 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/song_request_orchestrator /usr/local/bin/song_request_orchestrator
+COPY --from=builder /app/target/release/orchestrator /usr/local/bin/orchestrator
 EXPOSE 8080
-CMD ["song_request_orchestrator"]
+CMD ["orchestrator"]
