@@ -109,11 +109,11 @@ class Api:
         )
 
 
-def audio_fixture(frequency_hz: float = 440) -> bytes:
+def audio_fixture(frequency_hz: float = 440, duration_ms: int = DURATION_MS) -> bytes:
     rate = 22050
     pcm = b"".join(
         struct.pack("<h", round(8000 * math.sin(2 * math.pi * frequency_hz * sample / rate)))
-        for sample in range(rate * DURATION_MS // 1000)
+        for sample in range(rate * duration_ms // 1000)
     )
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as audio:
@@ -177,7 +177,13 @@ def wait_for(api: Api, path: str, key: str, target: str, deadline: float) -> Jso
 
 
 def run(
-    api: Api, timeout: float, report: Json, *, audio: bytes | None = None, mood: str | None = None
+    api: Api,
+    timeout: float,
+    report: Json,
+    *,
+    audio: bytes | None = None,
+    mood: str | None = None,
+    expected_duration_ms: int = DURATION_MS,
 ) -> None:
     print("Checking required services through the gateway...", flush=True)
     for path in (
@@ -212,11 +218,24 @@ def run(
     )
     if mood is not None:
         require(receipt.get("mood") == mood.strip().lower(), "Upload mood was not normalized")
-    verify(api, timeout, report, audio=audio, mood=mood)
+    verify(
+        api,
+        timeout,
+        report,
+        audio=audio,
+        mood=mood,
+        expected_duration_ms=expected_duration_ms,
+    )
 
 
 def verify(
-    api: Api, timeout: float, report: Json, *, audio: bytes, mood: str | None = None
+    api: Api,
+    timeout: float,
+    report: Json,
+    *,
+    audio: bytes,
+    mood: str | None = None,
+    expected_duration_ms: int = DURATION_MS,
 ) -> None:
     """Check an already submitted fixture, including one recovered from a failure."""
     song_id, event_id, title = report["song_id"], report["event_id"], report["title"]
@@ -242,8 +261,8 @@ def verify(
         require(song.get(field) == "READY", f"Catalogue {field} is not READY")
     duration = song.get("duration_ms")
     require(
-        isinstance(duration, int) and abs(duration - DURATION_MS) <= 100,
-        f"Catalogue duration should be about {DURATION_MS} ms, got {duration}",
+        isinstance(duration, int) and abs(duration - expected_duration_ms) <= 100,
+        f"Catalogue duration should be about {expected_duration_ms} ms, got {duration}",
     )
     print("PASS Catalogue metadata, processing state and measured duration", flush=True)
 
@@ -270,7 +289,7 @@ def verify(
     )
     require(
         isinstance(waveform.get("duration_ms"), int)
-        and abs(waveform["duration_ms"] - DURATION_MS) <= 100,
+        and abs(waveform["duration_ms"] - expected_duration_ms) <= 100,
         "Waveform duration does not match the generated audio",
     )
     print("PASS waveform generated from uploaded audio", flush=True)
