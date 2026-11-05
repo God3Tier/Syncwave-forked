@@ -24,12 +24,13 @@ from datetime import UTC, datetime
 from typing import Annotated, Self
 
 import httpx2
-from fastapi import FastAPI, Query, Request, Response
+from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.exceptions import HTTPException
 
+from playlist_service.auth import Account, AuthVerifier, check_request_origin, current_account
 from playlist_service.catalogue import CatalogueClient, HttpCatalogue, NoCatalogue
 from playlist_service.config import Settings, configure_logging, get_settings
 from playlist_service.db import (
@@ -61,6 +62,7 @@ STATUS_FOR_ERROR: dict[type[PlaylistError], int] = {
 PlaylistName = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)
 ]
+CurrentAccount = Annotated[Account, Depends(current_account)]
 
 
 class ErrorDetail(BaseModel):
@@ -73,7 +75,8 @@ class ErrorBody(BaseModel):
 
 
 class CreatePlaylistRequest(BaseModel):
-    owner_id: uuid.UUID
+    model_config = ConfigDict(extra="forbid")
+
     name: PlaylistName
 
 
@@ -177,6 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
     database = Database(settings.database_url)
     app.state.repository = PlaylistRepository(database.sessions)
+    app.state.auth_verifier = AuthVerifier(settings.auth_jwks_url)
     grpc_server = None
     if settings.grpc_port > 0:
         from playlist_service.grpc_service import create_grpc_server
@@ -238,19 +242,24 @@ async def health() -> dict[str, str]:
     status_code=201,
     responses={400: {"model": ErrorBody, "description": "Invalid body"}},
 )
-async def create_playlist(body: CreatePlaylistRequest, request: Request) -> Playlist:
-    return Playlist.from_data(await repository(request).create(body.owner_id, body.name))
+async def create_playlist(
+    body: CreatePlaylistRequest,
+    request: Request,
+    account: CurrentAccount,
+) -> Playlist:
+    check_request_origin(request)
+    return Playlist.from_data(await repository(request).create(account.user_id, body.name))
 
 
 @app.get("/playlists", responses={400: {"model": ErrorBody}})
 async def list_playlists(
     request: Request,
-    owner_id: uuid.UUID,
+    account: CurrentAccount,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: str | None = None,
 ) -> PlaylistPage:
     offset = decode_cursor(cursor) if cursor else 0
-    summaries, has_more = await repository(request).list_for_owner(owner_id, limit, offset)
+    summaries, has_more = await repository(request).list_for_owner(account.user_id, limit, offset)
     return PlaylistPage(
         items=[PlaylistSummary.from_data(summary) for summary in summaries],
         next_cursor=encode_cursor(offset + limit) if has_more else None,
@@ -273,8 +282,13 @@ async def get_playlist(playlist_id: uuid.UUID, request: Request) -> Playlist:
     responses={400: {"model": ErrorBody}, 404: {"model": ErrorBody}},
 )
 async def rename_playlist(
-    playlist_id: uuid.UUID, body: RenamePlaylistRequest, request: Request
+    playlist_id: uuid.UUID,
+    body: RenamePlaylistRequest,
+    request: Request,
+    account: CurrentAccount,
 ) -> Playlist:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     return Playlist.from_data(await repository(request).rename(playlist_id, body.name))
 
 
@@ -283,7 +297,13 @@ async def rename_playlist(
     status_code=204,
     responses={400: {"model": ErrorBody}, 404: {"model": ErrorBody}},
 )
-async def delete_playlist(playlist_id: uuid.UUID, request: Request) -> Response:
+async def delete_playlist(
+    playlist_id: uuid.UUID,
+    request: Request,
+    account: CurrentAccount,
+) -> Response:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     await repository(request).delete(playlist_id)
     return Response(status_code=204)
 
@@ -297,7 +317,14 @@ async def delete_playlist(playlist_id: uuid.UUID, request: Request) -> Response:
         502: {"model": ErrorBody, "description": "The Catalogue could not be asked"},
     },
 )
-async def add_song(playlist_id: uuid.UUID, body: AddSongRequest, request: Request) -> Playlist:
+async def add_song(
+    playlist_id: uuid.UUID,
+    body: AddSongRequest,
+    request: Request,
+    account: CurrentAccount,
+) -> Playlist:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     # Only adding a song needs the Catalogue; every other endpoint works without it.
     # The playlist is looked up first so an unknown playlist is always PLAYLIST_NOT_FOUND.
     if await repository(request).get(playlist_id) is None:
@@ -313,8 +340,13 @@ async def add_song(playlist_id: uuid.UUID, body: AddSongRequest, request: Reques
     responses={400: {"model": ErrorBody}, 404: {"model": ErrorBody}},
 )
 async def reorder_songs(
-    playlist_id: uuid.UUID, body: ReorderSongsRequest, request: Request
+    playlist_id: uuid.UUID,
+    body: ReorderSongsRequest,
+    request: Request,
+    account: CurrentAccount,
 ) -> Playlist:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     return Playlist.from_data(await repository(request).reorder(playlist_id, body.song_ids))
 
 
@@ -322,7 +354,14 @@ async def reorder_songs(
     "/playlists/{playlist_id}/songs/{song_id}",
     responses={400: {"model": ErrorBody}, 404: {"model": ErrorBody}},
 )
-async def remove_song(playlist_id: uuid.UUID, song_id: uuid.UUID, request: Request) -> Playlist:
+async def remove_song(
+    playlist_id: uuid.UUID,
+    song_id: uuid.UUID,
+    request: Request,
+    account: CurrentAccount,
+) -> Playlist:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     return Playlist.from_data(await repository(request).remove_song(playlist_id, song_id))
 
 
@@ -330,5 +369,19 @@ async def remove_song(playlist_id: uuid.UUID, song_id: uuid.UUID, request: Reque
     "/playlists/{playlist_id}/shuffle",
     responses={400: {"model": ErrorBody}, 404: {"model": ErrorBody}},
 )
-async def shuffle_playlist(playlist_id: uuid.UUID, request: Request) -> Playlist:
+async def shuffle_playlist(
+    playlist_id: uuid.UUID,
+    request: Request,
+    account: CurrentAccount,
+) -> Playlist:
+    check_request_origin(request)
+    await require_playlist_owner(repository(request), playlist_id, account)
     return Playlist.from_data(await repository(request).shuffle(playlist_id))
+
+
+async def require_playlist_owner(
+    playlists: PlaylistRepository, playlist_id: uuid.UUID, account: Account
+) -> None:
+    data = await playlists.get(playlist_id)
+    if data is None or data.owner_id != account.user_id:
+        raise PlaylistNotFound(f"No playlist with id {playlist_id}")

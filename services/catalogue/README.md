@@ -150,8 +150,8 @@ delivery ends in exactly one of:
 
 - REST contract: [`contracts/api/catalogue.openapi.yaml`](../../contracts/api/catalogue.openapi.yaml)
   (linted by CI).
-- The proposed gRPC contract
-  (`contracts/grpc/syncwave/catalogue/v1/catalogue.proto`) does not exist yet;
-  Sync currently uses a deterministic local fake for Catalogue queries until
-  it lands.
+- Catalogue implements the shared media query gRPC contract at
+  `contracts/grpc/syncwave/media/v1/media.proto` on port `50051`. Root Compose
+  configures Sync to call `catalogue:50051`; isolated tests still use local
+  fakes so they do not require another service.
 - Mock/internal tokens are local-development values only.

@@ -14,7 +14,8 @@ lyrics with timestamps in seconds, and waveform peaks with their duration and
 per-peak midpoint timestamps in milliseconds. The timestamp positions are
 derived from the waveform service's evenly spaced peaks and duration.
 
-The endpoint is protected by Cognito whenever authentication is configured.
+The endpoint uses the same account session as the SyncWave frontend whenever
+authentication is configured.
 Upstream base URLs can be overridden with `PLAYLIST_SERVICE_URL`,
 `AUDIO_SERVICE_URL`, `LYRICS_SERVICE_URL`, and `WAVEFORM_SERVICE_URL`. Defaults
 are `http://playlist:8080`, `http://audio_transmitter:8081`,
@@ -27,7 +28,7 @@ Call the initial `/play` endpoint first. Subsequent calls resume from the
 buffered offset and stop at the song duration when waveform metadata provides
 it. The response contains the updated playback buffers. Sessions are held in
 memory per client and playlist, so they reset when the service restarts. With
-Cognito enabled the client key is the verified user ID; with Cognito disabled,
+With Auth enabled the client key is the verified user ID; with Auth disabled,
 send the same stable `X-Client-ID` header to both playback requests.
 
 ## Run
@@ -55,22 +56,21 @@ it.
 
 ## Security / Authentication
 
-The service optionally verifies JWTs issued by Amazon Cognito through an
-actix-web middleware (`src/security`). Authentication is enabled when the
-following environment variables are set; otherwise the service runs
-unauthenticated (suitable for local development):
+The service verifies the RS256 session JWT issued by the project's Auth
+Service. Authentication is enabled when `AUTH_JWKS_URL`
+is configured; the included Compose file points it directly at the Auth
+service on the root Compose network. The orchestrator remains available
+through the gateway at `/api/orchestrator/*`.
 
-- `COGNITO_REGION` (or `AWS_REGION`) - AWS region, **required**.
-- `COGNITO_USER_POOL_ID` - **required**.
-- `COGNITO_CLIENT_ID` - **required**.
-- `COGNITO_DOMAIN` - optional Cognito domain prefix, enables token issuance.
-- `COGNITO_ISSUER` - optional issuer URL override.
-- `COGNITO_JWKS_TTL_SECS` - JWKS cache TTL in seconds (default `3600`).
+- `AUTH_JWKS_URL` - Auth's public signing-key endpoint.
+- `AUTH_ISSUER` - expected issuer (default `syncwave-auth`).
+- `AUTH_AUDIENCE` - expected audience (default `syncwave`).
+- `AUTH_JWKS_TTL_SECS` - key refresh interval (default `3600`).
 
-When enabled, every route except `GET /health` requires an
-`Authorization: Bearer <token>` header. Tokens are verified against Cognito's
-JWKS endpoint (`.../.well-known/jwks.json`): signature (RS256), issuer,
-audience (`COGNITO_CLIENT_ID`) and expiration are validated.
+Every route except `GET /health` accepts the frontend's HttpOnly
+`syncwave_session` cookie. `Authorization: Bearer <token>` is also supported
+for service clients. Signature, issuer, audience, expiry, issue time, and
+subject are validated against Auth's JWKS.
 
 The middleware is built with actix-web's middleware traits (`Transform` and
 `Service`) and the authenticated user ID is passed to handlers as a request
@@ -84,15 +84,10 @@ async fn me(user_id: UserId) -> impl Responder {
 }
 ```
 
-`GET /me` is an example protected route that returns the caller's Cognito user
-ID. The full set of verified claims is also available via the `CognitoClaims`
-extractor.
-
-Tokens can be obtained with `CognitoClient::authenticate_password`, which calls
-the Cognito token endpoint
-(`https://{domain}.auth.{region}.amazoncognito.com/oauth2/token`) using the
-`password` grant. The app client must allow the `PASSWORD` grant and must not
-have a client secret.
+`GET /me` is an example protected route that returns the caller's SyncWave
+account ID. The full set of verified claims is available through the
+`AuthClaims` extractor. Login and signup remain owned by `/api/auth/login` and
+`/api/auth/signup`; the orchestrator does not handle passwords.
 
 ## Test
 

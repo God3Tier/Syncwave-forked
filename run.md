@@ -140,9 +140,12 @@ closes inactive WebSockets after 45 seconds. Owner actions are sent to Jam's
 HTTP playback endpoints; browsers must not send owner commands directly to
 Sync.
 
-There is not yet a production Jam frontend. The APIs, WebSockets, automated
-tests, and Sync demo harness are available, but a user-facing room screen
-still needs to be connected to them.
+The production frontend exposes this flow at `/jam` and `/jam/{jam_id}`. It
+connects room membership and queue updates to Jam, creates a browser
+`AudioContext` after the required user gesture, then connects to Sync for
+clock sampling, preparation, readiness, scheduled playback, and correction.
+The local Playwright scenario exercises independent owner/member browsers,
+shared-queue search/add, audio activation, and owner-started playback.
 
 ## Run the automated tests
 
@@ -170,12 +173,8 @@ py -3.12 -m venv .venv
 Set-Location ../..
 ```
 
-Current expected result:
-
-```text
-Sync: 46 tests passed
-Jam:  8 tests passed
-```
+Both suites must pass before integration testing. Avoid documenting a fixed
+test count here because the suites grow independently.
 
 ## Run without Docker
 
@@ -205,10 +204,12 @@ $env:SYNC_GRPC_TARGET = "127.0.0.1:50051"
 When running this way, use `http://127.0.0.1:18082` as the Jam base URL and
 `http://127.0.0.1:18081` as the Sync base URL.
 
-## Current media limitation
+## Media delivery
 
-Catalogue and Streaming have not yet implemented the shared UUID-based media
-gRPC contract. Sync therefore uses deterministic media fakes when
-`CATALOGUE_GRPC_TARGET` and `STREAMING_GRPC_TARGET` are blank. Jam-to-Sync
-coordination works, but real audio streaming requires those services to adopt
-`contracts/grpc/syncwave/media/v1/media.proto`.
+Compose resolves Catalogue through the shared media gRPC contract at
+`catalogue:50051` and resolves Streaming metadata through
+`http://streaming:8081`. `STREAMING_GRPC_TARGET` remains optional for a future
+gRPC adapter. Solo browser playback uses Streaming's versioned manifest and
+independently decodable ten-second WAV chunks to maintain the adaptive
+nine-position queue buffer. The whole-track URL remains available to the
+clock-synchronised Jam engine; byte-range delivery remains unsupported.

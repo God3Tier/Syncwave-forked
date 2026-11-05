@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use actix_web::{App, Error, HttpResponse, Responder, body::to_bytes, http::StatusCode, test, web};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
-use super::{CognitoAuth, CognitoClaims, CognitoClient, CognitoConfig, UserId};
+use super::{AuthClaims, AuthClient, AuthConfig, SessionAuth, UserId};
 
 /// Throwaway 2048-bit RSA key pair used to sign and verify test tokens.
 /// Test-only; never used by the service itself.
@@ -52,27 +52,24 @@ AQIDAQAB
 ";
 
 const TEST_KID: &str = "syncwave-test-key";
-const TEST_CLIENT_ID: &str = "test-client-id";
-const TEST_ISSUER: &str = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TEST";
+const TEST_AUDIENCE: &str = "syncwave";
+const TEST_ISSUER: &str = "syncwave-auth";
 
-/// A Cognito client whose JWKS cache holds the test public key.
-fn test_client() -> Arc<CognitoClient> {
-    let config = CognitoConfig {
-        region: "us-east-1".to_owned(),
-        user_pool_id: "us-east-1_TEST".to_owned(),
-        client_id: TEST_CLIENT_ID.to_owned(),
+/// An Auth client whose JWKS cache holds the test public key.
+fn test_client() -> Arc<AuthClient> {
+    let config = AuthConfig {
+        audience: TEST_AUDIENCE.to_owned(),
         issuer: TEST_ISSUER.to_owned(),
         jwks_url: "https://example.invalid/.well-known/jwks.json".to_owned(),
-        token_endpoint: None,
         jwks_ttl: Duration::from_secs(3600),
     };
-    let client = CognitoClient::new(config).expect("test cognito client");
+    let client = AuthClient::new(config).expect("test auth client");
     client.insert_test_key(TEST_KID, TEST_PUBLIC_KEY.as_bytes());
     Arc::new(client)
 }
 
-fn test_auth() -> CognitoAuth {
-    CognitoAuth::new(Some(test_client())).exclude("/health")
+fn test_auth() -> SessionAuth {
+    SessionAuth::new(Some(test_client())).exclude("/health")
 }
 
 /// Signs a token with the test private key.
@@ -82,19 +79,12 @@ fn sign_token(sub: &str, exp_offset_secs: i64, kid: &str) -> String {
         .expect("system clock before unix epoch")
         .as_secs() as i64;
 
-    let claims = CognitoClaims {
+    let claims = AuthClaims {
         sub: sub.to_owned(),
-        aud: TEST_CLIENT_ID.to_owned(),
+        aud: TEST_AUDIENCE.to_owned(),
         iss: TEST_ISSUER.to_owned(),
         exp: (now + exp_offset_secs) as u64,
-        iat: Some(now as u64),
-        auth_time: None,
-        token_use: "access".to_owned(),
-        username: Some(sub.to_owned()),
-        email: Some(format!("{sub}@example.com")),
-        groups: Vec::new(),
-        scope: Some("openid".to_owned()),
-        client_id: Some(TEST_CLIENT_ID.to_owned()),
+        iat: now as u64,
         jti: None,
     };
 
@@ -113,8 +103,32 @@ fn test_token(sub: &str, exp_offset_secs: i64) -> String {
     sign_token(sub, exp_offset_secs, TEST_KID)
 }
 
+/// Signs the minimal claim set emitted by SyncWave Auth.
+fn syncwave_token(sub: &str, exp_offset_secs: i64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_secs() as i64;
+    let claims = serde_json::json!({
+        "sub": sub,
+        "aud": "syncwave",
+        "iss": "syncwave-auth",
+        "iat": now,
+        "exp": now + exp_offset_secs,
+        "jti": "test-session"
+    });
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(TEST_KID.to_owned());
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(TEST_PRIVATE_KEY.as_bytes()).expect("test private key"),
+    )
+    .expect("failed to sign SyncWave test token")
+}
+
 /// Routes used by the tests: `/health` has no extractors, `/whoami` takes the
-/// [`UserId`] parameter and `/claims` takes the [`CognitoClaims`] parameter.
+/// [`UserId`] parameter and `/claims` takes the [`AuthClaims`] parameter.
 fn configure_test_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/whoami", web::get().to(whoami))
         .route("/claims", web::get().to(claims_sub))
@@ -125,7 +139,7 @@ async fn whoami(user_id: UserId) -> impl Responder {
     HttpResponse::Ok().body(user_id.as_str().to_owned())
 }
 
-async fn claims_sub(claims: CognitoClaims) -> impl Responder {
+async fn claims_sub(claims: AuthClaims) -> impl Responder {
     HttpResponse::Ok().body(claims.sub)
 }
 
@@ -151,6 +165,27 @@ async fn valid_token_passes_user_id_to_the_handler() {
     let req = test::TestRequest::get()
         .uri("/whoami")
         .insert_header(("Authorization", format!("Bearer {token}")))
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = to_bytes(resp.into_body()).await.expect("response body");
+    assert_eq!(&body[..], b"user-123");
+}
+
+#[actix_web::test]
+async fn syncwave_session_cookie_passes_user_id_to_the_handler() {
+    let app = test::init_service(
+        App::new()
+            .wrap(test_auth())
+            .configure(configure_test_routes),
+    )
+    .await;
+
+    let token = syncwave_token("user-123", 3600);
+    let req = test::TestRequest::get()
+        .uri("/whoami")
+        .insert_header(("Cookie", format!("syncwave_session={token}")))
         .to_request();
 
     let resp = test::call_service(&app, req).await;
@@ -297,10 +332,10 @@ async fn excluded_path_does_not_require_a_token() {
 }
 
 #[actix_web::test]
-async fn passes_through_when_cognito_is_not_configured() {
+async fn passes_through_when_auth_is_not_configured() {
     let app = test::init_service(
         App::new()
-            .wrap(CognitoAuth::new(None))
+            .wrap(SessionAuth::new(None))
             .configure(configure_test_routes),
     )
     .await;
@@ -315,7 +350,7 @@ async fn passes_through_when_cognito_is_not_configured() {
 async fn user_id_extractor_rejects_when_unauthenticated() {
     let app = test::init_service(
         App::new()
-            .wrap(CognitoAuth::new(None))
+            .wrap(SessionAuth::new(None))
             .configure(configure_test_routes),
     )
     .await;

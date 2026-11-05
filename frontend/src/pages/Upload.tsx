@@ -52,7 +52,7 @@ function FileDrop({ label, hint, accept, file, onFile, required }: { label: stri
         setOver(false);
         onFile(event.dataTransfer.files[0] ?? null);
       }}
-      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+      className={`flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-6 text-center transition-colors ${
         over ? 'border-primary bg-primary/5' : file ? 'border-secondary/50 bg-secondary/5' : 'border-outline-variant/50 hover:border-outline'
       }`}
     >
@@ -64,7 +64,7 @@ function FileDrop({ label, hint, accept, file, onFile, required }: { label: stri
   );
 }
 
-const inputClass = 'w-full rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-2.5 text-sm placeholder:text-outline focus:border-primary focus:outline-none';
+const inputClass = 'min-h-11 w-full rounded-xl bg-surface-container px-3 py-2.5 text-sm ring-1 ring-outline-variant/45 placeholder:text-outline focus:ring-secondary focus:outline-none';
 
 /** Upload & Process (Scenario 2): the form plus a live view of the choreography. */
 export function Upload() {
@@ -110,19 +110,22 @@ export function Upload() {
 
   return (
     <Page wide>
-      <h1 className="mb-6 font-headline text-3xl font-bold tracking-tight">Upload</h1>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <h2 className="mb-5 font-headline text-lg font-semibold">Upload a song</h2>
+      <header className="mb-8 border-b border-outline-variant/35 pb-7">
+        <h1 className="text-3xl font-extrabold tracking-[-0.035em]">Bring your own track</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-on-surface-variant">Add audio to the shared catalogue. SyncWave prepares timed lyrics and a waveform in the background.</p>
+      </header>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(22rem,0.95fr)]">
+        <Card className="p-6">
+          <h2 className="mb-5 text-lg font-extrabold">Track details</h2>
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Title</span>
-                <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder="Midnight Run" />
+                <input required name="title" autoComplete="off" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} placeholder="Midnight Run" />
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Artist</span>
-                <input required maxLength={200} value={artist} onChange={(e) => setArtist(e.target.value)} className={inputClass} placeholder="Velvet Synth" />
+                <input required name="artist" autoComplete="off" maxLength={200} value={artist} onChange={(e) => setArtist(e.target.value)} className={inputClass} placeholder="Velvet Synth" />
               </label>
             </div>
             <FileDrop label="Drop an audio file or browse" hint="MP3, WAV, FLAC or OGG · up to 200 MB" accept="audio/*,.mp3,.wav,.flac,.ogg" file={audio} onFile={setAudio} required />
@@ -130,7 +133,7 @@ export function Upload() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Mood (optional)</span>
-                <select value={mood} onChange={(e) => setMood(e.target.value as Mood | '')} className={inputClass}>
+                <select name="mood" autoComplete="off" value={mood} onChange={(e) => setMood(e.target.value as Mood | '')} className={inputClass}>
                   <option value="">No mood</option>
                   {MOODS.map((m) => (
                     <option key={m} value={m}>
@@ -141,7 +144,7 @@ export function Upload() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-on-surface-variant">Duration in ms (optional)</span>
-                <input type="number" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass} placeholder="Measured automatically if blank" />
+                <input type="number" name="duration-ms" autoComplete="off" min={1} value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass} placeholder="Measured automatically if blank" />
               </label>
             </div>
             <p className="-mt-2 text-xs text-on-surface-variant">Recommendations put songs whose mood suits the listener's weather first.</p>
@@ -150,7 +153,7 @@ export function Upload() {
             </Button>
             {progress !== null && (
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
-                <div className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all" style={{ width: `${progress * 100}%` }} />
+                <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${progress * 100}%` }} />
               </div>
             )}
             {error !== undefined && (
@@ -165,13 +168,13 @@ export function Upload() {
         <div className="space-y-6">
           {trackedId ? <ProcessingCard key={trackedId} songId={trackedId} /> : (
             <Card>
-              <h2 className="font-headline text-lg font-semibold">Processing</h2>
+              <h2 className="text-lg font-extrabold">Processing</h2>
               <p className="mt-2 text-sm text-on-surface-variant">After an upload, its lyrics and waveform are processed here in parallel.</p>
             </Card>
           )}
           {recent.length > 0 && (
             <Card>
-              <h2 className="mb-3 font-headline text-base font-semibold">Recent uploads</h2>
+              <h2 className="mb-3 text-base font-extrabold">Recent uploads</h2>
               <ul className="space-y-1">
                 {recent.map((item) => (
                   <li key={item.song_id}>

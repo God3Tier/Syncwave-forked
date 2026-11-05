@@ -1,7 +1,7 @@
 # SyncWave parent pipeline.
 #
 # This file decides WHAT runs; it builds nothing itself.
-#   validate      contract checks, only when contracts/ changes
+#   validate      contract checks and deployed-service CI test coverage checks
 #   test          GitLab SAST + secret detection over the whole repo (once, not per service)
 #   services      one child pipeline per service, only when that service, one of
 #                 its contracts, or the shared CI (ci/) changed
@@ -47,6 +47,20 @@ default:
 
 # ── validate: shared contracts ──────────────────────────────────────────────
 
+ci:test-coverage:
+  stage: validate
+  image: python:3.14-slim
+  script:
+    - pip install --quiet PyYAML==6.0.3
+    - python ci/scripts/check-test-coverage.py --report tests/integration/ci-test-coverage-report.json
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - tests/integration/ci-test-coverage-report.json
+  rules:
+    - changes: [.gitlab-ci.yml, docker-compose.yml, services/**/*, frontend/**/*, ci/**/*]
+
 contracts:proto:
   stage: validate
   image:
@@ -84,6 +98,16 @@ contracts:schemas:
     PARENT_SOURCE: $CI_PIPELINE_SOURCE
   trigger:
     strategy: depend      # this job, and the MR, fail if the child pipeline fails
+
+auth:
+  extends: .service-trigger
+  variables:
+    CONTRACT_PATHS: contracts/api
+  trigger:
+    include: services/auth/.gitlab-ci.yml
+  rules:
+    - exists: [services/auth/.gitlab-ci.yml]
+      changes: [services/auth/**/*, contracts/api/auth.openapi.yaml, ci/**/*]
 
 catalogue:
   extends: .service-trigger
@@ -230,13 +254,26 @@ integration:
     IMAGE_REGISTRY: $CI_REGISTRY_IMAGE
     IMAGE_TAG: staging
   script:
+    # Host-side fault runner uses only Python's standard library and Docker CLI.
+    - apk add --no-cache python3
     - echo "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - docker compose up --detach --no-build --pull always --quiet-pull --wait --wait-timeout 300
+    # Real Catalogue/media/consumers; fixed weather keeps mood checks deterministic.
+    - docker compose -f docker-compose.yml -f tests/integration/ingestion.compose.yaml up --detach --no-build --pull always --quiet-pull --wait --wait-timeout 300
     - sh tests/integration/smoke.sh docker
-    # Scenario 2 end to end, with the Python already in the Upload image.
-    - docker compose exec -T upload python - --base-url http://gateway:8080 < tests/integration/upload-flow.py
+    # Item 2: upload, Search, duplicate delivery, mood ranking and processing recovery.
+    - docker compose cp tests/integration/upload-flow.py upload:/tmp/upload-flow.py
+    - docker compose cp tests/integration/ingestion-flow.py upload:/tmp/ingestion-flow.py
+    - docker compose exec -T upload python /tmp/ingestion-flow.py --report /tmp/ingestion-flow-report.json
+    # Item 4: generated uploads -> Playlist -> Jam -> two-client Sync scheduling.
+    - docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
+    - docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
+    - docker compose exec -T jam python /tmp/backend-flow.py --check-reconnect --report /tmp/backend-flow-report.json
+    # Run disruptions sequentially after the happy paths; the runner restores services.
+    - python3 tests/integration/failure-recovery.py --base-url http://docker:8080 --report tests/integration/failure-recovery-report.json
     - if [ -f tests/e2e/run.sh ]; then sh tests/e2e/run.sh docker; fi
   after_script:
+    - docker compose cp upload:/tmp/ingestion-flow-report.json tests/integration/ingestion-flow-report.json || true
+    - docker compose cp jam:/tmp/backend-flow-report.json tests/integration/backend-flow-report.json || true
     - docker compose ps --all > compose-ps.txt 2>&1 || true
     - docker compose logs --no-color --timestamps > compose-logs.txt 2>&1 || true
   artifacts:
@@ -245,5 +282,8 @@ integration:
     paths:
       - compose-ps.txt
       - compose-logs.txt
+      - tests/integration/ingestion-flow-report.json
+      - tests/integration/backend-flow-report.json
+      - tests/integration/failure-recovery-report.json
   rules:
     - if: $CI_PIPELINE_SOURCE != "merge_request_event" && $CI_COMMIT_BRANCH == "staging"

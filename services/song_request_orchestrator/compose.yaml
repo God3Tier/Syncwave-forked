@@ -15,7 +15,12 @@ services:
       AUDIO_SERVICE_URL: http://streaming:8081
       LYRICS_SERVICE_URL: http://lyrics:8080
       WAVEFORM_SERVICE_URL: http://waveform:8080
+      AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
+      AUTH_ISSUER: ${AUTH_ISSUER:-syncwave-auth}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-syncwave}
     depends_on:
+      auth:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:

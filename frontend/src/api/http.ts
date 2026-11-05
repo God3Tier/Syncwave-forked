@@ -89,6 +89,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       headers,
       body,
       signal: options.signal,
+      credentials: 'same-origin',
     });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;

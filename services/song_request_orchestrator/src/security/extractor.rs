@@ -3,7 +3,7 @@ use std::future::{Ready, ready};
 use actix_web::dev::Payload;
 use actix_web::{Error, FromRequest, HttpMessage, HttpRequest, error};
 
-use crate::security::CognitoClaims;
+use crate::security::AuthClaims;
 
 /// The authenticated user's ID, taken from the JWT `sub` claim.
 ///
@@ -15,7 +15,7 @@ use crate::security::CognitoClaims;
 /// }
 /// ```
 ///
-/// The value is supplied by the [`CognitoAuth`](crate::security::CognitoAuth)
+/// The value is supplied by the [`SessionAuth`](crate::security::SessionAuth)
 /// middleware, which verifies the request's bearer token and stores its claims
 /// in the request extensions. If the middleware did not run (or the token was
 /// rejected before reaching the handler), extraction fails with `401
@@ -24,7 +24,7 @@ use crate::security::CognitoClaims;
 pub struct UserId(pub String);
 
 impl UserId {
-    /// The raw Cognito user ID (JWT `sub`).
+    /// The SyncWave account ID (JWT `sub`).
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -43,18 +43,18 @@ impl FromRequest for UserId {
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let user_id = req
             .extensions()
-            .get::<CognitoClaims>()
+            .get::<AuthClaims>()
             .map(|claims| UserId(claims.sub.clone()));
         ready(user_id.ok_or_else(|| error::ErrorUnauthorized("missing authenticated user")))
     }
 }
 
-impl FromRequest for CognitoClaims {
+impl FromRequest for AuthClaims {
     type Error = Error;
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        let claims = req.extensions().get::<CognitoClaims>().cloned();
-        ready(claims.ok_or_else(|| error::ErrorUnauthorized("missing cognito claims")))
+        let claims = req.extensions().get::<AuthClaims>().cloned();
+        ready(claims.ok_or_else(|| error::ErrorUnauthorized("missing authenticated claims")))
     }
 }

@@ -9,8 +9,8 @@ pub mod middleware;
 #[cfg(test)]
 mod test;
 
-pub use claims::CognitoClaims;
-pub use client::CognitoClient;
-pub use config::CognitoConfig;
+pub use claims::AuthClaims;
+pub use client::AuthClient;
+pub use config::AuthConfig;
 pub use extractor::UserId;
-pub use middleware::CognitoAuth;
+pub use middleware::SessionAuth;

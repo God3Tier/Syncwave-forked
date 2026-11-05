@@ -38,15 +38,12 @@ async fn main() -> std::io::Result<()> {
         )
         .load()
         .await;
-    // A local S3-compatible store (RustFS in Docker Compose, set via
-    // AWS_ENDPOINT_URL) is addressed by path: the virtual-hosted name
-    // `<bucket>.s3` does not resolve on the Compose network. Real S3 keeps
-    // the SDK's default addressing.
-    let mut s3_config = aws_sdk_s3::config::Builder::from(&config);
-    if env::var_os("AWS_ENDPOINT_URL").is_some() {
-        s3_config = s3_config.force_path_style(true);
-    }
-    let s3_client = Client::from_conf(s3_config.build());
+    // Path-style URLs also work with the local S3-compatible store's Docker hostname.
+    let s3_client = Client::from_conf(
+        aws_sdk_s3::config::Builder::from(&config)
+            .force_path_style(true)
+            .build(),
+    );
     let bucket_name = env::var("S3_BUCKET").unwrap_or_else(|_| "syncwave-audio".to_owned());
 
     // TODO: Set the cache to be configurable

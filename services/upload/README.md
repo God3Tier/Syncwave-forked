@@ -128,6 +128,45 @@ task role: omit local endpoint/path-style settings and static AWS keys.
 
 ## Test and build
 
+### Processing failures after publication
+
+After a receipt becomes `PUBLISHED`, check Catalogue
+`GET /api/catalogue/songs/<song_id>` for overall/stage status and
+`GET /api/lyrics/songs/<song_id>/lyrics` or
+`GET /api/waveform/songs/<song_id>/waveform` for the failed stage's error.
+One failed stage gives Catalogue `PARTIAL`; both failing give `FAILED`.
+Search indexes songs only once Catalogue announces `SongReady`.
+
+Transient worker failures retry through RabbitMQ at ten-second intervals,
+giving up after three failed attempts. Permanent validation/decoding errors
+go directly to the affected worker's dead-letter queue. Broker publication
+retries on an Upload receipt are separate from these processing retries.
+
+For a user with malformed media/lyrics, correct the source files and submit
+a new upload; this creates a new song ID. There is no public HTTP endpoint
+for editing media or retrying an existing song.
+
+For operator recovery preserving the song ID:
+
+1. Inspect the failed stage's error, logs and the selected original
+   `SongUploaded` in `lyrics.song-uploaded.dlq` or
+   `waveform.song-uploaded.dlq`. Confirm the song ID/object references.
+2. Fix the dependency or repair that song's source object at the referenced
+   S3 key. Replaying permanently invalid input unchanged will fail again.
+3. Republish only that selected original body/event ID to the affected
+   consumer's queue (`lyrics.song-uploaded` or `waveform.song-uploaded`),
+   using RabbitMQ's default exchange. A failed stage can process it again;
+   already successful stages need not be replayed. A copied DLQ entry remains
+   for inspection until the operator explicitly removes that selected entry.
+4. Poll the stage and Catalogue until `READY`, then verify Search and media.
+   Do not purge/replay an entire shared queue to retry a single song.
+
+The automated version of this procedure is documented under item 2 in
+[`tests/integration/README.md`](../../tests/integration/README.md). It repairs
+only its generated lyrics fixture and leaves existing songs untouched.
+
+### Unit checks and container build
+
 ```sh
 cd services/upload
 python -m venv .venv

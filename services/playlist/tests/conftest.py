@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine
 
 from playlist_service.api.main import app
+from playlist_service.auth import Account, current_account
 from playlist_service.db import Base
 from playlist_service.errors import CatalogueUnavailable
 
@@ -62,17 +63,21 @@ def catalogue() -> FakeCatalogue:
 
 @pytest.fixture
 def client(api_db: Engine, catalogue: FakeCatalogue) -> Iterator[TestClient]:
+    app.dependency_overrides[current_account] = lambda: Account(uuid.UUID(OWNER_ID))
     with TestClient(app) as test_client:
         # Replace the real HTTP client the lifespan built.
         app.state.catalogue = catalogue
         yield test_client
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def create_playlist(client: TestClient) -> Callable[..., dict[str, Any]]:
     def create(name: str = "Rainy day", owner_id: str = OWNER_ID) -> dict[str, Any]:
-        response = client.post("/playlists", json={"owner_id": owner_id, "name": name})
+        app.dependency_overrides[current_account] = lambda: Account(uuid.UUID(owner_id))
+        response = client.post("/playlists", json={"name": name})
         assert response.status_code == 201, response.text
+        app.dependency_overrides[current_account] = lambda: Account(uuid.UUID(OWNER_ID))
         return response.json()
 
     return create

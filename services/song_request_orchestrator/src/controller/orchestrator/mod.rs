@@ -32,7 +32,7 @@ pub async fn health_check() -> impl Responder {
 }
 
 /// Example protected route: the authenticated user's ID is supplied as a
-/// handler parameter by the Cognito middleware via the [`UserId`] extractor.
+/// handler parameter by the SyncWave session middleware via the [`UserId`] extractor.
 pub async fn me(user_id: UserId) -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({ "user_id": user_id.as_str() }))
 }

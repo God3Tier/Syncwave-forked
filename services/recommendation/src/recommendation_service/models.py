@@ -11,7 +11,7 @@ CONDITIONS = ("CLEAR", "CLOUDY", "RAIN", "STORM", "SNOW", "FOG", "OTHER")
 class Song:
     """A candidate song from the Catalogue (a subset of the Song contract).
 
-    `mood` is optional and **not** part of the shared Song contract yet. Without
+    `mood` is optional in the Catalogue Song contract. Without
     it a song can never be a weather match, so it only ever ranks as GENERAL.
     """
 

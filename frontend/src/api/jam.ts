@@ -1,71 +1,74 @@
 import { uuid } from '../uuid';
-import { config } from '../config';
+import { getSignedInAccount } from '../auth/session';
 import { request } from './http';
 import type { Jam, Readiness } from './types';
 
 const BASE = '/api/jam/jams';
-const TOKENS_KEY = 'syncwave.jam_tokens';
+const MEMBERS_KEY = 'syncwave.jam_members';
+interface Membership { member_id: string; token: string | null }
 
-// Jam returns a member_token on create/join; it is remembered per Jam and
-// falls back to the configured mock token.
-function loadTokens(): Record<string, string> {
+function loadMemberships(): Record<string, Membership> {
   try {
-    return JSON.parse(localStorage.getItem(TOKENS_KEY) ?? '{}') as Record<string, string>;
+    return JSON.parse(sessionStorage.getItem(MEMBERS_KEY) ?? '{}') as Record<string, Membership>;
   } catch {
     return {};
   }
 }
 
 function remember(jam: Jam): Jam {
-  if (jam.member_token) {
+  if (jam.member_id) {
     try {
-      localStorage.setItem(TOKENS_KEY, JSON.stringify({ ...loadTokens(), [jam.jam_id]: jam.member_token }));
+      sessionStorage.setItem(MEMBERS_KEY, JSON.stringify({
+        ...loadMemberships(),
+        [jam.jam_id]: { member_id: jam.member_id, token: jam.member_token },
+      }));
     } catch {
-      // storage unavailable: the default token still works locally
+      // The current room remains active for this page load if storage is blocked.
     }
   }
   return jam;
 }
 
-export function jamToken(jamId: string): string {
-  return loadTokens()[jamId] ?? config.jamToken;
+export function jamMemberId(jamId: string, accountId?: string): string | null {
+  return accountId ?? loadMemberships()[jamId]?.member_id ?? null;
 }
 
 function call<T>(jamId: string | null, path: string, options: Parameters<typeof request>[1] = {}): Promise<T> {
+  const memberToken = jamId && !getSignedInAccount() ? loadMemberships()[jamId]?.token : null;
   return request<T>(`${BASE}${path}`, {
     ...options,
-    headers: { 'X-Jam-Token': jamId ? jamToken(jamId) : config.jamToken, ...options.headers },
+    headers: { ...(memberToken ? { 'X-Jam-Token': memberToken } : {}), ...options.headers },
   });
 }
 
 const id = (jamId: string) => `/${encodeURIComponent(jamId)}`;
 
-export async function createJam(ownerId: string, playlistId?: string | null): Promise<Jam> {
-  return remember(await call<Jam>(null, '', { method: 'POST', json: { owner_id: ownerId, playlist_id: playlistId || undefined } }));
+export async function createJam(playlistId?: string | null): Promise<Jam> {
+  return remember(await call<Jam>(null, '', { method: 'POST', json: { playlist_id: playlistId || undefined } }));
 }
 
 export function getJam(jamId: string, signal?: AbortSignal): Promise<Jam> {
   return call(jamId, id(jamId), { signal });
 }
 
-export async function joinJam(jamId: string, participantId: string): Promise<Jam> {
-  return remember(await call<Jam>(jamId, `${id(jamId)}/members`, { method: 'POST', json: { participant_id: participantId } }));
+export async function joinJam(jamId: string): Promise<Jam> {
+  return remember(await call<Jam>(jamId, `${id(jamId)}/members`, { method: 'POST' }));
 }
 
 export function leaveJam(jamId: string, participantId: string): Promise<void> {
   return call(jamId, `${id(jamId)}/members/${encodeURIComponent(participantId)}`, { method: 'DELETE' });
 }
 
-export function queueSong(jamId: string, actorId: string, songId: string): Promise<Jam> {
-  return call(jamId, `${id(jamId)}/queue`, { method: 'POST', json: { actor_id: actorId, song_id: songId } });
+export function queueSong(jamId: string, songId: string): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/queue`, { method: 'POST', json: { song_id: songId } });
 }
 
-export function removeQueueItem(jamId: string, actorId: string, queueItemId: string): Promise<Jam> {
-  return call(jamId, `${id(jamId)}/queue/${encodeURIComponent(queueItemId)}`, { method: 'DELETE', json: { actor_id: actorId } });
+export function removeQueueItem(jamId: string, queueItemId: string): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/queue/${encodeURIComponent(queueItemId)}`, { method: 'DELETE' });
 }
 
-export function reorderQueue(jamId: string, actorId: string, queueItemIds: string[]): Promise<Jam> {
-  return call(jamId, `${id(jamId)}/queue`, { method: 'PUT', json: { actor_id: actorId, queue_item_ids: queueItemIds } });
+export function reorderQueue(jamId: string, queueItemIds: string[]): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/queue`, { method: 'PUT', json: { queue_item_ids: queueItemIds } });
 }
 
 type Control = 'start' | 'pause' | 'resume' | 'skip' | 'seek';
@@ -73,30 +76,31 @@ type Control = 'start' | 'pause' | 'resume' | 'skip' | 'seek';
 /** Owner playback controls. Each carries a fresh request_id so Jam/Sync can de-duplicate retries. */
 export function playback(
   jamId: string,
-  actorId: string,
   action: Control,
   extra: { queue_item_id?: string; position_ms?: number } = {},
 ): Promise<Jam> {
   return call(jamId, `${id(jamId)}/playback/${action}`, {
     method: 'POST',
-    json: { actor_id: actorId, request_id: uuid(), ...extra },
+    json: { request_id: uuid(), ...extra },
   });
 }
 
-export function getReadiness(jamId: string, actorId: string, signal?: AbortSignal): Promise<Readiness> {
-  return call(jamId, `${id(jamId)}/playback/readiness`, { query: { actor_id: actorId }, signal });
+export function getReadiness(jamId: string, signal?: AbortSignal): Promise<Readiness> {
+  return call(jamId, `${id(jamId)}/playback/readiness`, { signal });
 }
 
-export function decideReadiness(jamId: string, actorId: string, decision: 'CONTINUE' | 'WAIT' | 'CANCEL'): Promise<Jam> {
+export function decideReadiness(jamId: string, decision: 'CONTINUE' | 'WAIT' | 'CANCEL'): Promise<Jam> {
   return call(jamId, `${id(jamId)}/playback/readiness-decision`, {
     method: 'POST',
-    json: { actor_id: actorId, request_id: uuid(), decision },
+    json: { request_id: uuid(), decision },
   });
 }
 
 export function jamSocketUrl(jamId: string, participantId: string): string {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const params = new URLSearchParams({ participant_id: participantId, token: jamToken(jamId) });
+  const params = new URLSearchParams({ participant_id: participantId });
+  const memberToken = getSignedInAccount() ? null : loadMemberships()[jamId]?.token;
+  if (memberToken) params.set('token', memberToken);
   return `${scheme}://${window.location.host}${BASE}${id(jamId)}/ws?${params}`;
 }
 

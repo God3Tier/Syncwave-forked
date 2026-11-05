@@ -32,18 +32,13 @@ check "rabbitmq: events exchange"   "http://syncwave:syncwave@$HOST:15672/api/ex
 check "rabbitmq: lyrics queue"      "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/lyrics.song-uploaded"
 check "rabbitmq: waveform queue"    "http://syncwave:syncwave@$HOST:15672/api/queues/%2F/waveform.song-uploaded"
 
-# Every service the root stack runs (its compose.yaml is under `include:` in
-# docker-compose.yml) must answer through the gateway.
-for dir in services/*/; do
-  name=$(basename "$dir")
-  [ "$name" = "_template" ] && continue
-  grep -q "services/$name/compose.yaml" docker-compose.yml || continue
-  case "$name" in
-    # The gateway routes this folder as /api/streaming.
-    audio_transmitter) check "service: streaming" "http://$HOST:8080/api/streaming/health" ;;
-    *) check "service: $name" "http://$HOST:8080/api/$name/health" ;;
-  esac
+# Check the APIs included in the root Compose stack. Standalone service
+# folders are not necessarily deployed, and Streaming uses /cache for health.
+for name in catalogue lyrics waveform playlist recommendation jam sync upload; do
+  check "service: $name" "http://$HOST:8080/api/$name/health"
 done
+check "upload: readiness" "http://$HOST:8080/api/upload/ready"
+check "service: streaming" "http://$HOST:8080/api/streaming/cache"
 if [ -d frontend ]; then
   check "frontend" "http://$HOST:8080/"
 fi

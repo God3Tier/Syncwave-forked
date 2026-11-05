@@ -107,6 +107,28 @@ export interface StreamInfo {
   song_id: string;
   stream_url: string;
   supports_ranges: boolean;
+  manifest_url: string;
+}
+
+export interface StreamChunk {
+  index: number;
+  start_ms: number;
+  duration_ms: number;
+  start_sample: number;
+  end_sample: number;
+  url: string;
+}
+
+export interface StreamManifest {
+  song_id: string;
+  media_version: string;
+  duration_ms: number;
+  chunk_duration_ms: number;
+  format: string;
+  sample_rate_hz: number;
+  channels: number;
+  bits_per_sample: number;
+  chunks: StreamChunk[];
 }
 
 export interface UploadReceipt {
@@ -144,6 +166,7 @@ export interface Jam {
   sync_generation: number | null;
   state: JamState;
   member_token: string | null;
+  member_id: string | null;
 }
 
 export interface Readiness {

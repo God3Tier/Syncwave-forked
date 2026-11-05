@@ -1,0 +1,9 @@
+SELECT 'CREATE ROLE auth LOGIN PASSWORD ''auth'''
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'auth')
+\gexec
+
+SELECT 'CREATE DATABASE auth OWNER auth'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'auth')
+\gexec
+
+REVOKE CONNECT ON DATABASE auth FROM PUBLIC;

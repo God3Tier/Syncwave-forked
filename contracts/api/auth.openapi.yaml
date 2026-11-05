@@ -1,0 +1,117 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Auth Service
+  version: 1.0.0
+  description: Username/password accounts for playlist ownership and Jam hosting.
+servers:
+  - url: http://auth:8080
+    description: Inside Docker Compose (the gateway adds the /api/auth prefix)
+paths:
+  /health:
+    get:
+      operationId: authHealth
+      responses:
+        "200":
+          description: The service is running.
+  /.well-known/jwks.json:
+    get:
+      operationId: getSigningKeys
+      summary: Public keys used by services to validate account JWTs
+      responses:
+        "200":
+          description: Public JSON Web Key Set. Contains no private signing material.
+  /signup:
+    post:
+      operationId: signUp
+      summary: Create a username and password account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "201":
+          description: Account created and signed in.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: HttpOnly signed JWT session cookie.
+        "409":
+          description: The normalized username is already taken.
+        "422":
+          description: Username or password does not meet the input constraints.
+  /login:
+    post:
+      operationId: logIn
+      summary: Start an account session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "200":
+          description: Signed in. Invalid username and password use the same response.
+        "401":
+          description: Username or password is incorrect.
+  /logout:
+    post:
+      operationId: logOut
+      summary: Clear the browser session cookie
+      responses:
+        "204":
+          description: Session cookie cleared.
+  /me:
+    get:
+      operationId: currentAccount
+      summary: Return the signed-in account
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Current account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: No valid session.
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: syncwave_session
+  schemas:
+    Credentials:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 24
+          pattern: "^[A-Za-z0-9_]+$"
+          description: Usernames are normalized to lowercase.
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+    User:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
