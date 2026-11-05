@@ -1,0 +1,44 @@
+# Child pipeline for the Waveform Service (see ci/service.yml). The root
+# .gitlab-ci.yml starts it when this folder, contracts/events or ci/ changes.
+
+include:
+  - local: ci/service.yml
+
+variables:
+  SERVICE: waveform               # = folder name = compose service name = image name
+  SERVICE_DIR: services/waveform
+
+.python:
+  image: python:3.14-slim
+  variables:
+    PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  cache:
+    key: pip-$SERVICE
+    paths:
+      - .cache/pip
+
+lint:
+  extends: [.lint, .python]
+  script:
+    - pip install --quiet "$(grep '^ruff==' requirements-dev.txt)"
+    - ruff check src tests migrations
+    - ruff format --check src tests migrations
+
+# Includes the contract tests against ../../contracts/events, and the ffmpeg decode tests.
+test:
+  extends: [.test, .python]
+  variables:
+    TEST_REPORTS: report.xml
+  script:
+    - apt-get update --quiet && apt-get install --quiet --yes --no-install-recommends ffmpeg > /dev/null
+    - pip install --quiet --requirement requirements-dev.txt
+    - pytest --junitxml=report.xml
+
+build:
+  extends: .build-image
+
+deploy:
+  extends: .deploy-ecs
+  variables:
+    ECS_SERVICES: "waveform waveform-worker"

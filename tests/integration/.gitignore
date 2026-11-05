@@ -1,0 +1,10 @@
+/upload-flow-report.json
+/backend-flow-report.json
+/ingestion-flow-report.json
+/failure-recovery-report.json
+/ci-test-coverage-report.json
+/physical-sync-starts.csv
+/physical-sync-events.csv
+/physical-sync-report.json
+/physical-sync-metrics.txt
+/physical-sync-logs.txt

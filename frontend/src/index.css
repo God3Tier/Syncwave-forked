@@ -1,0 +1,90 @@
+@import '@fontsource-variable/manrope';
+@import 'tailwindcss';
+
+@theme {
+  --color-background: #0b0f0d;
+  --color-surface: #0b0f0d;
+  --color-surface-dim: #080b09;
+  --color-surface-bright: #2a332e;
+  --color-surface-container-lowest: #070a08;
+  --color-surface-container-low: #101512;
+  --color-surface-container: #151c18;
+  --color-surface-container-high: #1c2520;
+  --color-surface-container-highest: #27332c;
+  --color-surface-variant: #202a24;
+  --color-on-surface: #f3f0e8;
+  --color-on-surface-variant: #adb7b0;
+  --color-outline: #7b887f;
+  --color-outline-variant: #37443c;
+  --color-primary: #ff7350;
+  --color-primary-dim: #dd5534;
+  --color-primary-container: #ff8a69;
+  --color-on-primary: #240b04;
+  --color-secondary: #79e3c3;
+  --color-secondary-dim: #4dbf9f;
+  --color-secondary-container: #175c4c;
+  --color-tertiary: #f1c75b;
+  --color-tertiary-container: #705719;
+  --color-error: #ff7e87;
+  --color-error-container: #6c2730;
+  --color-ok: #79e3c3;
+  --color-warn: #f1c75b;
+  --color-partial: #f5a66d;
+  --font-headline: 'Manrope Variable', 'Avenir Next', 'Segoe UI Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Manrope Variable', 'Avenir Next', 'Segoe UI Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace;
+  --font-sans: var(--font-body);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  html { color-scheme: dark; background: var(--color-background); }
+  body {
+    @apply bg-background text-on-surface font-body antialiased;
+    margin: 0;
+    min-width: 320px;
+    font-feature-settings: 'ss01' 1, 'cv11' 1;
+  }
+  button, input, select, textarea { font: inherit; }
+  button, a, input, select, textarea { touch-action: manipulation; -webkit-tap-highlight-color: rgb(255 115 80 / 0.18); }
+  h1, h2 { text-wrap: balance; }
+  dialog { overscroll-behavior: contain; }
+  button:not(:disabled), [role='button']:not([aria-disabled='true']) { cursor: pointer; }
+  ::selection { background: rgb(255 115 80 / 0.32); color: var(--color-on-surface); }
+  :focus-visible { outline: 2px solid var(--color-secondary); outline-offset: 3px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-outline) 55%, transparent);
+    background-clip: padding-box;
+  }
+}
+
+.app-canvas {
+  background:
+    radial-gradient(circle at 86% -10%, rgb(121 227 195 / 0.055), transparent 25rem),
+    linear-gradient(180deg, #0d120f 0%, var(--color-background) 22rem);
+}
+.page-enter { animation: page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes page-enter { from { opacity: 0.72; transform: translateY(5px); } }
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+.animate-pulse-glow { animation: pulse-live 1.8s ease-in-out infinite; }
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.eq-bar { animation: eq 0.86s ease-in-out infinite; transform-origin: bottom; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

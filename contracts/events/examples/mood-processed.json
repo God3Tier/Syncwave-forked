@@ -1,0 +1,13 @@
+{
+  "event_id": "b4f0a2c1-5e6f-4a7b-8c9d-0f1e2a3b4c5d",
+  "event_type": "MoodProcessed",
+  "version": 1,
+  "song_id": "0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20",
+  "timestamp": "2026-10-08T12:00:02.000Z",
+  "producer": "catalogue",
+  "correlation_id": "6f1d0c8e-2b7a-4c1e-9a4b-3f2d8e7c5a10",
+  "payload": {
+    "song_id": "0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20",
+    "mood": "energetic"
+  }
+}

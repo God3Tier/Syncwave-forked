@@ -1,0 +1,66 @@
+# Search Service (README.md), included from the root docker-compose.yml.
+# One image runs as two containers: the HTTP API behind the gateway, and
+# the AMQP worker, which has no port.
+
+x-search-environment: &search-environment
+  SERVICE_NAME: search
+  PORT: "8080"
+  LOG_LEVEL: INFO
+  AMQP_HOST: rabbitmq
+  AMQP_PORT: "5672"
+  AMQP_USER: syncwave
+  AMQP_PASSWORD: syncwave
+  AMQP_PREFETCH: "10"
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: search
+  DB_USER: search
+  DB_PASSWORD: search
+  CATALOGUE_URL: http://catalogue:8080
+
+services:
+  search:
+    build:
+      context: .
+    image: ${IMAGE_REGISTRY:-syncwave}/search:${IMAGE_TAG:-local}
+    environment: *search-environment
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      catalogue:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+  search-worker:
+    image: ${IMAGE_REGISTRY:-syncwave}/search:${IMAGE_TAG:-local}
+    command: ["python", "-m", "search_service.worker"]
+    environment: *search-environment
+    volumes:
+      - ../../infrastructure/health/check-consumers.py:/app/check-consumers.py:ro
+    healthcheck:
+      test: ["CMD", "python", "/app/check-consumers.py", "search.song-ready"]
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
+    restart: on-failure
+    depends_on:
+      search:
+        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
+      catalogue:
+        condition: service_healthy

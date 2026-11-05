@@ -1,0 +1,12 @@
+{
+  "type": "RESUME_AT",
+  "jam_id": "22222222-2222-4222-8222-222222222222",
+  "seq": 13,
+  "sent_at_ms": 1791460015000,
+  "payload": {
+    "generation": 1,
+    "target_server_time_ms": 1791460017000,
+    "start_position_ms": 7500,
+    "playback_rate": 1.0
+  }
+}

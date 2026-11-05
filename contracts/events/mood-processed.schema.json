@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/mood-processed.schema.json",
+  "title": "MoodProcessed",
+  "description": "Published by Catalogue when a song's mood is derived from metadata (or supplied at upload). Consumed by Catalogue to persist the mood column; other services may subscribe for discovery flows. Duplicate delivery is idempotent.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "MoodProcessed" },
+    "payload": {
+      "type": "object",
+      "required": ["song_id", "mood"],
+      "additionalProperties": false,
+      "properties": {
+        "song_id": {
+          "description": "The song whose mood was derived.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "mood": {
+          "description": "Derived mood label, e.g. energetic, chill, melancholy, romantic, focus, ambient.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

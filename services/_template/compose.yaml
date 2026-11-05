@@ -1,0 +1,59 @@
+# Compose fragment for this service. To enable it, add this line to the
+# `include:` list in the root docker-compose.yml:
+#     - services/<name>/compose.yaml
+#
+# Replace every "template" below with your service name. It must equal the
+# folder name: the gateway routes /api/<name>/ to <name>:8080.
+# Delete the environment entries and depends_on items for infrastructure
+# your service does not use.
+
+services:
+  template:
+    build:
+      context: .
+      additional_contexts:
+        contracts: ../../contracts
+    # Locally the image is built as syncwave/template:local. The staging
+    # integration job sets IMAGE_REGISTRY/IMAGE_TAG to run the CI-built image.
+    image: ${IMAGE_REGISTRY:-syncwave}/template:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: template
+      PORT: "8080"
+      # RabbitMQ (topology: contracts/events/README.md). Kept as separate
+      # variables, never a URL with the password inside: in production the
+      # password is injected on its own from AWS Secrets Manager.
+      AMQP_HOST: rabbitmq
+      AMQP_PORT: "5672"
+      AMQP_USER: syncwave
+      AMQP_PASSWORD: syncwave
+      # Postgres: this service's own database (infrastructure/postgres/init.sql)
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: template
+      DB_USER: template
+      DB_PASSWORD: template
+      # S3: RustFS locally. In production the endpoint/path-style/key variables
+      # are not set: the SDK talks to real S3 with the ECS task role's credentials.
+      S3_ENDPOINT_URL: http://s3:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000   # host to use in URLs handed to the browser
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: syncwave
+      AWS_SECRET_ACCESS_KEY: syncwave-secret
+      AWS_REGION: us-east-1
+      S3_BUCKET: syncwave-audio
+    depends_on:
+      rabbitmq-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+
+  # A second process from the same image, e.g. an AMQP consumer (worker).
+  # It is not behind the gateway, so it needs no port. Its name is <name>-worker.
+  # template-worker:
+  #   image: ${IMAGE_REGISTRY:-syncwave}/template:${IMAGE_TAG:-local}
+  #   command: ["java", "-jar", "/app/app.jar", "--spring.profiles.active=worker"]
+  #   healthcheck: { disable: true }
+  #   environment: (copy the block above)
+  #   depends_on: (copy the block above)

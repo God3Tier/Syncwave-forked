@@ -1,0 +1,24 @@
+[package]
+name = "song_request_orchestrator"
+version = "0.1.0"
+edition = "2024"
+
+# The Dockerfile copies target/release/orchestrator
+[[bin]]
+name = "orchestrator"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = "4"
+base64 = "0.23"
+bytes = "1.12.1"
+diesel = { version = "2.3", features = ["postgres", "r2d2"] }
+dotenvy = "0.15"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+reqwest = { version = "0.13.5", features = ["json", "form"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["rt", "time"] }
+uuid = { version = "1", features = ["serde", "v4"] }

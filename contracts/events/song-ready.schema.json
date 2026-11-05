@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/events/song-ready.schema.json",
+  "title": "SongReady",
+  "description": "Published by Catalogue on routing key song.ready once a song's processing_status first becomes READY (both lyrics_status and waveform_status are READY, or a song has no lyrics and waveform is READY). Consumed by Search so newly processable songs are discoverable. May be re-announced for the same song (duplicate delivery or crash recovery); consumers must be idempotent. PARTIAL songs are NOT published.",
+  "type": "object",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "SongReady" },
+    "payload": {
+      "type": "object",
+      "required": ["song_id"],
+      "additionalProperties": false,
+      "properties": {
+        "song_id": {
+          "description": "The song that is now fully processed and ready to play.",
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    }
+  }
+}

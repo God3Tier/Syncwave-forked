@@ -1,0 +1,38 @@
+services:
+  jam:
+    build: .
+    image: ${IMAGE_REGISTRY:-syncwave}/jam:${IMAGE_TAG:-local}
+    environment:
+      SERVICE_NAME: jam
+      PORT: "8080"
+      DATABASE_URL: postgresql+asyncpg://jam:jam@postgres:5432/jam
+      SYNC_GRPC_TARGET: sync:50051
+      SYNC_TIMEOUT_MS: "1000"
+      INTERNAL_SERVICE_TOKEN: local-jam-to-sync-token
+      PLAYLIST_GRPC_TARGET: playlist:50051
+      PLAYLIST_INTERNAL_TOKEN: local-playlist-internal-token
+      PLAYLIST_TIMEOUT_MS: "750"
+      AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
+      JAM_MEMBER_TOKEN_SECRET: local-room-token-secret-replace-before-deploy
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sync:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      playlist:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5

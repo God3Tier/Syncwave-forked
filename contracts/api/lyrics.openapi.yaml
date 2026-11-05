@@ -1,0 +1,151 @@
+openapi: 3.1.0
+info:
+  title: SyncWave Lyrics Service
+  version: 1.0.0
+  description: |
+    Timestamped (LRC) lyrics for a song. Lyrics are processed asynchronously
+    from the `SongUploaded` event (`contracts/events/`); this API only reads
+    the result.
+
+    Browsers call it through the gateway, e.g.
+    `GET http://localhost:8080/api/lyrics/songs/{song_id}/lyrics`. The paths
+    below are the service's own paths, without the `/api/lyrics` prefix.
+servers:
+  - url: http://lyrics:8080
+    description: Inside Docker Compose (the gateway adds the /api/lyrics prefix)
+security: []
+tags:
+  - name: lyrics
+    description: Lyrics retrieval
+  - name: operations
+    description: Health checks
+paths:
+  /health:
+    get:
+      tags: [operations]
+      operationId: getHealth
+      summary: Liveness check
+      responses:
+        "200":
+          description: The service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /songs/{song_id}/lyrics:
+    get:
+      tags: [lyrics]
+      operationId: getSongLyrics
+      summary: Get a song's lyrics and their processing status
+      description: |
+        Returns 200 for every song the Lyrics Service has received a
+        `SongUploaded` event for. `lines` is only filled when `status` is
+        `READY`; poll while it is `PROCESSING`. A song uploaded without lyrics
+        is `READY` with no lines.
+      parameters:
+        - name: song_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lyrics, or the current processing status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lyrics"
+              examples:
+                ready:
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: READY
+                    line_count: 2
+                    lines:
+                      - time_ms: 12340
+                        text: First line
+                      - time_ms: 15000
+                        text: Second line
+                    updated_at: "2026-10-08T12:00:01.250Z"
+                failed:
+                  value:
+                    song_id: 0b6c2f4e-8d3a-4f7b-b1e2-9c5d7a3e1f20
+                    status: FAILED
+                    line_count: 0
+                    lines: []
+                    error:
+                      code: LYRICS_NOT_TIMESTAMPED
+                      message: The lyrics file has no [mm:ss.xx] time tags
+                    updated_at: "2026-10-08T12:00:01.250Z"
+        "400":
+          description: "`song_id` is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "No `SongUploaded` event has been received for this song (`LYRICS_NOT_FOUND`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Lyrics:
+      type: object
+      required: [song_id, status, line_count, lines, updated_at]
+      properties:
+        song_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PROCESSING, READY, FAILED]
+        line_count:
+          type: integer
+          minimum: 0
+        lines:
+          description: Sorted by `time_ms`. Empty unless `status` is `READY`.
+          type: array
+          items:
+            $ref: "#/components/schemas/LyricLine"
+        error:
+          description: Only present when `status` is `FAILED`.
+          $ref: "#/components/schemas/ErrorDetail"
+        updated_at:
+          type: string
+          format: date-time
+    LyricLine:
+      type: object
+      required: [time_ms, text]
+      properties:
+        time_ms:
+          description: When the line starts, in milliseconds from the start of the song.
+          type: integer
+          minimum: 0
+        text:
+          description: The line's text. Empty for an instrumental break.
+          type: string
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [LYRICS_NOT_FOUND]
+        message:
+          type: string
