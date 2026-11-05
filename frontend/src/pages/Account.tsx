@@ -19,7 +19,7 @@ export function AccountPage({ mode }: { mode: Mode }) {
   const { account, loading, signUp, logIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(params.get('username') ?? '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -47,9 +47,16 @@ export function AccountPage({ mode }: { mode: Mode }) {
     setBusy(true);
     try {
       const credentials = { username: username.trim(), password };
-      if (isSignup) await signUp(credentials);
-      else await logIn(credentials);
-      navigate(destination, { replace: true });
+      if (isSignup) {
+        await signUp(credentials);
+        const loginParams = new URLSearchParams({ username: credentials.username, returnTo });
+        if (intent) loginParams.set('intent', intent);
+        loginParams.set('created', '1');
+        navigate(`/login?${loginParams}`, { replace: true });
+      } else {
+        await logIn(credentials);
+        navigate(destination, { replace: true });
+      }
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setError('That username is already taken. Try another one.');
@@ -94,6 +101,11 @@ export function AccountPage({ mode }: { mode: Mode }) {
         <p className="mt-2 text-sm leading-6 text-on-surface-variant">
           {isSignup ? 'Save your playlists and start listening rooms.' : 'Your playlists and Jams are waiting.'}
         </p>
+        {!isSignup && params.get('created') === '1' && (
+          <p role="status" className="mt-4 rounded-lg border border-primary/35 bg-primary/10 px-3 py-2.5 text-sm text-primary">
+            Account created. Log in with your new username and password.
+          </p>
+        )}
 
         <form onSubmit={(event) => void submit(event)} className="mt-7 flex flex-col gap-4">
           <div>

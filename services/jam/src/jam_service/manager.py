@@ -1,10 +1,18 @@
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import WebSocket
 
-from jam_service.models import JamResponse, JamState, QueueItem, ReadinessDecision
+from jam_service.models import (
+    JamLifecycle,
+    JamParticipant,
+    JamResponse,
+    JamState,
+    QueueItem,
+    ReadinessDecision,
+)
 from jam_service.playlist_client import PlaylistClient
 from jam_service.repository import JamRepository, PersistedJam
 from jam_service.sync_client import (
@@ -34,10 +42,13 @@ class Jam:
     jam_id: UUID
     owner_id: UUID
     participant_ids: list[UUID]
+    participant_usernames: dict[UUID, str]
     queue: list[QueueItem] = field(default_factory=list)
     current_queue_item_id: UUID | None = None
     sync_generation: int | None = None
     state: JamState = JamState.IDLE
+    lifecycle_state: JamLifecycle = JamLifecycle.ACTIVE
+    ended_at: datetime | None = None
 
 
 class JamManager:
@@ -60,10 +71,13 @@ class JamManager:
                 jam_id=value.jam_id,
                 owner_id=value.owner_id,
                 participant_ids=value.participant_ids,
+                participant_usernames=value.participant_usernames,
                 queue=value.queue,
                 current_queue_item_id=value.current_queue_item_id,
                 sync_generation=value.sync_generation,
                 state=value.state,
+                lifecycle_state=value.lifecycle_state,
+                ended_at=value.ended_at,
             )
 
     async def close(self) -> None:
@@ -77,20 +91,34 @@ class JamManager:
             jam_id=jam.jam_id,
             owner_id=jam.owner_id,
             participant_ids=jam.participant_ids,
+            participants=[
+                JamParticipant(
+                    participant_id=participant_id,
+                    username=jam.participant_usernames.get(
+                        participant_id, f"Member {str(participant_id)[:8]}"
+                    ),
+                    role="OWNER" if participant_id == jam.owner_id else "MEMBER",
+                )
+                for participant_id in jam.participant_ids
+            ],
             queue=jam.queue,
             current_queue_item_id=jam.current_queue_item_id,
             sync_generation=jam.sync_generation,
             state=jam.state,
+            lifecycle_state=jam.lifecycle_state,
             member_token=None,
         )
 
-    async def create(self, owner_id: UUID, playlist_id: UUID | None = None) -> JamResponse:
+    async def create(
+        self, owner_id: UUID, username: str, playlist_id: UUID | None = None
+    ) -> JamResponse:
         song_ids = await self._playlist.get_song_ids(playlist_id) if playlist_id else []
         async with self._lock:
             jam = Jam(
                 jam_id=uuid4(),
                 owner_id=owner_id,
                 participant_ids=[owner_id],
+                participant_usernames={owner_id: username},
                 queue=[
                     QueueItem(
                         queue_item_id=uuid4(),
@@ -111,6 +139,14 @@ class JamManager:
             if jam.sync_generation is None:
                 return self.get(jam_id)
             snapshot = await self._sync.playback_state(jam.jam_id)
+            if snapshot.state is JamState.ENDED and jam.current_queue_item_id is not None:
+                current = self._queue_item(jam, jam.current_queue_item_id)
+                if current.position + 1 < len(jam.queue):
+                    selection = jam.queue[current.position + 1]
+                    snapshot = await self._sync.skip(
+                        uuid4(), jam.jam_id, snapshot.generation, selection
+                    )
+                    jam.current_queue_item_id = selection.queue_item_id
             changed = jam.sync_generation != snapshot.generation or jam.state != snapshot.state
             self._apply_snapshot(jam, snapshot.generation, snapshot.state)
             if changed:
@@ -119,9 +155,10 @@ class JamManager:
             await self.broadcast(jam_id)
         return self.get(jam_id)
 
-    async def join(self, jam_id: UUID, participant_id: UUID) -> JamResponse:
+    async def join(self, jam_id: UUID, participant_id: UUID, username: str) -> JamResponse:
         async with self._lock:
             jam = self._find(jam_id)
+            self._require_active(jam)
             if participant_id not in jam.participant_ids:
                 updated_participants = [*jam.participant_ids, participant_id]
                 if jam.sync_generation is not None:
@@ -129,7 +166,8 @@ class JamManager:
                         uuid4(), jam.jam_id, jam.sync_generation, updated_participants
                     )
                 jam.participant_ids.append(participant_id)
-                await self._save(jam)
+            jam.participant_usernames[participant_id] = username
+            await self._save(jam)
         await self.broadcast(jam_id)
         return self.get(jam_id)
 
@@ -148,6 +186,7 @@ class JamManager:
                     uuid4(), jam.jam_id, jam.sync_generation, updated_participants
                 )
             jam.participant_ids.remove(participant_id)
+            jam.participant_usernames.pop(participant_id, None)
             await self._save(jam)
         await self._disconnect_participant(jam_id, participant_id)
         await self.broadcast(jam_id)
@@ -155,6 +194,7 @@ class JamManager:
     async def add(self, jam_id: UUID, actor_id: UUID, song_id: UUID) -> JamResponse:
         async with self._lock:
             jam = self._find(jam_id)
+            self._require_active(jam)
             self._require_member(jam, actor_id)
             jam.queue.append(
                 QueueItem(
@@ -205,6 +245,7 @@ class JamManager:
     ) -> JamResponse:
         async with self._lock:
             jam = self._find(jam_id)
+            self._require_active(jam)
             self._require_owner(jam, actor_id)
             if not jam.queue:
                 raise JamConflictError("queue is empty")
@@ -280,6 +321,7 @@ class JamManager:
 
     async def connect(self, jam_id: UUID, participant_id: UUID, websocket: WebSocket) -> None:
         jam = self._find(jam_id)
+        self._require_active(jam)
         self._require_member(jam, participant_id)
         await websocket.accept()
         self._connections.setdefault(jam_id, {})[websocket] = participant_id
@@ -306,6 +348,55 @@ class JamManager:
                 await websocket.close(code=4403, reason="Jam membership removed")
                 connections.pop(websocket, None)
 
+    async def transfer(
+        self,
+        jam_id: UUID,
+        actor_id: UUID,
+        participant_id: UUID,
+        *,
+        leave: bool,
+    ) -> JamResponse:
+        async with self._lock:
+            jam = self._find(jam_id)
+            self._require_active(jam)
+            self._require_owner(jam, actor_id)
+            if participant_id == actor_id or participant_id not in jam.participant_ids:
+                raise JamConflictError("new owner must be another current participant")
+            jam.owner_id = participant_id
+            if leave:
+                updated = [value for value in jam.participant_ids if value != actor_id]
+                if jam.sync_generation is not None:
+                    await self._sync.update_participants(
+                        uuid4(), jam.jam_id, jam.sync_generation, updated
+                    )
+                jam.participant_ids = updated
+                jam.participant_usernames.pop(actor_id, None)
+            await self._save(jam)
+        if leave:
+            await self._disconnect_participant(jam_id, actor_id)
+        await self.broadcast(jam_id)
+        return self.get(jam_id)
+
+    async def end(self, jam_id: UUID, actor_id: UUID) -> JamResponse:
+        async with self._lock:
+            jam = self._find(jam_id)
+            self._require_owner(jam, actor_id)
+            if jam.lifecycle_state is JamLifecycle.ENDED:
+                return self.get(jam_id)
+            if jam.sync_generation is not None:
+                await self._sync.update_participants(
+                    uuid4(), jam.jam_id, jam.sync_generation, []
+                )
+            jam.lifecycle_state = JamLifecycle.ENDED
+            jam.state = JamState.ENDED
+            jam.ended_at = datetime.now(UTC)
+            await self._save(jam)
+        await self.broadcast(jam_id)
+        for websocket in list(self._connections.get(jam_id, {})):
+            await websocket.close(code=4408, reason="Jam ended")
+            self.disconnect(jam_id, websocket)
+        return self.get(jam_id)
+
     def _find(self, jam_id: UUID) -> Jam:
         try:
             return self._jams[jam_id]
@@ -324,10 +415,16 @@ class JamManager:
 
     def _active_owner(self, jam_id: UUID, actor_id: UUID) -> Jam:
         jam = self._find(jam_id)
+        self._require_active(jam)
         self._require_owner(jam, actor_id)
         if jam.sync_generation is None:
             raise JamConflictError("playback has not started")
         return jam
+
+    @staticmethod
+    def _require_active(jam: Jam) -> None:
+        if jam.lifecycle_state is JamLifecycle.ENDED:
+            raise JamConflictError("Jam has ended")
 
     async def _switch_song(self, jam: Jam, request_id: UUID, selection: QueueItem) -> SyncSnapshot:
         """Start `selection` for everyone.
@@ -377,6 +474,9 @@ class JamManager:
                 current_queue_item_id=jam.current_queue_item_id,
                 sync_generation=jam.sync_generation,
                 participant_ids=jam.participant_ids,
+                participant_usernames=jam.participant_usernames,
                 queue=jam.queue,
+                lifecycle_state=jam.lifecycle_state,
+                ended_at=jam.ended_at,
             )
         )

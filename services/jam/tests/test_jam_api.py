@@ -25,11 +25,11 @@ def create_jam(client: TestClient, owner_id: str) -> dict:
 
 
 def join_guest(client: TestClient, jam_id: str) -> tuple[dict, dict[str, str]]:
-    as_guest(client)
+    as_account(client, str(uuid4()))
     response = client.post(f"/jams/{jam_id}/members")
     assert response.status_code == 200, response.text
     body = response.json()
-    return body, {"x-jam-token": body["member_token"]}
+    return body, {}
 
 
 def test_health_and_hosting_requires_an_account(client: TestClient) -> None:
@@ -64,7 +64,7 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
     joined, guest_headers = join_guest(client, jam_id)
     member_id = joined["member_id"]
     assert member_id in joined["participant_ids"]
-    assert joined["member_token"]
+    assert joined["member_token"] is None
 
     queued = client.post(
         f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}, headers=guest_headers
@@ -78,14 +78,11 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
         headers=guest_headers,
     )
     assert spoofed.status_code == 422
-    assert (
-        client.post(
-            f"/jams/{jam_id}/playback/start",
-            json={"request_id": str(uuid4())},
-            headers=guest_headers,
-        ).status_code
-        == 401
-    )
+    assert client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"request_id": str(uuid4())},
+        headers=guest_headers,
+    ).status_code == 403
 
     as_account(client, str(uuid4()))
     assert (
@@ -104,14 +101,14 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
     assert paused.json()["state"] == "PAUSED"
 
 
-def test_room_token_is_scoped_to_one_room(client: TestClient) -> None:
+def test_account_membership_is_scoped_to_one_room(client: TestClient) -> None:
     first_id = create_jam(client, str(uuid4()))["jam_id"]
-    _, token = join_guest(client, first_id)
+    joined, _ = join_guest(client, first_id)
+    member_id = joined["member_id"]
     second_id = create_jam(client, str(uuid4()))["jam_id"]
-
-    response = client.get(f"/jams/{second_id}", headers=token)
-
-    assert response.status_code == 401
+    as_account(client, member_id)
+    response = client.get(f"/jams/{second_id}")
+    assert response.status_code == 403
 
 
 def test_owner_queue_controls_and_websocket(client: TestClient) -> None:
@@ -157,28 +154,67 @@ def test_get_reconciles_readiness_driven_sync_state(client: TestClient) -> None:
     assert refreshed.json()["state"] == "SCHEDULED"
 
 
+def test_ended_song_advances_to_the_next_queue_item(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    for _ in range(2):
+        queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())})
+        queued.raise_for_status()
+    queue = queued.json()["queue"]
+    started = client.post(f"/jams/{jam_id}/playback/start", json={"request_id": str(uuid4())})
+    started.raise_for_status()
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(generation=1, state=JamState.ENDED)
+
+    refreshed = client.get(f"/jams/{jam_id}")
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()["current_queue_item_id"] == queue[1]["queue_item_id"]
+    assert refreshed.json()["state"] == "PREPARING"
+
+
+def test_owner_can_transfer_leave_and_end_a_jam(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    joined, _ = join_guest(client, jam_id)
+    next_owner_id = joined["member_id"]
+    as_account(client, owner_id)
+
+    transferred = client.post(
+        f"/jams/{jam_id}/owner/transfer-and-leave",
+        json={"participant_id": next_owner_id},
+    )
+    assert transferred.status_code == 200
+    assert transferred.json()["owner_id"] == next_owner_id
+    assert owner_id not in transferred.json()["participant_ids"]
+
+    as_account(client, next_owner_id)
+    ended = client.post(f"/jams/{jam_id}/end")
+    assert ended.status_code == 200
+    assert ended.json()["lifecycle_state"] == "ENDED"
+
+
 def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> None:
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]
     for _ in range(3):
         response = client.post(
             f"/jams/{jam_id}/queue",
-            json={"actor_id": owner_id, "song_id": str(uuid4())},
+                json={"song_id": str(uuid4())},
         )
     queue_ids = [item["queue_item_id"] for item in response.json()["queue"]]
 
     started = client.post(
         f"/jams/{jam_id}/playback/start",
-        json={"actor_id": owner_id, "request_id": str(uuid4())},
+        json={"request_id": str(uuid4())},
     ).json()
     client.post(
         f"/jams/{jam_id}/playback/readiness-decision",
-        json={"actor_id": owner_id, "request_id": str(uuid4()), "decision": "CONTINUE"},
+        json={"request_id": str(uuid4()), "decision": "CONTINUE"},
     ).raise_for_status()
 
     # A new song moves the existing session on (next generation), like a skip,
     # instead of replacing it and stranding the devices connected to it.
-    play_now = {"actor_id": owner_id, "request_id": str(uuid4()), "queue_item_id": queue_ids[2]}
+    play_now = {"request_id": str(uuid4()), "queue_item_id": queue_ids[2]}
     switched = client.post(f"/jams/{jam_id}/playback/start", json=play_now).json()
     assert switched["current_queue_item_id"] == queue_ids[2]
     assert switched["sync_generation"] == started["sync_generation"] + 1
@@ -189,21 +225,21 @@ def test_play_now_starts_a_new_session_when_sync_lost_it(client: TestClient) -> 
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]
     client.post(
-        f"/jams/{jam_id}/queue", json={"actor_id": owner_id, "song_id": str(uuid4())}
+        f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}
     ).raise_for_status()
     client.post(
         f"/jams/{jam_id}/playback/start",
-        json={"actor_id": owner_id, "request_id": str(uuid4())},
+        json={"request_id": str(uuid4())},
     ).raise_for_status()
     client.post(
         f"/jams/{jam_id}/playback/readiness-decision",
-        json={"actor_id": owner_id, "request_id": str(uuid4()), "decision": "CANCEL"},
+        json={"request_id": str(uuid4()), "decision": "CANCEL"},
     ).raise_for_status()
     sync_client._snapshots.clear()  # as if Sync restarted
 
     restarted = client.post(
         f"/jams/{jam_id}/playback/start",
-        json={"actor_id": owner_id, "request_id": str(uuid4())},
+        json={"request_id": str(uuid4())},
     )
     assert restarted.status_code == 200
     assert restarted.json()["state"] == "PREPARING"

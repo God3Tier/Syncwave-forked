@@ -20,13 +20,20 @@ MEMBER_SECONDS = 30 * 24 * 60 * 60
 class Actor:
     user_id: UUID
     account: bool
+    username: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountIdentity:
+    user_id: UUID
+    username: str
 
 
 class AuthVerifier:
     def __init__(self, jwks_url: str) -> None:
         self._client = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
 
-    def account(self, token: str) -> UUID:
+    def account(self, token: str) -> AccountIdentity:
         try:
             key = self._client.get_signing_key_from_jwt(token).key
             claims = jwt.decode(
@@ -37,7 +44,10 @@ class AuthVerifier:
                 issuer=ACCOUNT_ISSUER,
                 options={"require": ["sub", "exp", "iat"]},
             )
-            return UUID(claims["sub"])
+            username = claims.get("username")
+            if not isinstance(username, str) or not username:
+                raise ValueError("username claim is missing")
+            return AccountIdentity(UUID(claims["sub"]), username)
         except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as error:
             raise HTTPException(status_code=401, detail="Sign in to continue") from error
         except PyJWKClientError as error:
@@ -46,7 +56,7 @@ class AuthVerifier:
             ) from error
 
 
-def optional_account(request: Request) -> UUID | None:
+def optional_account(request: Request) -> AccountIdentity | None:
     token = request.cookies.get(ACCOUNT_COOKIE)
     if not token:
         return None
@@ -91,24 +101,24 @@ def actor_for_request(request: Request, jam_id: UUID, manager) -> Actor:
         jam = manager.get(jam_id)
         if user_id == jam.owner_id or user_id not in jam.participant_ids:
             raise HTTPException(status_code=403, detail="You are not a member of this Jam")
-        return Actor(user_id=user_id, account=False)
-    user_id = optional_account(request)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Join this Jam or sign in")
+        return Actor(user_id=user_id, account=False, username=f"Member {str(user_id)[:8]}")
+    identity = optional_account(request)
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Sign in to continue")
     jam = manager.get(jam_id)
-    if user_id not in jam.participant_ids:
+    if identity.user_id not in jam.participant_ids:
         raise HTTPException(status_code=403, detail="Join this Jam first")
-    return Actor(user_id=user_id, account=True)
+    return Actor(user_id=identity.user_id, account=True, username=identity.username)
 
 
 def owner_for_request(request: Request, jam_id: UUID, manager) -> UUID:
-    user_id = optional_account(request)
-    if user_id is None:
+    identity = optional_account(request)
+    if identity is None:
         raise HTTPException(status_code=401, detail="Sign in to host and control a Jam")
     jam = manager.get(jam_id)
-    if jam.owner_id != user_id:
+    if jam.owner_id != identity.user_id:
         raise HTTPException(status_code=403, detail="Only the host can control this Jam")
-    return user_id
+    return identity.user_id
 
 
 def check_request_origin(request: Request) -> None:
