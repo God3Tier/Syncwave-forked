@@ -6,10 +6,12 @@ info:
 servers:
   - url: http://auth:8080
     description: Inside Docker Compose (the gateway adds the /api/auth prefix)
+security: []
 paths:
   /health:
     get:
       operationId: authHealth
+      summary: Check Auth service health
       responses:
         "200":
           description: The service is running.
