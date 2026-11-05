@@ -4,7 +4,46 @@ use aws_sdk_s3::Client;
 use bytes::Bytes;
 use moka::future::Cache;
 use serde::Serialize;
+use std::{fs, process::Command, sync::Arc};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
+
+fn encode_pcm_chunk(source: Bytes, start_ms: u64, duration_ms: u64) -> Result<Vec<u8>, String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let input = directory.path().join("source");
+    let output = directory.path().join("chunk.wav");
+    fs::write(&input, source).map_err(|error| error.to_string())?;
+
+    let result = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{:.3}", start_ms as f64 / 1000.0),
+            "-i",
+        ])
+        .arg(&input)
+        .args([
+            "-t",
+            &format!("{:.3}", duration_ms as f64 / 1000.0),
+            "-vn",
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s16le",
+            "-y",
+        ])
+        .arg(&output)
+        .output()
+        .map_err(|error| format!("failed to start FFmpeg: {error}"))?;
+    if !result.status.success() {
+        return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned());
+    }
+    fs::read(output).map_err(|error| error.to_string())
+}
 
 /// One cached song, without its audio bytes.
 #[derive(Debug, PartialEq, Serialize)]
@@ -15,6 +54,8 @@ pub struct CachedTrack {
 
 pub struct AudioStore {
     audio_stash: Cache<Uuid, Bytes>,
+    chunk_stash: Cache<String, Bytes>,
+    conversions: Arc<Semaphore>,
     client: Client,
     bucket_name: String,
 }
@@ -23,6 +64,11 @@ impl AudioStore {
     pub fn new(capacity: u64, client: Client, bucket_name: String) -> Self {
         AudioStore {
             audio_stash: Cache::new(capacity),
+            chunk_stash: Cache::builder()
+                .max_capacity(256 * 1024 * 1024)
+                .weigher(|_key: &String, value: &Bytes| value.len().min(u32::MAX as usize) as u32)
+                .build(),
+            conversions: Arc::new(Semaphore::new(2)),
             client,
             bucket_name,
         }
@@ -38,6 +84,43 @@ impl AudioStore {
                 bytes: audio.len(),
             })
             .collect()
+    }
+
+    /// Produces one independently decodable PCM WAV derivative. Derivatives
+    /// are cached by media version and chunk index; at most two FFmpeg jobs may
+    /// run at once so a prefetch burst cannot exhaust the service.
+    pub async fn get_pcm_chunk(
+        &self,
+        song_id: Uuid,
+        audio_reference: &str,
+        media_version: &str,
+        chunk_index: u32,
+        start_ms: u64,
+        duration_ms: u64,
+    ) -> Result<Bytes, StoreError> {
+        let key = format!("{song_id}:{media_version}:{chunk_index}");
+        if let Some(bytes) = self.chunk_stash.get(&key).await {
+            return Ok(bytes);
+        }
+
+        let source = self.get_track(song_id, audio_reference).await?;
+        let permit = self
+            .conversions
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|error| StoreError::AudioDerivative(error.to_string()))?;
+        let encoded = actix_web::web::block(move || {
+            let _permit = permit;
+            encode_pcm_chunk(source, start_ms, duration_ms)
+        })
+        .await
+        .map_err(|error| StoreError::AudioDerivative(error.to_string()))?
+        .map_err(StoreError::AudioDerivative)?;
+
+        let encoded = Bytes::from(encoded);
+        self.chunk_stash.insert(key, encoded.clone()).await;
+        Ok(encoded)
     }
 }
 
@@ -103,5 +186,60 @@ mod tests {
             .await;
 
         assert_eq!(store.cache_state(), vec![CachedTrack { song_id, bytes: 9 }]);
+    }
+
+    #[test]
+    fn variable_bitrate_input_produces_independent_exact_wav_chunks() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.mp3");
+        let generated = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=25.001",
+                "-q:a",
+                "4",
+                "-y",
+            ])
+            .arg(&source_path)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+        let source = Bytes::from(fs::read(source_path).unwrap());
+
+        for (index, duration_ms) in [10_000, 10_000, 5_001].into_iter().enumerate() {
+            let wav = encode_pcm_chunk(source.clone(), index as u64 * 10_000, duration_ms).unwrap();
+            assert!(wav.starts_with(b"RIFF"));
+            assert_eq!(&wav[8..12], b"WAVE");
+
+            let path = directory.path().join(format!("chunk-{index}.wav"));
+            fs::write(&path, wav).unwrap();
+            let probe = Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=sample_rate,channels,duration_ts",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(path)
+                .output()
+                .unwrap();
+            assert!(probe.status.success());
+            let values = String::from_utf8(probe.stdout).unwrap();
+            let fields: Vec<_> = values.trim().split(',').collect();
+            assert_eq!(&fields[..2], ["44100", "2"]);
+            assert_eq!(
+                fields[2].parse::<u64>().unwrap(),
+                duration_ms * 44_100 / 1_000
+            );
+        }
     }
 }

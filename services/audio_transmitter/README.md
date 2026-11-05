@@ -2,7 +2,7 @@
 
 The streaming HTTP service listens on port `8081` and exposes `GET /health`,
 `GET /cache`, `GET /tracks/{track_id}/stream-info`, `GET /tracks/{track_id}/audio`,
-and `GET /tracks/{track_id}/audio/range`.
+and a versioned chunk API for browser-owned playback buffers.
 
 `GET /cache` lists the cached songs as `[{"song_id": "...", "bytes": 123}]`; it
 never returns the audio itself.
@@ -24,9 +24,18 @@ Sync calls `stream-info` before preparing playback. The response contains the
 browser-facing `/api/streaming/tracks/{song_id}/audio` URL; Jam continues to
 call Sync and does not depend on Streaming directly.
 
-## Range endpoint and the Catalogue
+## Chunk playback and the Catalogue
 
-`GET /tracks/{track_id}/audio/range?start=&end=` (seconds) asks the Catalogue for the song first:
+`GET /tracks/{track_id}/manifest` returns exact sample boundaries and URLs for
+independently decodable ten-second PCM WAV chunks. `GET
+/tracks/{track_id}/chunks/{index}?version=...` generates the derivative with
+FFmpeg on first use, caches it, and limits the process to two concurrent
+conversions. The final chunk may be shorter than ten seconds.
+
+The legacy `GET /tracks/{track_id}/audio/range?start=&end=` endpoint remains for
+the standalone song-request orchestrator. It proportionally slices stored bytes
+and must not be used for browser playback or seeking. It asks the Catalogue for
+the song first:
 
 | Catalogue answers | This endpoint returns |
 |---|---|

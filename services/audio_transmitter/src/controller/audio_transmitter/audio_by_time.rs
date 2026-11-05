@@ -53,22 +53,15 @@ pub async fn get_audio_by_range(
     let pattern = normalize_time_range(range.start, range.end, duration_seconds);
 
     if pattern.is_none() {
-        return HttpResponse::BadRequest().body(
-            "range start must not be greater than end: {range.start} <= {range.end}",
-        );
+        return HttpResponse::BadRequest()
+            .body("range start must not be greater than end: {range.start} <= {range.end}");
     }
 
     let (start, end) = pattern.unwrap();
 
     match store
         .into_inner()
-        .get_track_by_timing(
-            song_id,
-            &song.audio_reference,
-            start,
-            end,
-            duration_seconds,
-        )
+        .get_track_by_timing(song_id, &song.audio_reference, start, end, duration_seconds)
         .await
     {
         Ok(bytes) => HttpResponse::Ok()
@@ -203,9 +196,15 @@ mod tests {
     async fn valid_time_range_returns_the_requested_audio_bytes() {
         let track_id = Uuid::new_v4();
         let (endpoint, _) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])),
+            endpoint
+        );
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=2&end=5"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=2&end=5")
+        );
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(to_bytes(response.into_body()).await.unwrap(), b"234"[..]);
@@ -215,13 +214,21 @@ mod tests {
     async fn the_audio_is_fetched_with_the_key_the_catalogue_gave() {
         let track_id = Uuid::new_v4();
         let (endpoint, requested) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])),
+            endpoint
+        );
 
-        fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
+        fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=0&end=1")
+        );
 
         let paths = requested.lock().unwrap().clone();
         assert!(
-            paths.iter().any(|path| path.ends_with(&format!("audio/{track_id}.mp3"))),
+            paths
+                .iter()
+                .any(|path| path.ends_with(&format!("audio/{track_id}.mp3"))),
             "{paths:?}"
         );
     }
@@ -254,7 +261,10 @@ mod tests {
         let (endpoint, _) = start_mock_s3().await;
         let app = init_range_app!(Arc::new(FakeCatalogue::with(&[])), endpoint);
 
-        let response = fetch!(app, &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4()));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4())
+        );
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
@@ -264,10 +274,16 @@ mod tests {
         let (endpoint, requested) = start_mock_s3().await;
         let app = init_range_app!(Arc::new(FakeCatalogue::down()), endpoint);
 
-        let response = fetch!(app, &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4()));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{}/audio/range?start=2&end=5", Uuid::new_v4())
+        );
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        assert!(requested.lock().unwrap().is_empty(), "no audio is fetched without metadata");
+        assert!(
+            requested.lock().unwrap().is_empty(),
+            "no audio is fetched without metadata"
+        );
     }
 
     #[actix_web::test]
@@ -276,7 +292,10 @@ mod tests {
         let (endpoint, requested) = start_mock_s3().await;
         let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, None)])), endpoint);
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=0&end=1")
+        );
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
         assert!(requested.lock().unwrap().is_empty());
@@ -286,9 +305,15 @@ mod tests {
     async fn empty_time_range_returns_bad_request() {
         let track_id = Uuid::new_v4();
         let (endpoint, _) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])),
+            endpoint
+        );
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=5&end=5"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=5&end=5")
+        );
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -297,9 +322,15 @@ mod tests {
     async fn end_after_track_runtime_returns_the_whole_song() {
         let track_id = Uuid::new_v4();
         let (endpoint, _) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])),
+            endpoint
+        );
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=11"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=0&end=11")
+        );
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -312,9 +343,15 @@ mod tests {
     async fn zero_runtime_is_rejected_by_the_controller() {
         let track_id = Uuid::new_v4();
         let (endpoint, _) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(0))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(0))])),
+            endpoint
+        );
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=0&end=1"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=0&end=1")
+        );
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
@@ -323,9 +360,15 @@ mod tests {
     async fn start_after_end_is_rejected_by_the_controller() {
         let track_id = Uuid::new_v4();
         let (endpoint, _) = start_mock_s3().await;
-        let app = init_range_app!(Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])), endpoint);
+        let app = init_range_app!(
+            Arc::new(FakeCatalogue::with(&[(track_id, Some(10_000))])),
+            endpoint
+        );
 
-        let response = fetch!(app, &format!("/tracks/{track_id}/audio/range?start=5&end=2"));
+        let response = fetch!(
+            app,
+            &format!("/tracks/{track_id}/audio/range?start=5&end=2")
+        );
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }

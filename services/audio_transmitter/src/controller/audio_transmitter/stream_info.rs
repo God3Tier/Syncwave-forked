@@ -9,6 +9,7 @@ struct StreamInfo {
     song_id: Uuid,
     stream_url: String,
     supports_ranges: bool,
+    manifest_url: String,
 }
 
 pub async fn get_stream_info(
@@ -30,6 +31,7 @@ pub async fn get_stream_info(
         song_id,
         stream_url: format!("/api/streaming/tracks/{song_id}/audio"),
         supports_ranges: false,
+        manifest_url: format!("/api/streaming/tracks/{song_id}/manifest"),
     })
 }
 
@@ -78,5 +80,9 @@ mod tests {
             format!("/api/streaming/tracks/{song_id}/audio")
         );
         assert_eq!(body["supports_ranges"], false);
+        assert_eq!(
+            body["manifest_url"],
+            format!("/api/streaming/tracks/{song_id}/manifest")
+        );
     }
 }
