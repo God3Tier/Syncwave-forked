@@ -144,7 +144,7 @@ def test_correction_gate_uses_hysteresis_before_first_correction() -> None:
     )
 
 
-def test_correction_gate_suppresses_repeats_but_allows_rate_to_seek_escalation() -> None:
+def test_correction_gate_suppresses_during_cooldown_and_retries_persistent_seek() -> None:
     gate = CorrectionGate()
     rate = choose_correction(
         drift_ms=150,
@@ -189,7 +189,7 @@ def test_correction_gate_suppresses_repeats_but_allows_rate_to_seek_escalation()
         hysteresis_ms=20,
         cooldown_ms=3_000,
     )
-    assert not gate.should_issue(
+    assert gate.should_issue(
         seek,
         drift_ms=400,
         now_ms=17_000,

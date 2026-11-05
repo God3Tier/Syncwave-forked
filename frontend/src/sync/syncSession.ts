@@ -381,18 +381,24 @@ export class SyncSession {
 
   private startStatusReports(): void {
     if (this.status) clearInterval(this.status);
-    this.status = setInterval(() => {
-      if (this.snapshot.phase !== 'PLAYING') return;
-      this.send('PLAYBACK_STATUS', {
-        generation: this.snapshot.generation,
-        measured_server_time_ms: Math.round(Date.now() + this.offset()),
-        position_ms: Math.round(this.positionMs()),
-        buffering: false,
-        clock_offset_ms: this.snapshot.offsetMs ?? undefined,
-        round_trip_delay_ms: this.snapshot.rttMs ?? undefined,
-        start_error_ms: this.pendingStartErrorMs ?? undefined,
-      });
-      this.pendingStartErrorMs = null;
-    }, config.syncStatusIntervalMs);
+    this.reportStatus();
+    this.status = setInterval(() => this.reportStatus(), config.syncStatusIntervalMs);
+  }
+
+  private reportStatus(): void {
+    if (this.snapshot.phase !== 'PLAYING') return;
+    // Refresh the four-timestamp clock estimate while playback is active. This
+    // catches mobile clock changes and foreground resumes faster than the idle heartbeat.
+    this.ping();
+    this.send('PLAYBACK_STATUS', {
+      generation: this.snapshot.generation,
+      measured_server_time_ms: Math.round(Date.now() + this.offset()),
+      position_ms: Math.round(this.positionMs()),
+      buffering: false,
+      clock_offset_ms: this.snapshot.offsetMs ?? undefined,
+      round_trip_delay_ms: this.snapshot.rttMs ?? undefined,
+      start_error_ms: this.pendingStartErrorMs ?? undefined,
+    });
+    this.pendingStartErrorMs = null;
   }
 }
