@@ -31,7 +31,7 @@ from lyrics_service.shared.events import (
     parse_song_uploaded,
     previous_failures,
 )
-from lyrics_service.shared.mood import categorize_mood_from_lyrics
+from lyrics_service.shared.mood import categorize_mood
 from lyrics_service.shared.storage import ObjectNotFound, ObjectTooLarge
 
 logger = logging.getLogger(__name__)
@@ -101,12 +101,13 @@ class LyricsHandler:
             # Duplicate delivery, or a crash between committing and publishing:
             # announce the stored result again instead of redoing the work.
             logger.info("already READY, re-announcing: %s", context)
-            await self._announce_ready(event, existing.line_count)
+            mood = categorize_mood(existing.lines or [], title=event.title)
+            await self._announce_ready(event, existing.line_count, mood=mood)
             return
 
         await self._repository.mark_processing(event.song_id, event.event_id)
         lines = await self._load_lines(event.lyrics_reference)
-        mood = categorize_mood_from_lyrics(lines)
+        mood = categorize_mood(lines, title=event.title)
         await self._repository.mark_ready(event.song_id, lines)
         logger.info("READY: %s lines=%d mood=%s", context, len(lines), mood)
         await self._announce_ready(event, len(lines), mood=mood)

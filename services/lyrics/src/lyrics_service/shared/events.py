@@ -47,6 +47,7 @@ class SongUploaded:
     event_id: str
     song_id: uuid.UUID
     lyrics_reference: str | None
+    title: str
 
 
 def parse_song_uploaded(body: bytes) -> SongUploaded:
@@ -74,7 +75,15 @@ def parse_song_uploaded(body: bytes) -> SongUploaded:
     reference = payload.get("lyrics_reference")
     if reference is not None and (not isinstance(reference, str) or not reference):
         raise InvalidEvent("payload.lyrics_reference must be a non-empty string or null", **ids)
-    return SongUploaded(event_id=event_id, song_id=song_id, lyrics_reference=reference)
+    title = payload.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise InvalidEvent("payload.title must be a non-empty string", **ids)
+    return SongUploaded(
+        event_id=event_id,
+        song_id=song_id,
+        lyrics_reference=reference,
+        title=title,
+    )
 
 
 def build_event(
