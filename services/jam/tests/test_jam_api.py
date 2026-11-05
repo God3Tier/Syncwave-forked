@@ -85,11 +85,14 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
         headers=guest_headers,
     )
     assert spoofed.status_code == 422
-    assert client.post(
-        f"/jams/{jam_id}/playback/start",
-        json={"request_id": str(uuid4())},
-        headers=guest_headers,
-    ).status_code == 401
+    assert (
+        client.post(
+            f"/jams/{jam_id}/playback/start",
+            json={"request_id": str(uuid4())},
+            headers=guest_headers,
+        ).status_code
+        == 401
+    )
 
     as_account(client, str(uuid4()))
     assert (
@@ -206,7 +209,7 @@ def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> 
     for _ in range(3):
         response = client.post(
             f"/jams/{jam_id}/queue",
-                json={"song_id": str(uuid4())},
+            json={"song_id": str(uuid4())},
         )
     queue_ids = [item["queue_item_id"] for item in response.json()["queue"]]
 
@@ -231,9 +234,7 @@ def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> 
 def test_play_now_starts_a_new_session_when_sync_lost_it(client: TestClient) -> None:
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]
-    client.post(
-        f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}
-    ).raise_for_status()
+    client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).raise_for_status()
     client.post(
         f"/jams/{jam_id}/playback/start",
         json={"request_id": str(uuid4())},

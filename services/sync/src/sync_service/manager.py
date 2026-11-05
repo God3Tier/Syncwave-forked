@@ -286,7 +286,8 @@ class SessionManager:
                     anchor_position_ms=session.anchor_position_ms,
                     playback_rate=session.playback_rate,
                     measured_server_time_ms=measured_server_time_ms,
-                ) >= session.duration_ms
+                )
+                >= session.duration_ms
             ):
                 session.state = PlaybackState.ENDED
                 session.anchor_position_ms = session.duration_ms
