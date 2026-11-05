@@ -65,18 +65,18 @@ export function PlaylistDetail() {
   return (
     <Page wide>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 space-y-6">
-          <Card className="flex flex-col gap-6 sm:flex-row sm:items-end">
+        <div className="min-w-0 space-y-8">
+          <header className="flex flex-col gap-6 border-b border-outline-variant/35 pb-8 sm:flex-row sm:items-end">
             <div className="w-40 shrink-0 md:w-48">
               <Mosaic songIds={ids} />
             </div>
             <div className="min-w-0 flex-1">
-              <span className="rounded border border-secondary/40 bg-secondary/10 px-2 py-0.5 font-mono text-[11px] tracking-widest text-secondary">PLAYLIST</span>
-              <h1 className="mt-3 flex items-center gap-2 font-headline text-3xl font-bold tracking-tight md:text-4xl">
+              <p className="text-xs font-bold text-secondary">Playlist</p>
+              <h1 className="mt-2 flex items-center gap-2 text-3xl font-extrabold tracking-[-0.035em] md:text-4xl">
                 <span className="truncate">{data.name}</span>
                 <IconButton icon="edit" label="Rename playlist" onClick={rename} />
               </h1>
-              <p className="mt-1 font-mono text-sm text-on-surface-variant">
+              <p className="mt-2 text-sm text-on-surface-variant">
                 {data.song_count} song{data.song_count === 1 ? '' : 's'} · {Math.round(totalMs / 60000)} min
               </p>
               <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -87,16 +87,16 @@ export function PlaylistDetail() {
                   Shuffle
                 </Button>
                 <Button variant="cyan" icon="sensors" onClick={() => void startJam()}>
-                  Start Jam with this playlist
+                  Start a Jam
                 </Button>
                 <IconButton icon="delete" label="Delete playlist" onClick={() => void remove()} className="ml-auto hover:text-error" />
               </div>
             </div>
-          </Card>
+          </header>
 
           {error !== undefined && <Notice tone="error">{errorMessage(error)}</Notice>}
 
-          <Card className="p-2">
+          <section>
             {ids.length === 0 && <p className="px-3 py-8 text-center text-on-surface-variant">No songs yet. Add some from the panel.</p>}
             <ol>
               {ids.map((id, i) => {
@@ -105,7 +105,7 @@ export function PlaylistDetail() {
                 return (
                   <li key={id} {...drag.rowProps(i)} className={`relative ${drag.dragging === i ? 'opacity-40' : ''}`}>
                     {drag.gap === i && <DropLine />}
-                    <div className={`group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-2 py-2 hover:bg-surface-container-high md:grid-cols-[auto_2rem_minmax(0,1fr)_5rem_7rem_auto] ${current ? 'bg-surface-container-high' : ''}`}>
+                    <div className={`group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-outline-variant/25 px-2 py-2.5 hover:bg-surface-container/55 md:grid-cols-[auto_2rem_minmax(0,1fr)_5rem_7rem_auto] ${current ? 'bg-surface-container/70' : ''}`}>
                       <Icon name="drag_indicator" className="cursor-grab text-lg text-outline" />
                       <span className="hidden font-mono text-xs text-outline md:block">{current && player.playing ? <EqualizerIcon /> : String(i + 1).padStart(2, '0')}</span>
                       <button type="button" onClick={() => player.playQueue(ids, i)} className="flex min-w-0 items-center gap-3 text-left">
@@ -124,7 +124,7 @@ export function PlaylistDetail() {
                 );
               })}
             </ol>
-          </Card>
+          </section>
         </div>
 
         <AddSongsPanel existing={new Set(ids)} onAdd={(songId) => void apply(() => addSong(playlistId, songId))} />

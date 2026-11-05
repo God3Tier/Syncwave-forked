@@ -1,6 +1,6 @@
 # Remaining integration work
 
-Updated: 4 November 2026. Original baseline branch: `feat/streaming-sync-integration`.
+Updated: 5 November 2026. Original baseline branch: `feat/streaming-sync-integration`.
 
 ## Verified baseline
 
@@ -107,15 +107,25 @@ Upload and full Search follow once their backend services are ready.
 - [x] Connect discovery, upload status, playlists, and playback to gateway APIs.
   A browser upload reached Catalogue `READY`, then opened and played through
   the production UI.
-- [ ] Connect Jam room membership, queue updates, owner controls, and the Sync
+- [x] Connect Jam room membership, queue updates, owner controls, and the Sync
   WebSocket protocol, including clock sampling, buffering, readiness, scheduled
   playback, drift correction, reconnects, and readiness-timeout decisions.
-- [ ] Implement browser-owned nine-slot buffering using Streaming's planned
-  manifest and independently decodable chunk endpoints. The separate
-  `song_request_orchestrator` remains standalone, outside this frontend path.
-- [ ] Verify seeking and chunk-boundary playback with real audio formats.
-  Streaming currently buffers whole objects and reports `supports_ranges=false`;
-  the proportional byte-slicing endpoint must not be used for the new buffer.
+  The production frontend implements the complete Jam/Sync client flow. The
+  local browser suite passed independent owner/member membership, shared-queue
+  search/add, audio activation, owner start, synchronized `PLAYING` state, and
+  responsive Queue/People navigation on 5 November 2026. The backend scenario
+  separately verifies identical scheduled starts and reconnect catch-up. Audible
+  cross-device timing remains a physical-device evidence gate under item 4.
+- [x] Implement browser-owned nine-slot buffering using Streaming's versioned
+  manifest and independently decodable chunk endpoints. The browser prioritizes
+  current, +1, -1, +2, -2, then outer positions, permits at most two downloads,
+  and reduces targets on constrained devices while retaining all nine logical
+  positions. The separate `song_request_orchestrator` remains standalone.
+- [x] Verify seeking and chunk-boundary playback with real audio formats. The
+  Streaming suite generates variable-bitrate MP3 input and verifies three
+  independently decodable 44.1 kHz stereo WAV outputs at 441,000, 441,000, and
+  220,544 samples. The browser seeks by manifest chunk and intra-chunk offset;
+  the proportional legacy byte-slicing endpoint is not used by this flow.
 
 Acceptance: the three documented user journeys work through the production UI,
 including actionable errors when a dependency or processing stage fails.
@@ -132,7 +142,8 @@ including actionable errors when a dependency or processing stage fails.
   item 1; configuring the job does not establish that GitLab has run it.
 - [ ] Wire the Playwright browser test into staging. `tests/e2e/test_app.py`
   passes locally for Discover & Listen, Upload & Process, a two-browser Jam
-  join, and desktop/mobile layout. The current `docker:29-cli` integration
+  playback flow, and desktop/tablet/mobile layout at 1440px, 768px, and 390px. The
+  current `docker:29-cli` integration
   image has no browser runtime, so a pinned Playwright job or image is still
   required before adding `tests/e2e/run.sh`.
 - [x] Cover duplicate events, failed decoding, unavailable S3, dependency
@@ -170,9 +181,10 @@ not satisfy this gate.
   for in-memory WebSocket/session ownership and service restarts.
 - [ ] Verify logs and metrics expose failed processing, dead-letter queues,
   unhealthy consumers, dependency timeouts, and playback readiness failures.
-- [ ] Update `README.md`, `run.md`, and service READMEs to match the actual
-  interfaces. Some still describe Catalogue/media integration as fake even
-  though Compose uses Catalogue gRPC and Streaming's HTTP metadata adapter.
+- [x] Update `README.md`, `run.md`, and service READMEs to match the actual
+  interfaces. The root runbook, frontend design documentation, and Catalogue
+  notes now describe Catalogue gRPC, Streaming's HTTP metadata adapter, the
+  production Jam frontend, and the whole-object playback limitation accurately.
 
 Acceptance: a staging deployment runs the same scenario tests, has a tested
 rollback, and can be operated using accurate runbooks. Production readiness

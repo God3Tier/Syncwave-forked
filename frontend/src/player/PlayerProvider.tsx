@@ -1,204 +1,229 @@
-// Personal (non-Jam) playback for Scenario 1.
-//
-// The browser owns the logical buffer (plan.md §5): it downloads the current
-// song and pre-buffers the next `config.prefetchAhead` songs of the queue,
-// keeps the previous one, and evicts everything else. Streaming does not yet
-// support HTTP Range requests, so each song is fetched whole and played from
-// an object URL; the window logic stays the same once ranges arrive.
-
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, gatewayPath } from '../api/http';
-import { getStreamInfo } from '../api/media';
-import { config } from '../config';
+import { getStreamManifest } from '../api/media';
+import type { StreamManifest } from '../api/types';
+import { bufferSlots, DownloadPool } from './chunkBuffer';
 import { PlayerContext, type BufferState, type Player, type PlayerState } from './context';
 
+type ChunkLoad = { controller: AbortController; promise: Promise<string> };
+
+/** Browser-owned, two-download, nine-position chunk playback for solo listening. */
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const getAudio = useCallback((): HTMLAudioElement => {
+  const getAudio = useCallback(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
       audioRef.current.preload = 'auto';
     }
     return audioRef.current;
   }, []);
-  const urls = useRef(new Map<string, string>());
-  const loads = useRef(new Map<string, { controller: AbortController; promise: Promise<string> }>());
+  const manifests = useRef(new Map<string, StreamManifest>());
+  const manifestLoads = useRef(new Map<string, Promise<StreamManifest>>());
+  const chunkUrls = useRef(new Map<string, string>());
+  const chunkLoads = useRef(new Map<string, ChunkLoad>());
+  const pool = useRef(new DownloadPool(2));
+  const chunkIndex = useRef(0);
   const [state, setState] = useState<PlayerState>({
-    queue: [],
-    index: 0,
-    playing: false,
-    durationMs: 0,
-    buffers: {},
-    error: null,
-    volume: 0.8,
+    queue: [], index: 0, playing: false, durationMs: 0, buffers: {}, error: null, volume: 0.8,
   });
   const stateRef = useRef(state);
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   const setBuffer = useCallback((id: string, value: BufferState | null) => {
-    setState((s) => {
-      const buffers = { ...s.buffers };
+    setState((current) => {
+      const buffers = { ...current.buffers };
       if (value) buffers[id] = value;
       else delete buffers[id];
-      return { ...s, buffers };
+      return { ...current, buffers };
     });
   }, []);
 
-  const ensureBuffered = useCallback(
-    (id: string): Promise<string> => {
-      const ready = urls.current.get(id);
-      if (ready) return Promise.resolve(ready);
-      const existing = loads.current.get(id);
-      if (existing) return existing.promise;
+  const ensureManifest = useCallback((songId: string) => {
+    const ready = manifests.current.get(songId);
+    if (ready) return Promise.resolve(ready);
+    const pending = manifestLoads.current.get(songId);
+    if (pending) return pending;
+    const promise = getStreamManifest(songId).then((manifest) => {
+      manifests.current.set(songId, manifest);
+      return manifest;
+    }).finally(() => manifestLoads.current.delete(songId));
+    manifestLoads.current.set(songId, promise);
+    return promise;
+  }, []);
 
-      const controller = new AbortController();
-      setBuffer(id, 'loading');
-      const promise = (async () => {
-        const info = await getStreamInfo(id, controller.signal);
-        const response = await fetch(gatewayPath(info.stream_url), { signal: controller.signal });
-        if (!response.ok) throw new ApiError(response.status, 'STREAM_UNAVAILABLE', `Audio request failed (${response.status})`);
-        const url = URL.createObjectURL(await response.blob());
-        urls.current.set(id, url);
-        setBuffer(id, 'ready');
-        return url;
-      })();
-      promise
-        .catch(() => {
-          if (!controller.signal.aborted) setBuffer(id, 'error');
-        })
-        .finally(() => loads.current.delete(id));
-      loads.current.set(id, { controller, promise });
-      return promise;
-    },
-    [setBuffer],
-  );
+  const ensureChunk = useCallback(async (songId: string, manifest: StreamManifest, index: number, priority: number) => {
+    const chunk = manifest.chunks[index];
+    if (!chunk) throw new Error('Chunk is outside the track');
+    const key = `${songId}:${manifest.media_version}:${index}`;
+    const ready = chunkUrls.current.get(key);
+    if (ready) return ready;
+    const pending = chunkLoads.current.get(key);
+    if (pending) return pending.promise;
+    const controller = new AbortController();
+    const promise = pool.current.schedule(priority, async () => {
+      const response = await fetch(gatewayPath(chunk.url), { signal: controller.signal });
+      if (!response.ok) throw new ApiError(response.status, 'CHUNK_UNAVAILABLE', `Audio chunk failed (${response.status})`);
+      const url = URL.createObjectURL(await response.blob());
+      chunkUrls.current.set(key, url);
+      return url;
+    }).finally(() => chunkLoads.current.delete(key));
+    chunkLoads.current.set(key, { controller, promise });
+    return promise;
+  }, []);
 
-  // Keep [index-1, index+prefetchAhead] buffered and drop the rest.
-  const maintainWindow = useCallback(
-    (queue: string[], index: number) => {
-      const keep = new Set(queue.slice(Math.max(0, index - 1), index + 1 + config.prefetchAhead));
-      for (const [id, url] of urls.current) {
-        if (!keep.has(id)) {
-          URL.revokeObjectURL(url);
-          urls.current.delete(id);
-          setBuffer(id, null);
-        }
+  const bufferTrack = useCallback(async (songId: string, targetMs: number, priority: number) => {
+    setBuffer(songId, 'loading');
+    try {
+      const manifest = await ensureManifest(songId);
+      const count = Math.min(manifest.chunks.length, Math.ceil(targetMs / manifest.chunk_duration_ms));
+      await Promise.all(Array.from({ length: count }, (_, index) => ensureChunk(songId, manifest, index, priority)));
+      setBuffer(songId, 'ready');
+      return manifest;
+    } catch (error) {
+      setBuffer(songId, 'error');
+      throw error;
+    }
+  }, [ensureChunk, ensureManifest, setBuffer]);
+
+  const maintainWindow = useCallback((queue: string[], index: number) => {
+    const constrained = window.innerWidth < 768
+      || ('deviceMemory' in navigator && Number(navigator.deviceMemory) <= 4);
+    const slots = bufferSlots(queue, index, constrained);
+    const keep = new Set(slots.flatMap((slot) => slot.songId ? [slot.songId] : []));
+    for (const [key, url] of chunkUrls.current) {
+      if (!keep.has(key.split(':', 1)[0])) {
+        URL.revokeObjectURL(url);
+        chunkUrls.current.delete(key);
       }
-      for (const [id, load] of loads.current) {
-        if (!keep.has(id)) {
-          load.controller.abort();
-          loads.current.delete(id);
-          setBuffer(id, null);
-        }
-      }
-      for (const id of queue.slice(index + 1, index + 1 + config.prefetchAhead)) void ensureBuffered(id).catch(() => undefined);
-    },
-    [ensureBuffered, setBuffer],
-  );
+    }
+    for (const [key, load] of chunkLoads.current) {
+      if (!keep.has(key.split(':', 1)[0])) load.controller.abort();
+    }
+    for (const id of Object.keys(stateRef.current.buffers)) if (!keep.has(id)) setBuffer(id, null);
+    for (const slot of slots.sort((a, b) => a.priority - b.priority)) {
+      if (slot.songId) void bufferTrack(slot.songId, slot.targetMs, slot.priority).catch(() => undefined);
+    }
+  }, [bufferTrack, setBuffer]);
 
-  const loadIndex = useCallback(
-    (queue: string[], index: number, autoplay: boolean) => {
-      const id = queue[index];
-      if (!id) return;
-      setState((s) => ({ ...s, queue, index, error: null, durationMs: 0 }));
-      stateRef.current = { ...stateRef.current, queue, index };
-      const element = getAudio();
-      element.pause();
-      maintainWindow(queue, index);
-      ensureBuffered(id)
-        .then((url) => {
-          const { queue: q, index: i } = stateRef.current;
-          if (q[i] !== id) return; // the user moved on while this was loading
-          element.src = url;
-          element.volume = stateRef.current.volume;
-          if (autoplay) void element.play().catch(() => undefined);
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof ApiError && error.status === 409 ? 'This song is still processing.' : 'Could not load the audio.';
-          setState((s) => ({ ...s, error: message, playing: false }));
-        });
-    },
-    [getAudio, ensureBuffered, maintainWindow],
-  );
+  const playChunk = useCallback(async (
+    queue: string[], queueIndex: number, nextChunkIndex: number, autoplay: boolean, offsetMs = 0,
+  ) => {
+    const songId = queue[queueIndex];
+    if (!songId) return;
+    const manifest = await ensureManifest(songId);
+    const url = await ensureChunk(songId, manifest, nextChunkIndex, -1);
+    if (stateRef.current.queue[stateRef.current.index] !== songId) return;
+    chunkIndex.current = nextChunkIndex;
+    const audio = getAudio();
+    audio.src = url;
+    audio.volume = stateRef.current.volume;
+    if (offsetMs > 0) {
+      const applyOffset = () => { audio.currentTime = offsetMs / 1000; };
+      if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) applyOffset();
+      else audio.addEventListener('loadedmetadata', applyOffset, { once: true });
+    }
+    setState((current) => ({ ...current, durationMs: manifest.duration_ms }));
+    if (autoplay) await audio.play().catch(() => undefined);
+  }, [ensureChunk, ensureManifest, getAudio]);
+
+  const loadIndex = useCallback((queue: string[], index: number, autoplay: boolean) => {
+    const songId = queue[index];
+    if (!songId) return;
+    getAudio().pause();
+    setState((current) => ({ ...current, queue, index, error: null, durationMs: 0 }));
+    stateRef.current = { ...stateRef.current, queue, index };
+    void playChunk(queue, index, 0, autoplay).then(() => maintainWindow(queue, index)).catch((error: unknown) => {
+      const message = error instanceof ApiError && error.status === 409
+        ? 'This song is still processing.' : 'Could not load the audio.';
+      setState((current) => ({ ...current, error: message, playing: false }));
+    });
+  }, [getAudio, maintainWindow, playChunk]);
 
   useEffect(() => {
-    const element = getAudio();
-    const onPlay = () => setState((s) => ({ ...s, playing: true }));
-    const onPause = () => setState((s) => ({ ...s, playing: false }));
-    const onMetadata = () => setState((s) => ({ ...s, durationMs: Number.isFinite(element.duration) ? element.duration * 1000 : 0 }));
+    const audio = getAudio();
+    const onPlay = () => setState((current) => ({ ...current, playing: true }));
+    const onPause = () => setState((current) => ({ ...current, playing: false }));
     const onEnded = () => {
       const { queue, index } = stateRef.current;
-      if (index + 1 < queue.length) loadIndex(queue, index + 1, true);
+      const songId = queue[index];
+      const manifest = songId ? manifests.current.get(songId) : null;
+      if (manifest && chunkIndex.current + 1 < manifest.chunks.length) {
+        void playChunk(queue, index, chunkIndex.current + 1, true);
+      } else if (index + 1 < queue.length) loadIndex(queue, index + 1, true);
     };
-    element.addEventListener('play', onPlay);
-    element.addEventListener('pause', onPause);
-    element.addEventListener('loadedmetadata', onMetadata);
-    element.addEventListener('ended', onEnded);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('ended', onEnded);
     return () => {
-      element.removeEventListener('play', onPlay);
-      element.removeEventListener('pause', onPause);
-      element.removeEventListener('loadedmetadata', onMetadata);
-      element.removeEventListener('ended', onEnded);
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('ended', onEnded);
     };
-  }, [getAudio, loadIndex]);
+  }, [getAudio, loadIndex, playChunk]);
 
   useEffect(() => {
-    const created = urls.current;
+    const urls = chunkUrls.current;
+    const loads = chunkLoads.current;
     return () => {
       audioRef.current?.pause();
-      for (const url of created.values()) URL.revokeObjectURL(url);
+      for (const load of loads.values()) load.controller.abort();
+      for (const url of urls.values()) URL.revokeObjectURL(url);
     };
   }, []);
 
-  const positionMs = useCallback(() => (audioRef.current ? audioRef.current.currentTime * 1000 : 0), []);
+  const positionMs = useCallback(() => {
+    const songId = stateRef.current.queue[stateRef.current.index];
+    const manifest = songId ? manifests.current.get(songId) : null;
+    const base = manifest?.chunks[chunkIndex.current]?.start_ms ?? 0;
+    return base + (audioRef.current?.currentTime ?? 0) * 1000;
+  }, []);
 
-  const value = useMemo<Player>(
-    () => ({
-      ...state,
-      currentId: state.queue[state.index] ?? null,
-      playQueue: (songIds, startIndex = 0) => loadIndex(songIds, startIndex, true),
-      enqueue: (songId) => {
+  const value = useMemo<Player>(() => ({
+    ...state,
+    currentId: state.queue[state.index] ?? null,
+    playQueue: (songIds, startIndex = 0) => loadIndex(songIds, startIndex, true),
+    enqueue: (songId) => {
+      const { queue, index } = stateRef.current;
+      if (!queue.length) return loadIndex([songId], 0, true);
+      const next = [...queue, songId];
+      setState((current) => ({ ...current, queue: next }));
+      stateRef.current = { ...stateRef.current, queue: next };
+      maintainWindow(next, index);
+    },
+    toggle: () => {
+      const audio = getAudio();
+      if (!audio.src) {
         const { queue, index } = stateRef.current;
-        if (!queue.length) {
-          loadIndex([songId], 0, true);
-          return;
-        }
-        const next = [...queue, songId];
-        setState((s) => ({ ...s, queue: next }));
-        maintainWindow(next, index);
-      },
-      toggle: () => {
-        if (!getAudio().src) {
-          const { queue, index } = stateRef.current;
-          if (queue.length) loadIndex(queue, index, true);
-          return;
-        }
-        if (getAudio().paused) void getAudio().play().catch(() => undefined);
-        else getAudio().pause();
-      },
-      pause: () => getAudio().pause(),
-      next: () => {
-        const { queue, index } = stateRef.current;
-        if (index + 1 < queue.length) loadIndex(queue, index + 1, true);
-      },
-      previous: () => {
-        const { queue, index } = stateRef.current;
-        if (getAudio().currentTime > 3 || index === 0) getAudio().currentTime = 0;
-        else loadIndex(queue, index - 1, true);
-      },
-      seek: (ms) => {
-        if (getAudio().src) getAudio().currentTime = Math.max(0, ms / 1000);
-      },
-      setVolume: (volume) => {
-        getAudio().volume = volume;
-        setState((s) => ({ ...s, volume }));
-      },
-      positionMs,
-    }),
-    [state, getAudio, loadIndex, maintainWindow, positionMs],
-  );
+        if (queue.length) loadIndex(queue, index, true);
+      } else if (audio.paused) void audio.play().catch(() => undefined);
+      else audio.pause();
+    },
+    pause: () => getAudio().pause(),
+    next: () => {
+      const { queue, index } = stateRef.current;
+      if (index + 1 < queue.length) loadIndex(queue, index + 1, true);
+    },
+    previous: () => {
+      const { queue, index } = stateRef.current;
+      if (positionMs() > 3_000 || index === 0) void playChunk(queue, index, 0, !getAudio().paused);
+      else loadIndex(queue, index - 1, true);
+    },
+    seek: (ms) => {
+      const { queue, index, playing } = stateRef.current;
+      const songId = queue[index];
+      const manifest = songId ? manifests.current.get(songId) : null;
+      if (!manifest) return;
+      const bounded = Math.max(0, Math.min(ms, manifest.duration_ms - 1));
+      const nextChunk = Math.min(manifest.chunks.length - 1, Math.floor(bounded / manifest.chunk_duration_ms));
+      const offset = bounded - manifest.chunks[nextChunk].start_ms;
+      void playChunk(queue, index, nextChunk, playing, offset);
+    },
+    setVolume: (volume) => {
+      getAudio().volume = volume;
+      setState((current) => ({ ...current, volume }));
+    },
+    positionMs,
+  }), [state, getAudio, loadIndex, maintainWindow, playChunk, positionMs]);
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }

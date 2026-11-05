@@ -60,30 +60,24 @@ The owner's controls go through Jam, never directly to Sync. While Jam is `PREPA
 
 ## Design
 
-The screens were designed in Google Stitch through the Stitch MCP server:
+The frontend uses the **Shared Listening Desk** design system recorded in
+[`DESIGN.md`](../DESIGN.md). It is a friends-first consumer music interface:
+deep ink surfaces, warm paper text, coral actions, mint live state, bundled
+Manrope typography, Lucide icons, and deterministic record-sleeve artwork when
+the catalogue has no cover image.
 
-- project **SyncWave** (`projects/10085564592196518540`)
-- design system **SyncWave Dark** (`assets/5597125808747825182`): dark theme, violet/cyan, Space Grotesk / Inter / JetBrains Mono
+Desktop uses a 15rem navigation rail and persistent player. Below 1024px the
+rail becomes a compact header plus four-item bottom navigation. At mobile sizes,
+music shelves scroll horizontally and Jam rooms switch between Queue and People
+without compressing both panels into one column.
 
-Screens were requested for:
-
-- Discover
-- Search results
-- Now playing
-- Upload
-- Playlists
-- Playlist detail
-- Jam lobby
-- Jam room (desktop, with the readiness modal)
-- Jam room (mobile)
-
-Discover, Search results, Playlist detail and the desktop Jam room came back through MCP and were used as the reference. The other five generations timed out on the MCP side, so those pages follow the same shell and components and the prompts' specifications.
-
-The design tokens are in `src/index.css` (`@theme`). The screens were ported into the components in `src/components` and `src/pages`. The exported HTML was used only as a reference and is not committed. The Stitch mock-ups contain decorative telemetry ("mesh node", "P2P") that the system doesn't have, so it was left out.
+Design tokens live in `src/index.css`; reusable primitives and generated sleeve
+art live in `src/components/ui.tsx`. The UI intentionally keeps drift, RTT,
+generation, and buffer data secondary to the current song, queue, and friends.
 
 ## Known limitations
 
-- **Streaming:** the Streaming service does not support HTTP Range yet, so the player downloads each song whole. It keeps a small window buffered (the previous song, the current one and the next two) rather than the full ±4 adaptive buffer described in plan.md.
-- **Search and Upload:** these services live on other branches until they are merged. Search falls back to the Catalogue, and Upload shows a clear "not deployed" message.
+- **Streaming:** solo playback uses the versioned manifest and independently decodable ten-second WAV chunks. A two-download priority pool fills the complete −4…+4 logical queue window; whole-track playback remains available for the clock-synchronised Jam engine.
+- **Search fallback:** Search falls back to the Catalogue when the Search service is unreachable.
 - **Drift display:** the drift shown in the Jam room is the value Sync reports when it corrects this device. The client does not compute its own drift.
 - **Deploy:** there is no ECS deploy job yet (see `.gitlab-ci.yml`).

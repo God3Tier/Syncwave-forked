@@ -1,8 +1,10 @@
 # SyncWave frontend: nine-slot buffering, laptop/mobile UI, and Playwright tests
 
-Updated: 30 October 2026.
-Status: agreed implementation plan; the frontend and chunk API described below
-have not been implemented. Working branch: `feat/streaming-sync-integration`.
+Updated: 5 November 2026.
+Status: implemented locally. The responsive product UI, versioned chunk API,
+adaptive nine-position browser buffer, and automated checks are in place.
+Staging/CI and physical-device evidence remain external gates tracked in
+`INTEGRATION_PLAN.md`.
 
 ## 1. Goal and technology
 

@@ -83,6 +83,7 @@ export function JamRoom() {
   const [audio, setAudio] = useState<AudioContext | null>(null);
   const [sync, setSync] = useState<SyncSnapshot | null>(null);
   const [session, setSession] = useState<SyncSession | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'queue' | 'people'>('queue');
   const sessionRef = useRef<SyncSession | null>(null);
 
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
@@ -191,10 +192,11 @@ export function JamRoom() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/20 bg-surface/80 px-4 py-3 backdrop-blur md:px-6">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 bg-surface-container-lowest px-4 py-3 md:px-6">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-headline text-lg font-bold">Jam</h1>
-          <button type="button" onClick={copyInvite} title="Copy Jam ID link" className="flex items-center gap-1.5 rounded border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 font-mono text-xs text-secondary">
+          <span className="size-2 animate-pulse-glow rounded-full bg-secondary" aria-label="Live room" />
+          <h1 className="text-lg font-extrabold">Jam</h1>
+          <button type="button" onClick={copyInvite} title="Copy Jam ID link" className="flex items-center gap-1.5 rounded-lg bg-surface-container px-2.5 py-1.5 text-xs font-semibold text-secondary">
             {shortId(jamId)} <Icon name="content_copy" className="text-sm text-outline" />
           </button>
           <StatusChip status={owner ? 'OWNER' : 'MEMBER'} />
@@ -233,6 +235,13 @@ export function JamRoom() {
         )}
       </div>
 
+      <div className="px-4 pt-4 md:hidden">
+        <div className="grid grid-cols-2 rounded-xl bg-surface-container p-1" role="tablist" aria-label="Jam room panels">
+          <button type="button" role="tab" aria-selected={mobilePanel === 'queue'} onClick={() => setMobilePanel('queue')} className={`min-h-10 rounded-lg text-sm font-bold ${mobilePanel === 'queue' ? 'bg-on-surface text-background' : 'text-on-surface-variant'}`}>Queue</button>
+          <button type="button" role="tab" aria-selected={mobilePanel === 'people'} onClick={() => setMobilePanel('people')} className={`min-h-10 rounded-lg text-sm font-bold ${mobilePanel === 'people' ? 'bg-on-surface text-background' : 'text-on-surface-variant'}`}>People</button>
+        </div>
+      </div>
+
       <div className="grid flex-1 gap-5 p-4 md:p-6 lg:grid-cols-12">
         <div className="lg:col-span-4">
           <Deck
@@ -244,7 +253,7 @@ export function JamRoom() {
             onControl={(action, extra) => void run(() => playback(jamId, userId, action, extra))}
           />
         </div>
-        <div className="space-y-5 lg:col-span-5">
+        <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
           <Queue jam={jam} owner={owner} playingSongId={currentSongId} run={run} />
           <AddSongsPanel
             title="Add to the shared queue"
@@ -252,7 +261,7 @@ export function JamRoom() {
             onAdd={(songId) => void run(() => queueSong(jamId, userId, songId))}
           />
         </div>
-        <div className="space-y-5 lg:col-span-3">
+        <div className={`${mobilePanel === 'people' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-3`}>
           <Participants jam={jam} sync={sync} readiness={readiness} />
           <SyncStats sync={sync} audioEnabled={Boolean(audio)} />
         </div>
@@ -304,11 +313,10 @@ function Deck({
   const hasNext = jam.queue.findIndex((item) => item.queue_item_id === jam.current_queue_item_id) < jam.queue.length - 1;
 
   return (
-    <Card className="relative h-full overflow-hidden border-primary/25">
-      <div className="pointer-events-none absolute -left-24 -top-24 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
+    <Card className="relative h-full overflow-hidden p-4 md:p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${sync?.phase === 'PLAYING' ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
-        <span className="font-mono text-xs uppercase tracking-wider text-secondary">Synchronised deck</span>
+        <span className="text-xs font-bold text-secondary">Now playing together</span>
       </div>
       {songId ? <SongArt id={songId} size="lg" className="mx-auto max-w-72" /> : (
         <div className="mx-auto flex aspect-square max-w-72 items-center justify-center rounded-xl border border-dashed border-outline-variant/50 text-on-surface-variant">
@@ -329,7 +337,7 @@ function Deck({
       </div>
 
       {/* Phones: a large drift read-out (Stitch mobile Jam room). */}
-      <div className="mt-4 rounded-xl border border-secondary/30 bg-secondary/5 p-3 text-center lg:hidden">
+      <div className="mt-4 rounded-xl bg-secondary/5 p-3 text-center ring-1 ring-secondary/25 lg:hidden">
         <p className="font-mono text-[11px] uppercase text-secondary">{sync?.phase === 'PLAYING' ? 'In sync' : sync?.phase ?? 'Not connected'}</p>
         <p className="font-mono text-3xl font-semibold tabular-nums">{formatMs(sync?.lastDriftMs ?? sync?.startErrorMs ?? null)}</p>
         <p className="font-mono text-[11px] text-on-surface-variant">
@@ -366,7 +374,7 @@ function Deck({
       ) : (
         <p className="mt-5 border-t border-outline-variant/20 pt-4 font-mono text-[11px] text-outline">Only the owner can control playback.</p>
       )}
-      <p className="mt-4 truncate font-mono text-[10px] text-outline">
+      <p className="mt-4 hidden truncate font-mono text-[10px] text-outline lg:block">
         Generation {jam.sync_generation ?? '—'} · target {sync?.targetServerMs ? new Date(sync.targetServerMs).toISOString().slice(11, 23) : '—'}
       </p>
     </Card>
@@ -511,9 +519,15 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
 
 function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecide: (decision: 'CONTINUE' | 'WAIT' | 'CANCEL') => void }) {
   const count = readiness.unready_participant_ids.length;
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="readiness-title">
-      <div className="w-full max-w-md rounded-2xl border border-primary/40 bg-surface-container p-6 shadow-2xl shadow-black/80">
+    <dialog ref={dialog} aria-labelledby="readiness-title" onCancel={(event) => event.preventDefault()} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-surface-container p-0 text-on-surface shadow-[0_24px_80px_rgb(0_0_0/0.55)] backdrop:bg-black/75">
+      <div className="p-6 ring-1 ring-inset ring-outline-variant/55">
         <div className="mb-4 flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-tertiary/40 bg-tertiary/10 text-tertiary">
             <Icon name="sync_problem" className="text-2xl" />
@@ -545,6 +559,6 @@ function ReadinessModal({ readiness, onDecide }: { readiness: Readiness; onDecid
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

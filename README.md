@@ -7,8 +7,9 @@ choreography) and **Create & Synchronise a Jam** (orchestration).
 See [plan.md](plan.md) for the architecture and service ownership.
 See [INTEGRATION_PLAN.md](INTEGRATION_PLAN.md) for verified integration status,
 remaining work, and acceptance criteria.
-See [FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the agreed laptop/mobile UI,
-nine-slot audio buffer, usability requirements, and Playwright test plan.
+See [DESIGN.md](DESIGN.md) for the implemented visual system and
+[FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the implemented nine-slot audio buffer,
+usability requirements, and Playwright coverage.
 See [infrastructure/aws/DEPLOYMENT.md](infrastructure/aws/DEPLOYMENT.md) for
 the AWS deployment sequence, current gaps, and production readiness gates.
 
