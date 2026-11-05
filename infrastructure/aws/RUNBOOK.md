@@ -11,7 +11,10 @@ should see.
 
 **Nothing stays up between sessions.** A session starts with an empty account,
 brings everything up (§2, about 25 minutes), and ends by destroying all of it,
-the state bucket included (§8). Nothing is billed in between.
+the state bucket included (§8). Nothing is billed in between. For a short
+break inside a session (overnight, between two demos), you can pause instead
+(§9): it stops the tasks and the database but keeps everything else, so it
+is cheaper than staying up and faster to come back from than §2.
 
 Each section sets the shell variables it uses, so you can start any section in
 a new terminal. Commands that pass a `/ecs/...` log group start with
@@ -28,7 +31,8 @@ Contents:
 [5 Deploy and roll back](#5-deploy-and-roll-back) ·
 [6 Change configuration](#6-change-configuration) ·
 [7 Debug](#7-debug) ·
-[8 Tear it down](#8-tear-it-down-end-of-every-session)
+[8 Tear it down](#8-tear-it-down-end-of-every-session) ·
+[9 Pause and resume](#9-pause-and-resume-optional)
 
 ---
 
@@ -715,3 +719,84 @@ pipelines stop trying to deploy.
 
 If you no longer need AWS access at all, deactivate your access key (IAM >
 Users > Security credentials) and remove its profile from `~/.aws/credentials`.
+
+---
+
+## 9. Pause and resume (optional)
+
+Pausing scales every ECS service (the apps, the workers and RabbitMQ) to 0
+tasks and stops the RDS instance. Resuming brings them back in the right
+order. It takes about 5 minutes each way, instead of §8 plus §2.
+
+**What a pause saves, and what it doesn't.** Fargate tasks and RDS compute
+stop being billed. Everything else stays and is still billed: the ALB (by the
+hour, whether or not it gets traffic), RDS storage, the secrets, ECR images,
+S3 and CloudWatch logs. So pause for hours or a few days; for anything longer,
+tear down (§8).
+
+**Caveats:**
+- **RDS starts again by itself after 7 days** stopped, and is billed from
+  then on. Pause again (only the RDS step) or tear down before that.
+- **RabbitMQ has no volume.** Messages still queued when it stops are lost.
+  Let uploads finish processing (the Catalogue reports `READY`) before you
+  pause.
+- **Jam and Sync rooms are lost.** They live in memory; users reconnect after
+  the resume.
+- **Don't run `terraform apply` while paused.** It sets the task counts back
+  to their Terraform values, so tasks start against a stopped database, and
+  any change to the RDS instance fails while it is stopped. Resume first.
+  Tearing down (§8) from a paused state is fine.
+- **CI deploys still work** while paused: the deploy registers the new
+  revision and finds the service "stable" at 0 tasks. The new image runs
+  when you resume.
+
+The commands are two scripts in this folder, [pause.sh](pause.sh) and
+[resume.sh](resume.sh). Run them in Git Bash from any directory. They find
+the services with `list-services`, so they need no `SERVICES` list and pick
+up new stacks automatically. Both are safe to run again if one stops
+halfway.
+
+Each service's task count is saved as a `PausedDesiredCount` tag on the ECS
+service itself, not in a local file, so anyone on the team can resume a pause
+someone else started. A service already at 0 before the pause (left at 0 on
+purpose) gets no tag and stays at 0.
+
+### 9.1 Pause
+
+```sh
+infrastructure/aws/pause.sh            # from the repo root
+```
+
+It saves each service's task count in its tag, scales every service to 0,
+waits until the tasks have stopped, then stops RDS. You should see one
+`<service>  0` line per service, `Running tasks: 0`, `stopping`, and finally
+`RDS stopped. Paused; ...` (a few minutes in all).
+
+If RDS is in any state other than `available`, `stopping` or `stopped` (for
+example still `starting` or `modifying`), the script says so and exits
+before stopping it. Run it again once
+`aws rds describe-db-instances --db-instance-identifier syncwave --query 'DBInstances[0].DBInstanceStatus'`
+says `available`.
+
+### 9.2 Resume
+
+```sh
+infrastructure/aws/resume.sh           # from the repo root
+```
+
+It starts the database first, then RabbitMQ, then the apps. The workers must
+start after RabbitMQ has declared its queues; otherwise they connect to a
+broker with no queues and sit at `consumers 0` (§7). So the script waits for
+RabbitMQ's `definitions loaded` log line before it restores anything else.
+
+You should see `starting`, then (after about 5 to 10 minutes)
+`RDS available`, `rabbitmq  1` and `RabbitMQ ready`, one `<service>  <count>`
+line per other service, and finally `Resumed: <base_url>`. The URL is the same
+as before the pause. Run the smoke test (§3) to check that everything is back.
+
+If RDS already started by itself (the 7-day limit), the script skips the
+start and only waits. If RabbitMQ doesn't load its definitions within 10
+minutes, the script stops; check its logs and events (§7), then run it again.
+If `wait services-stable` times out, a service's tasks are failing to start:
+go to [7 Debug](#7-debug). A worker that shows `consumers 0` needs
+`--force-new-deployment` (§7).
