@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-orchestrator}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orchestrator_dev_password}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - orchestrator_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,9 +23,14 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${ORCHESTRATOR_PORT:-8082}:8080"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-orchestrator}:${POSTGRES_PASSWORD:-orchestrator_dev_password}@db:5432/${POSTGRES_DB:-orchestrator}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-http://host.docker.internal:8080/api/auth/.well-known/jwks.json}
+      AUTH_ISSUER: ${AUTH_ISSUER:-syncwave-auth}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-syncwave}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
       interval: 5s

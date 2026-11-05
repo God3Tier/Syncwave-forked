@@ -8,7 +8,7 @@ mod webhook;
 use actix_web::{App, HttpServer, web};
 use std::{env, io, sync::Arc};
 
-use security::{CognitoAuth, CognitoClient, CognitoConfig};
+use security::{AuthClient, AuthConfig, SessionAuth};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -24,23 +24,16 @@ async fn main() -> std::io::Result<()> {
         Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     );
 
-    // --- Cognito JWT authentication (opt-in via environment variables) ---
-    // When COGNITO_REGION/AWS_REGION, COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID
-    // are set, every route except public health checks requires a valid Cognito
-    // JWT. Otherwise the middleware is skipped and the service runs unauthenticated
-    // (suitable for local development).
-    let cognito_client: Option<Arc<CognitoClient>> = match CognitoConfig::from_env() {
+    // SyncWave account authentication is enabled when AUTH_JWKS_URL is set.
+    let auth_client: Option<Arc<AuthClient>> = match AuthConfig::from_env() {
         Ok(config) => {
             let client = Arc::new(
-                CognitoClient::new(config)
-                    .map_err(|error| io::Error::other(format!("cognito client: {error}")))?,
+                AuthClient::new(config)
+                    .map_err(|error| io::Error::other(format!("auth client: {error}")))?,
             );
-            // Load the JWKS at startup so tokens can be verified. If Cognito is
-            // unreachable this is non-fatal; requests fail with 401 until the
-            // keys are loaded.
-            if let Err(error) = client.refresh_jwks().await {
-                eprintln!("warning: failed to load Cognito JWKS: {error}");
-            }
+            client.refresh_jwks().await.map_err(|error| {
+                io::Error::other(format!("failed to load SyncWave Auth JWKS: {error}"))
+            })?;
 
             // Refresh periodically so rotated signing keys are picked up.
             let refresh_client = client.clone();
@@ -51,7 +44,7 @@ async fn main() -> std::io::Result<()> {
                 loop {
                     ticker.tick().await;
                     if let Err(error) = refresh_client.refresh_jwks().await {
-                        eprintln!("warning: failed to refresh Cognito JWKS: {error}");
+                        eprintln!("warning: failed to refresh SyncWave Auth JWKS: {error}");
                     }
                 }
             });
@@ -59,7 +52,7 @@ async fn main() -> std::io::Result<()> {
             Some(client)
         }
         Err(error) => {
-            eprintln!("warning: Cognito authentication disabled ({error})");
+            eprintln!("warning: SyncWave authentication disabled ({error})");
             None
         }
     };
@@ -69,10 +62,10 @@ async fn main() -> std::io::Result<()> {
             .app_data(pool.clone())
             .app_data(webhook.clone())
             .app_data(playback_sessions.clone())
-            .app_data(web::Data::new(cognito_client.clone()))
-            // Protect every route except public health checks. When Cognito is
+            .app_data(web::Data::new(auth_client.clone()))
+            // Protect every route except public health checks. When Auth is
             // not configured the middleware passes requests through unauthenticated.
-            .wrap(CognitoAuth::new(cognito_client.clone()).exclude("/health"))
+            .wrap(SessionAuth::new(auth_client.clone()).exclude("/health"))
             .configure(controller::configure_routes)
     })
     .bind(("0.0.0.0", 8080))?

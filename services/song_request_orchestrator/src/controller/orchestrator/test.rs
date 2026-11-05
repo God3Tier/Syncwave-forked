@@ -4,22 +4,15 @@ use actix_web::{App, Error, HttpMessage, body::to_bytes, http::StatusCode, test}
 
 use super::{health_check, me};
 
-use crate::security::CognitoClaims;
+use crate::security::AuthClaims;
 
-fn test_claims(sub: &str) -> CognitoClaims {
-    CognitoClaims {
+fn test_claims(sub: &str) -> AuthClaims {
+    AuthClaims {
         sub: sub.to_string(),
-        aud: "test-client".to_string(),
-        iss: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test".to_string(),
+        aud: "syncwave".to_string(),
+        iss: "syncwave-auth".to_string(),
         exp: 4_000_000_000,
-        iat: None,
-        auth_time: None,
-        token_use: "access".to_string(),
-        username: None,
-        email: None,
-        groups: Vec::new(),
-        scope: None,
-        client_id: None,
+        iat: 1,
         jti: None,
     }
 }
@@ -49,7 +42,7 @@ async fn unknown_route_returns_not_found() {
 
 #[actix_web::test]
 async fn me_returns_user_id_when_authenticated() {
-    // Emulates the Cognito middleware by attaching verified claims.
+    // Emulates the SyncWave session middleware by attaching verified claims.
     async fn inject_claims<B>(
         req: ServiceRequest,
         next: Next<B>,

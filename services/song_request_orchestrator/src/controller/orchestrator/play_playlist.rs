@@ -2,7 +2,7 @@ use super::PlaybackSessions;
 use crate::{
     models::playback::PlaylistPlayback,
     ringbuffer::{CURRENT_SLOT, OFFSETS, RingBufferImpl},
-    security::CognitoClaims,
+    security::AuthClaims,
     webhook::{Webhook, client::WebHookClient},
 };
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Responder, web};
@@ -81,7 +81,7 @@ pub async fn next_chunk(
 }
 
 fn resolve_client_id(request: &HttpRequest) -> Result<String, HttpResponse> {
-    if let Some(claims) = request.extensions().get::<CognitoClaims>() {
+    if let Some(claims) = request.extensions().get::<AuthClaims>() {
         return Ok(claims.sub.clone());
     }
     request
@@ -92,7 +92,7 @@ fn resolve_client_id(request: &HttpRequest) -> Result<String, HttpResponse> {
         .map(str::to_owned)
         .ok_or_else(|| {
             HttpResponse::BadRequest().json(serde_json::json!({
-                "error": { "code": "CLIENT_ID_REQUIRED", "message": "send X-Client-ID when Cognito authentication is disabled" }
+                "error": { "code": "CLIENT_ID_REQUIRED", "message": "send X-Client-ID when SyncWave authentication is disabled" }
             }))
         })
 }
@@ -129,7 +129,7 @@ fn playback_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::CognitoClaims;
+    use crate::security::AuthClaims;
     use actix_web::{
         App, Error, HttpMessage, HttpRequest, HttpResponse, HttpServer,
         body::to_bytes,
@@ -142,20 +142,13 @@ mod tests {
     const PLAYLIST_ID: &str = "00000000-0000-4000-8000-000000000010";
     const SONG_ID: &str = "00000000-0000-4000-8000-000000000011";
 
-    fn test_claims(sub: &str) -> CognitoClaims {
-        CognitoClaims {
+    fn test_claims(sub: &str) -> AuthClaims {
+        AuthClaims {
             sub: sub.to_owned(),
-            aud: "test-client".to_owned(),
-            iss: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test".to_owned(),
+            aud: "syncwave".to_owned(),
+            iss: "syncwave-auth".to_owned(),
             exp: 4_000_000_000,
-            iat: None,
-            auth_time: None,
-            token_use: "access".to_owned(),
-            username: None,
-            email: None,
-            groups: Vec::new(),
-            scope: None,
-            client_id: None,
+            iat: 1,
             jti: None,
         }
     }
