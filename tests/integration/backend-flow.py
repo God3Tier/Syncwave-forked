@@ -317,6 +317,15 @@ async def playback(
                     rejoined["payload"]["participant_id"] == member,
                     "Reconnect attached the wrong participant",
                 )
+                prepare = await clients[1].receive("PREPARE")
+                await clients[1].send(
+                    "READY",
+                    {
+                        "generation": prepare["payload"]["generation"],
+                        "buffered_duration_ms": duration,
+                        "media_duration_ms": duration,
+                    },
+                )
                 caught_up = await clients[1].receive("PLAY_AT")
                 payload = caught_up["payload"]
                 require(payload["generation"] == generation, "Reconnect changed generation")
@@ -405,12 +414,15 @@ def main() -> int:
         ):
             api.call("GET", path)
         username = f"e2e_{report['run_id'][:16]}"
+        credentials = {"username": username, "password": f"E2e-{report['run_id']}"}
         account = api.call(
             "POST",
             "/api/auth/signup",
-            {"username": username, "password": f"E2e-{report['run_id']}"},
+            credentials,
             expected=201,
         )
+        session = api.call("POST", "/api/auth/login", credentials)
+        require(session["id"] == account["id"], "Login returned a different account")
         report["account_id"] = str(uuid.UUID(account["id"]))
         report["username"] = username
         passed(report, "disposable account signs in through the deployed Auth service")
