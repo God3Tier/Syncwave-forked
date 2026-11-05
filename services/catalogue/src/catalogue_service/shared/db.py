@@ -155,6 +155,21 @@ class CatalogueRepository:
             record.updated_at = datetime.now(UTC)
             return record
 
+    async def set_mood(
+        self, song_id: uuid.UUID, mood: str, event_id: str | None
+    ) -> SongRecord | None:
+        """Sets the mood label on a song. Idempotent: overwrites with the
+        latest derived value. Returns the updated record, or None if the song
+        does not exist."""
+        async with self._sessions.begin() as session:
+            record = await session.get(SongRecord, song_id)
+            if record is None:
+                return None
+            record.mood = mood
+            record.source_event_id = event_id
+            record.updated_at = datetime.now(UTC)
+            return record
+
     async def set_waveform_status(
         self,
         song_id: uuid.UUID,

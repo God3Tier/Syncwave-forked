@@ -8,6 +8,7 @@ Every delivery ends in exactly one of:
 """
 
 import logging
+import uuid
 
 from aio_pika.abc import AbstractIncomingMessage
 
@@ -20,6 +21,8 @@ from catalogue_service.shared.errors import PermanentError, TransientError
 from catalogue_service.shared.events import (
     FAILED_EVENT,
     MAX_ATTEMPTS,
+    MOOD_PROCESSED_EVENT,
+    MOOD_PROCESSED_ROUTING_KEY,
     PROCESSED_EVENT,
     QUEUE_SONG_UPLOADED,
     SONG_READY_EVENT,
@@ -27,14 +30,17 @@ from catalogue_service.shared.events import (
     WAVEFORM_FAILED_EVENT,
     WAVEFORM_PROCESSED_EVENT,
     InvalidEvent,
+    MoodProcessed,
     ProcessingEvent,
     Publisher,
     SongUploaded,
     build_event,
+    parse_mood_processed,
     parse_processing_event,
     parse_song_uploaded,
     previous_failures,
 )
+from catalogue_service.shared.mood import categorize_mood
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +107,26 @@ class CatalogueHandler:
                 processing_event = parse_processing_event(message.body)
             except InvalidEvent as exc:
                 raise PermanentError("INVALID_EVENT", str(exc)) from exc
-            await self._handle_processing_result(processing_event)
+            if processing_event.event_type == MOOD_PROCESSED_EVENT:
+                try:
+                    mood_event = parse_mood_processed(message.body)
+                except InvalidEvent as exc:
+                    raise PermanentError("INVALID_EVENT", str(exc)) from exc
+                await self._handle_mood_processed(mood_event)
+            else:
+                await self._handle_processing_result(processing_event)
 
     async def _handle_song_uploaded(self, event: SongUploaded) -> None:
-        """Creates the initial Song record. Idempotent: the first write wins."""
+        """Creates the initial Song record. Idempotent: the first write wins.
+
+        If the upload did not supply a mood, derive one from title/artist /
+        duration and persist it. Publish MoodProcessed so other services can
+        react and so the write can be repaired idempotently after a crash.
+        """
+        mood = event.mood
+        if mood is None:
+            mood = categorize_mood(event.title, event.artist, event.duration_ms)
+
         await self._repository.create_song(
             event.song_id,
             event.title,
@@ -113,15 +135,45 @@ class CatalogueHandler:
             event.lyrics_reference,
             event.duration_ms,
             event.event_id,
-            mood=event.mood,
+            mood=mood,
         )
+        if mood is not None:
+            await self._announce_mood_processed(event.song_id, mood, event.event_id)
         logger.info(
-            "song created: song_id=%s title=%r artist=%r event_id=%s",
+            "song created: song_id=%s title=%r artist=%r mood=%s event_id=%s",
             event.song_id,
             event.title,
             event.artist,
+            mood,
             event.event_id,
         )
+
+    async def _handle_mood_processed(self, event: MoodProcessed) -> None:
+        """Sets the mood column from a MoodProcessed event. Idempotent."""
+        record = await self._repository.set_mood(event.song_id, event.mood, event.event_id)
+        if record is None:
+            # Song not yet known; the SongUploaded event may be in flight.
+            raise TransientError(
+                "SONG_NOT_FOUND", f"song {event.song_id} not yet known to Catalogue"
+            )
+        logger.info(
+            "mood set: song_id=%s mood=%s event_id=%s",
+            event.song_id,
+            event.mood,
+            event.event_id,
+        )
+
+    async def _announce_mood_processed(
+        self, song_id: uuid.UUID, mood: str, correlation_id: str | None
+    ) -> None:
+        event = build_event(
+            MOOD_PROCESSED_EVENT,
+            song_id,
+            {"song_id": str(song_id), "mood": mood},
+            correlation_id=correlation_id,
+        )
+        await self._publisher.publish_event(event, MOOD_PROCESSED_ROUTING_KEY)
+        logger.info("mood processed: song_id=%s mood=%s", song_id, mood)
 
     async def _handle_processing_result(self, event: ProcessingEvent) -> None:
         """Updates one processing stage, derives readiness, and publishes
@@ -137,6 +189,13 @@ class CatalogueHandler:
             if record.lyrics_status != StageStatus.READY:
                 await self._repository.set_lyrics_status(
                     event.song_id, StageStatus.READY, event.event_id
+                )
+            # Mood derived from lyrics text overrides title-based mood.
+            lyrics_mood = event.payload.get("mood")
+            if isinstance(lyrics_mood, str) and lyrics_mood:
+                await self._repository.set_mood(event.song_id, lyrics_mood, event.event_id)
+                await self._announce_mood_processed(
+                    event.song_id, lyrics_mood, event.correlation_id
                 )
         elif event.event_type == FAILED_EVENT:
             if record.lyrics_status != StageStatus.READY:
