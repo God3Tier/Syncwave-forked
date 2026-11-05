@@ -159,6 +159,7 @@ export interface QueueItem {
 
 export interface Jam {
   jam_id: string;
+  join_code: string;
   owner_id: string;
   participant_ids: string[];
   participants: Array<{ participant_id: string; username: string; role: 'OWNER' | 'MEMBER' }>;

@@ -95,6 +95,7 @@ export function JamRoom() {
   const [mobilePanel, setMobilePanel] = useState<'queue' | 'people'>('queue');
   const sessionRef = useRef<SyncSession | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
   useEffect(() => {
@@ -230,6 +231,14 @@ export function JamRoom() {
       window.prompt('Copy this invite link', link);
     }
   };
+  const copyCode = async () => {
+    if (await copyText(jam.join_code)) {
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } else {
+      window.prompt('Copy this Jam code', jam.join_code);
+    }
+  };
   const leave = async () => {
     sessionRef.current?.close();
     if (owner) {
@@ -263,8 +272,8 @@ export function JamRoom() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="size-2 animate-pulse-glow rounded-full bg-secondary" aria-label="Live room" />
           <h1 className="text-lg font-extrabold">Jam</h1>
-          <button type="button" onClick={() => void copyInvite()} title="Copy Jam ID link" className="flex items-center gap-1.5 rounded-lg bg-surface-container px-2.5 py-1.5 text-xs font-semibold text-secondary">
-            {shortId(jamId)} <Icon name="content_copy" className="text-sm text-outline" />
+          <button type="button" onClick={() => void copyCode()} title="Copy Jam code" aria-label={`Jam code ${jam.join_code}`} className="flex items-center gap-1.5 rounded-lg bg-surface-container px-2.5 py-1.5 font-mono text-xs font-semibold tracking-[0.12em] text-secondary">
+            {jam.join_code} <Icon name={copiedCode ? 'check' : 'content_copy'} className="text-sm text-outline" />
           </button>
           <StatusChip status={owner ? 'OWNER' : 'MEMBER'} />
           <StatusChip status={jam.state} />

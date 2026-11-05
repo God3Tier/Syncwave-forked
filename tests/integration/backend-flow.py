@@ -168,7 +168,12 @@ def passed(report: Json, label: str) -> None:
 
 
 async def playback(
-    api: Api, sdk, client_wait_seconds: float, report: Json, check_reconnect: bool = False
+    api: Api,
+    sdk,
+    client_wait_seconds: float,
+    report: Json,
+    check_reconnect: bool = False,
+    check_resync: bool = False,
 ) -> None:
     owner = report["account_id"]
     song_ids = [song["song_id"] for song in report["songs"]]
@@ -355,6 +360,80 @@ async def playback(
                 if not monitor.done():
                     monitor.cancel()
                 await asyncio.gather(monitor, return_exceptions=True)
+
+        if check_resync:
+            timeline = report.get("reconnect", {}).get("play_at", first)
+            simulated_clock_offset_ms = 750
+
+            async def report_drift(
+                drift_ms: int,
+                elapsed_from_target_ms: int,
+                round_trip_delay_ms: int,
+                *,
+                after_sent_at_ms: int = -1,
+            ) -> tuple[Json, float]:
+                measured_server_time_ms = (
+                    timeline["target_server_time_ms"] + elapsed_from_target_ms
+                )
+                expected_position_ms = round(
+                    timeline["start_position_ms"]
+                    + elapsed_from_target_ms * timeline["playback_rate"]
+                )
+                await clients[1].send(
+                    "PLAYBACK_STATUS",
+                    {
+                        "generation": generation,
+                        "measured_server_time_ms": measured_server_time_ms,
+                        "position_ms": expected_position_ms + drift_ms,
+                        "buffering": False,
+                        "clock_offset_ms": simulated_clock_offset_ms,
+                        "round_trip_delay_ms": round_trip_delay_ms,
+                    },
+                )
+                started_at = time.monotonic()
+                correction = await clients[1].receive(
+                    "SYNC_CORRECTION",
+                    lambda frame: frame["sent_at_ms"] > after_sent_at_ms,
+                )
+                return correction, round((time.monotonic() - started_at) * 1000, 1)
+
+            scenarios = [(200, 1_000, 80), (2_000, 4_200, 450), (-2_000, 7_400, 1_200)]
+            corrections = []
+            previous_sent_at = -1
+            for index, (drift_ms, elapsed_ms, rtt_ms) in enumerate(scenarios):
+                if index:
+                    await asyncio.sleep(3.2)
+                correction, response_ms = await report_drift(
+                    drift_ms,
+                    elapsed_ms,
+                    rtt_ms,
+                    after_sent_at_ms=previous_sent_at,
+                )
+                require(
+                    correction["payload"]["method"] == "SEEK",
+                    f"{drift_ms} ms drift did not use SEEK",
+                )
+                require(
+                    correction["payload"]["drift_ms"] == drift_ms,
+                    "Correction reported wrong drift",
+                )
+                corrections.append(
+                    {
+                        "input_drift_ms": drift_ms,
+                        "simulated_round_trip_delay_ms": rtt_ms,
+                        "correction_response_ms": response_ms,
+                        "correction": correction["payload"],
+                    }
+                )
+                previous_sent_at = correction["sent_at_ms"]
+            report["resync"] = {
+                "simulated_clock_offset_ms": simulated_clock_offset_ms,
+                "changing_latency_and_drift": corrections,
+            }
+            passed(
+                report,
+                "changing +200, +2000 and -2000 ms drift is corrected across variable latency",
+            )
     finally:
         results = await asyncio.gather(
             *(client.close() for client in clients), return_exceptions=True
@@ -376,6 +455,11 @@ def main() -> int:
         "--check-reconnect",
         action="store_true",
         help="Also reconnect a participant after the scheduled start",
+    )
+    parser.add_argument(
+        "--check-resync",
+        action="store_true",
+        help="Also simulate moderate and severe playback drift under degraded network telemetry",
     )
     parser.add_argument(
         "--report", type=Path, help="JSON evidence file, including partial failures"
@@ -453,7 +537,16 @@ def main() -> int:
         passed(
             report, "both generated songs pass upload, processing and exact audio download checks"
         )
-        asyncio.run(playback(api, websockets, args.ws_timeout, report, args.check_reconnect))
+        asyncio.run(
+            playback(
+                api,
+                websockets,
+                args.ws_timeout,
+                report,
+                args.check_reconnect,
+                args.check_resync,
+            )
+        )
         report["result"] = "PASS"
     except Exception as exc:
         report["error"] = f"{type(exc).__name__}: {exc}"

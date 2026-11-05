@@ -267,7 +267,7 @@ integration:
     # Item 4: generated uploads -> Playlist -> Jam -> two-client Sync scheduling.
     - docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
     - docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
-    - docker compose exec -T jam python /tmp/backend-flow.py --check-reconnect --report /tmp/backend-flow-report.json
+    - docker compose exec -T jam python /tmp/backend-flow.py --check-reconnect --check-resync --report /tmp/backend-flow-report.json
     # Run disruptions sequentially after the happy paths; the runner restores services.
     - python3 tests/integration/failure-recovery.py --base-url http://docker:8080 --report tests/integration/failure-recovery-report.json
     - if [ -f tests/e2e/run.sh ]; then sh tests/e2e/run.sh docker; fi
@@ -285,5 +285,6 @@ integration:
       - tests/integration/ingestion-flow-report.json
       - tests/integration/backend-flow-report.json
       - tests/integration/failure-recovery-report.json
+      - tests/e2e/artifacts/
   rules:
     - if: $CI_PIPELINE_SOURCE != "merge_request_event" && $CI_COMMIT_BRANCH == "staging"

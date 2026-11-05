@@ -37,6 +37,7 @@ class QueueItem(StrictModel):
 
 class JamResponse(StrictModel):
     jam_id: UUID
+    join_code: str = Field(pattern=r"^\d{8}$")
     owner_id: UUID
     participant_ids: list[UUID]
     participants: list[JamParticipant]
