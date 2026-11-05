@@ -87,6 +87,26 @@ async def test_duplicate_delivery_re_announces_without_reprocessing(
     assert publisher.events[1][1]["payload"] == {"line_count": 2}
 
 
+async def test_duplicate_delivery_re_announces_the_stored_lyrics_mood(
+    handler: LyricsHandler,
+    storage: FakeStorage,
+    publisher: FakePublisher,
+    song_uploaded: SongUploaded,
+    make_message: MakeMessage,
+) -> None:
+    event = song_uploaded()
+    storage.objects[event["payload"]["lyrics_reference"]] = (
+        b"[00:01.00]Electric rhythm, we dance and feel alive\n"
+    )
+
+    await handler(make_message(event))
+    await handler(make_message(event))
+
+    assert len(storage.reads) == 1
+    assert publisher.events[0][1]["payload"]["mood"] == "energetic"
+    assert publisher.events[1][1]["payload"]["mood"] == "energetic"
+
+
 async def test_invalid_lyrics_fail_permanently_on_the_first_attempt(
     handler: LyricsHandler,
     repository: LyricsRepository,
