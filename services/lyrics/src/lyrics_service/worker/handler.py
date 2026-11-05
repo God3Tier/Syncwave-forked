@@ -10,7 +10,7 @@ Every delivery ends in exactly one of:
 import asyncio
 import logging
 import uuid
-from typing import Protocol
+from typing import Any, Protocol
 
 from aio_pika.abc import AbstractIncomingMessage
 
@@ -31,6 +31,7 @@ from lyrics_service.shared.events import (
     parse_song_uploaded,
     previous_failures,
 )
+from lyrics_service.shared.mood import categorize_mood_from_lyrics
 from lyrics_service.shared.storage import ObjectNotFound, ObjectTooLarge
 
 logger = logging.getLogger(__name__)
@@ -105,9 +106,10 @@ class LyricsHandler:
 
         await self._repository.mark_processing(event.song_id, event.event_id)
         lines = await self._load_lines(event.lyrics_reference)
+        mood = categorize_mood_from_lyrics(lines)
         await self._repository.mark_ready(event.song_id, lines)
-        logger.info("READY: %s lines=%d", context, len(lines))
-        await self._announce_ready(event, len(lines))
+        logger.info("READY: %s lines=%d mood=%s", context, len(lines), mood)
+        await self._announce_ready(event, len(lines), mood=mood)
 
     async def _load_lines(self, reference: str | None) -> list[dict[str, int | str]]:
         if reference is None:
@@ -120,11 +122,16 @@ class LyricsHandler:
             raise PermanentError("LYRICS_TOO_LARGE", str(exc)) from exc
         return [line.as_dict() for line in lrc.parse(raw)]
 
-    async def _announce_ready(self, event: SongUploaded, line_count: int) -> None:
+    async def _announce_ready(
+        self, event: SongUploaded, line_count: int, mood: str | None = None
+    ) -> None:
+        payload: dict[str, Any] = {"line_count": line_count}
+        if mood is not None:
+            payload["mood"] = mood
         processed = build_event(
             PROCESSED_EVENT,
             event.song_id,
-            {"line_count": line_count},
+            payload,
             correlation_id=event.event_id,
         )
         await self._publisher.publish_event(processed, PROCESSED_ROUTING_KEY)
