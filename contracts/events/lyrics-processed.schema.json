@@ -16,6 +16,11 @@
           "description": "Number of timestamped lyric lines stored. 0 for a song uploaded without lyrics (instrumental).",
           "type": "integer",
           "minimum": 0
+        },
+        "mood": {
+          "description": "Derived mood label from lyrics text, e.g. melancholy, romantic, energetic, chill, focus.",
+          "type": "string",
+          "minLength": 1
         }
       }
     }
