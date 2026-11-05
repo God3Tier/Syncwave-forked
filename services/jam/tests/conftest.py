@@ -12,12 +12,14 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DATABASE_PATH.as_posix(
 os.environ["SYNC_GRPC_TARGET"] = ""
 os.environ["PLAYLIST_GRPC_TARGET"] = ""
 
+from jam_service.auth import AccountIdentity  # noqa: E402
 from jam_service.main import app, manager, playlist_client  # noqa: E402
 
 
 class FakeAuthVerifier:
-    def account(self, token: str) -> UUID:
-        return UUID(token)
+    def account(self, token: str) -> AccountIdentity:
+        user_id = UUID(token)
+        return AccountIdentity(user_id=user_id, username=f"user_{str(user_id)[:8]}")
 
 
 @pytest.fixture(autouse=True)

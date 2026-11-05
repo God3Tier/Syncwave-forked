@@ -6,12 +6,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from upload_service import main
+from upload_service.auth import AccountIdentity
 from upload_service.db import Base
 
 
@@ -50,6 +52,16 @@ class FakePublisher:
         self.events.append(event)
 
 
+class FakeAuthVerifier:
+    def account(self, token: str) -> AccountIdentity:
+        if token != "test-account-token":
+            raise AssertionError("unexpected account token")
+        return AccountIdentity(
+            user_id=UUID("00000000-0000-4000-8000-000000000001"),
+            username="uploader",
+        )
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -72,7 +84,9 @@ def client(
     Base.metadata.create_all(engine)
     engine.dispose()
     monkeypatch.setattr(main, "S3Storage", lambda _: storage)
+    monkeypatch.setattr(main, "AuthVerifier", lambda _: FakeAuthVerifier())
     with TestClient(main.app) as test_client:
+        test_client.cookies.set("syncwave_session", "test-account-token")
         yield test_client
 
 

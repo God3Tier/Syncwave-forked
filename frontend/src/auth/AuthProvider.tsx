@@ -46,8 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     error,
     signUp: async (credentials) => {
       const next = await signUp(credentials);
-      setAccount(next);
-      setSignedInAccount(next);
       setError(undefined);
       return next;
     },

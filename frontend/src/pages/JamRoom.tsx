@@ -9,6 +9,7 @@ import { ApiError } from '../api/http';
 import { useAuth } from '../auth/AuthProvider';
 import {
   decideReadiness,
+  endJam,
   getJam,
   getReadiness,
   jamMemberId,
@@ -20,6 +21,8 @@ import {
   rememberJam,
   removeQueueItem,
   reorderQueue,
+  transferAndLeave,
+  transferOwnership,
 } from '../api/jam';
 import { getWaveform } from '../api/media';
 import type { Jam, Readiness } from '../api/types';
@@ -34,11 +37,13 @@ import { useSongs } from '../hooks/useSongs';
 import { usePlayer, usePosition } from '../player/context';
 import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
+import { productColors } from '../theme';
 
 const JAM_CLOSE_REASONS: Record<number, string> = {
   4401: 'The Jam rejected this device’s token.',
   4403: 'You are no longer a member of this Jam.',
   4404: 'This Jam does not exist.',
+  4408: 'This Jam has ended.',
 };
 
 /** Keeps the Jam state live through the Jam room WebSocket, reconnecting after drops. */
@@ -95,17 +100,18 @@ export function JamRoom() {
   useEffect(() => {
     if (authLoading) return;
     const controller = new AbortController();
-    joinJam(jamId)
+    const knownMember = jamMemberId(jamId, account?.id);
+    (knownMember ? getJam(jamId) : joinJam(jamId))
       .then((value) => {
         if (controller.signal.aborted) return;
-        const joinedAs = value.member_id ?? account?.id ?? jamMemberId(jamId);
+        const joinedAs = value.member_id ?? account?.id ?? knownMember;
         setParticipantId(joinedAs);
         setJam(value);
         rememberJam(jamId, value.owner_id === joinedAs);
       })
       .catch((error: unknown) => !controller.signal.aborted && setLoadError(error));
     return () => controller.abort();
-  }, [account?.id, authLoading, jamId]);
+  }, [account, authLoading, jamId]);
 
   const member = Boolean(participantId && jam?.participant_ids.includes(participantId));
   const jamCloseCode = useJamSocket(jamId, participantId, member, setJam);
@@ -122,9 +128,9 @@ export function JamRoom() {
     if (!participantId) return;
     const next = new SyncSession({ jamId, participantId, context: audio, onChange: setSync });
     sessionRef.current = next;
-    queueMicrotask(() => setSession((current) => current === null ? next : current));
+    queueMicrotask(() => setSession(next));
     next.connect();
-  }, [audio, active, member, participantId, jamId, jam?.sync_generation]);
+  }, [audio, active, member, participantId, jamId, jam?.sync_generation, sync?.phase]);
 
   useEffect(
     () => () => {
@@ -135,10 +141,33 @@ export function JamRoom() {
   );
   useEffect(() => () => void audio?.close(), [audio]);
 
+  useEffect(() => {
+    if (!audio) return;
+    const resume = () => {
+      if (document.visibilityState === 'visible' && audio.state === 'suspended') void audio.resume();
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('online', resume);
+    return () => {
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('online', resume);
+    };
+  }, [audio]);
+
   const enableAudio = async () => {
     // Browsers only allow audio after a user gesture, so the AudioContext is created here.
+    if (audio) {
+      await audio.resume();
+      return;
+    }
     const context = new AudioContext();
     await context.resume();
+    // Starting a silent source inside the tap keeps iOS Web Audio unlocked even
+    // though the real track is fetched and scheduled asynchronously afterwards.
+    const unlock = context.createBufferSource();
+    unlock.buffer = context.createBuffer(1, 1, context.sampleRate);
+    unlock.connect(context.destination);
+    unlock.start();
     personalPlayer.pause();
     setAudio(context);
   };
@@ -203,7 +232,28 @@ export function JamRoom() {
   };
   const leave = async () => {
     sessionRef.current?.close();
-    if (!owner && participantId) await leaveJam(jamId, participantId).catch(() => undefined);
+    if (owner) {
+      const candidates = jam.participants.filter((participant) => participant.participant_id !== participantId);
+      if (candidates.length === 0) {
+        if (!window.confirm('You are the only listener. End this Jam?')) return;
+        await run(() => endJam(jamId));
+      } else {
+        const choice = window.prompt(
+          `Transfer ownership before leaving. Enter a username:\n${candidates.map((participant) => participant.username).join(', ')}\n\nOr type END to end the Jam.`,
+          candidates[0].username,
+        );
+        if (!choice) return;
+        if (choice.trim().toUpperCase() === 'END') await run(() => endJam(jamId));
+        else {
+          const target = candidates.find((participant) => participant.username.toLowerCase() === choice.trim().toLowerCase());
+          if (!target) {
+            setActionError(new Error('Choose a current participant by username.'));
+            return;
+          }
+          await run(() => transferAndLeave(jamId, target.participant_id));
+        }
+      }
+    } else if (participantId) await leaveJam(jamId, participantId).catch(() => undefined);
     navigate('/jam');
   };
 
@@ -223,6 +273,13 @@ export function JamRoom() {
           <Button icon={copied ? 'check' : 'link'} onClick={() => void copyInvite()} className="py-1.5 text-xs">
             {copied ? 'Copied' : 'Copy invite link'}
           </Button>
+          {owner && jam.lifecycle_state === 'ACTIVE' && (
+            <Button variant="danger" icon="stop_circle" onClick={() => {
+              if (window.confirm('End this Jam for everyone? The invite will become read-only.')) void run(() => endJam(jamId));
+            }} className="py-1.5 text-xs">
+              End Jam
+            </Button>
+          )}
           <Button variant="ghost" icon="logout" onClick={() => void leave()} className="py-1.5 text-xs">
             Leave
           </Button>
@@ -233,6 +290,7 @@ export function JamRoom() {
         {jamCloseCode && JAM_CLOSE_REASONS[jamCloseCode] && <Notice tone="error">{JAM_CLOSE_REASONS[jamCloseCode]}</Notice>}
         {jamCloseCode && !JAM_CLOSE_REASONS[jamCloseCode] && <Notice tone="warn">Lost the live room connection. Reconnecting…</Notice>}
         {actionError !== undefined && <Notice tone="error">{errorMessage(actionError)}</Notice>}
+        {jam.lifecycle_state === 'ENDED' && <Notice tone="info">This Jam has ended. Its queue remains available as a read-only record.</Notice>}
         {sync?.error && (
           <Notice tone="error">
             Sync: {sync.error.code} {sync.error.message && `· ${sync.error.message}`}
@@ -272,14 +330,16 @@ export function JamRoom() {
         </div>
         <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
           <Queue jam={jam} memberId={participantId} owner={owner} playingSongId={currentSongId} run={run} />
-          <AddSongsPanel
-            title="Add to the shared queue"
-            existing={new Set()}
-            onAdd={(songId) => void run(() => queueSong(jamId, songId))}
-          />
+          {jam.lifecycle_state === 'ACTIVE' && (
+            <AddSongsPanel
+              title="Add to the shared queue"
+              existing={new Set()}
+              onAdd={(songId) => void run(() => queueSong(jamId, songId))}
+            />
+          )}
         </div>
         <div className={`${mobilePanel === 'people' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-3`}>
-          <Participants jam={jam} memberId={participantId} sync={sync} readiness={readiness} />
+          <Participants jam={jam} memberId={participantId} owner={owner} sync={sync} readiness={readiness} run={run} />
           <SyncStats sync={sync} audioEnabled={Boolean(audio)} />
         </div>
       </div>
@@ -336,7 +396,11 @@ function Deck({
         <span className={`h-2 w-2 rounded-full ${sync?.phase === 'PLAYING' ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
         <span className="text-xs font-bold text-secondary">Now playing together</span>
       </div>
-      {songId ? <SongArt id={songId} size="lg" className="mx-auto max-w-72" /> : (
+      {songId ? (
+        <Link to={`/songs/${songId}`} aria-label={`Open ${song?.title ?? 'current song'}`} className="mx-auto block max-w-72 rounded-2xl">
+          <SongArt id={songId} size="lg" />
+        </Link>
+      ) : (
         <div className="mx-auto flex aspect-square max-w-72 items-center justify-center rounded-xl border border-dashed border-outline-variant/50 text-on-surface-variant">
           Nothing playing yet
         </div>
@@ -421,7 +485,9 @@ function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberI
               {drag.gap === i && <span className="absolute inset-x-2 -top-1.5 h-0.5 rounded-full bg-primary" />}
               <div className={`group flex items-center gap-3 rounded-xl border p-2.5 ${current ? 'border-primary/40 bg-surface-container-high' : 'border-outline-variant/20 bg-surface-container'}`}>
                 {owner && <Icon name="drag_indicator" className="cursor-grab text-base text-outline" />}
-                <SongArt id={item.song_id} size="sm" />
+                <Link to={`/songs/${item.song_id}`} aria-label={`Open ${song?.title ?? 'song'}`} className="shrink-0 rounded-[10px]">
+                  <SongArt id={item.song_id} size="sm" />
+                </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-headline text-sm font-semibold">{song?.title ?? '…'}</p>
@@ -454,14 +520,15 @@ function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberI
   );
 }
 
-function Participants({ jam, memberId, sync, readiness }: { jam: Jam; memberId: string | null; sync: SyncSnapshot | null; readiness: Readiness | null }) {
+function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam; memberId: string | null; owner: boolean; sync: SyncSnapshot | null; readiness: Readiness | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
   return (
     <Card className="p-4">
       <h4 className="mb-3 flex items-center gap-1.5 font-headline text-xs font-bold uppercase tracking-wider">
         <Icon name="group" className="text-base text-secondary" /> Participants ({jam.participant_ids.length})
       </h4>
       <ul className="space-y-2">
-        {jam.participant_ids.map((id) => {
+        {jam.participants.map((participant) => {
+          const id = participant.participant_id;
           const state = sync?.participants[id];
           const ready = state?.ready ?? readiness?.ready_participant_ids.includes(id) ?? false;
           // Sync only reports others' presence on changes; this device knows its own socket state.
@@ -469,8 +536,8 @@ function Participants({ jam, memberId, sync, readiness }: { jam: Jam; memberId: 
           return (
             <li key={id} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/20 bg-surface-container p-2">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/15 font-mono text-[10px] font-bold text-primary">{initials(id)}</span>
-                <span className="truncate font-mono text-xs">{shortId(id)}</span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/15 font-mono text-[10px] font-bold text-primary">{initials(participant.username)}</span>
+                <span className="truncate text-xs font-semibold">{participant.username}</span>
                 {id === memberId && <span className="rounded bg-secondary/15 px-1 font-mono text-[9px] uppercase text-secondary">you</span>}
                 {id === jam.owner_id && <span className="rounded bg-primary/20 px-1 font-mono text-[9px] uppercase text-primary">owner</span>}
               </div>
@@ -479,8 +546,16 @@ function Participants({ jam, memberId, sync, readiness }: { jam: Jam; memberId: 
                   <span className={`h-2 w-2 rounded-full ${connected ? 'bg-ok' : 'bg-outline-variant'}`} />
                 </span>
                 <span className="flex items-center gap-1" title="Buffered and ready">
-                  <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_#48e4ff]' : 'bg-outline-variant'}`} />
+                  <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_rgb(121_227_195/0.65)]' : 'bg-outline-variant'}`} />
                 </span>
+                {owner && id !== memberId && jam.lifecycle_state === 'ACTIVE' && (
+                  <>
+                    <IconButton icon="manage_accounts" label={`Make ${participant.username} owner`} onClick={() => void run(() => transferOwnership(jam.jam_id, id))} />
+                    <IconButton icon="person_remove" label={`Remove ${participant.username}`} onClick={() => {
+                      if (window.confirm(`Remove ${participant.username} from this Jam?`)) void run(() => leaveJam(jam.jam_id, id));
+                    }} />
+                  </>
+                )}
               </div>
             </li>
           );
@@ -500,8 +575,8 @@ function Sparkline({ values }: { values: number[] }) {
   const points = values.map((v, i) => `${(i / (values.length - 1)) * 48},${8 - (v / max) * 7}`).join(' ');
   return (
     <svg viewBox="0 0 48 16" className="h-4 w-12 overflow-visible" aria-hidden="true">
-      <line x1="0" y1="8" x2="48" y2="8" stroke="#484750" strokeWidth="0.5" />
-      <polyline points={points} fill="none" stroke="#3adffa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="0" y1="8" x2="48" y2="8" stroke={productColors.outlineVariant} strokeWidth="0.5" />
+      <polyline points={points} fill="none" stroke={productColors.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

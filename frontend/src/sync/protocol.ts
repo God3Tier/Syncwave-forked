@@ -29,6 +29,7 @@ export interface PreparePayload {
   queue_item_id: string;
   song_id: string;
   stream_url: string;
+  manifest_url: string;
   start_position_ms: number;
 }
 

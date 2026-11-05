@@ -47,11 +47,12 @@ class TokenSigner:
             output.write(pem)
         return key
 
-    def issue(self, user_id: str) -> str:
+    def issue(self, user_id: str, username: str) -> str:
         now = datetime.now(UTC)
         return jwt.encode(
             {
                 "sub": user_id,
+                "username": username,
                 "iss": ISSUER,
                 "aud": AUDIENCE,
                 "iat": now,

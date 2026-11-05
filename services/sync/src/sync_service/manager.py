@@ -25,6 +25,7 @@ class SyncSession:
     queue_item_id: UUID
     song_id: UUID
     stream_url: str
+    duration_ms: int
     owner_id: UUID
     generation: int = 1
     state: PlaybackState = PlaybackState.PREPARING
@@ -79,6 +80,7 @@ class SessionManager:
         request: StartSessionRequest,
         prepare_deadline_ms: int,
         stream_url: str | None = None,
+        duration_ms: int | None = None,
     ) -> SyncSession:
         async with self._lock:
             previous = self._request_results.get(request.request_id)
@@ -92,6 +94,7 @@ class SessionManager:
                 queue_item_id=request.queue_item_id,
                 song_id=request.song_id,
                 stream_url=stream_url or f"/api/streaming/songs/{request.song_id}/audio",
+                duration_ms=duration_ms or 180_000,
                 owner_id=request.owner_id,
                 generation=generation,
                 prepare_deadline_ms=prepare_deadline_ms,
@@ -144,6 +147,9 @@ class SessionManager:
                 )
                 for participant_id in participant_ids
             }
+            if not participant_ids:
+                session.state = PlaybackState.ENDED
+                session.anchor_server_time_ms = None
             self._request_results[request_id] = session
             await self._repository.save_start(request_id, self._to_persisted(session))
             metrics.ready_participants.set(self.ready_participant_count())
@@ -217,23 +223,45 @@ class SessionManager:
         session: SyncSession,
         participant_id: UUID,
         target_server_time_ms: int,
-    ) -> bool:
-        """Mark one participant ready and atomically schedule when all are ready."""
+    ) -> tuple[str | None, int, int]:
+        """Mark ready and return who to schedule, target time, and start position."""
         async with self._lock:
             active_session = self._sessions.get(session.jam_id)
-            if active_session is not session or session.state is not PlaybackState.PREPARING:
-                return False
+            if active_session is not session:
+                return None, target_server_time_ms, 0
 
             session.participants[participant_id].ready = True
             metrics.ready_participants.set(self.ready_participant_count())
-            if not all(participant.ready for participant in session.participants.values()):
-                return False
-
-            session.state = PlaybackState.SCHEDULED
-            session.anchor_server_time_ms = target_server_time_ms
-            session.anchor_position_ms = 0
+            if session.state is PlaybackState.PREPARING:
+                if not all(participant.ready for participant in session.participants.values()):
+                    return None, target_server_time_ms, 0
+                session.state = PlaybackState.SCHEDULED
+                session.anchor_server_time_ms = target_server_time_ms
+                session.anchor_position_ms = 0
+                audience = "all"
+                start_position_ms = 0
+            elif session.state in {PlaybackState.SCHEDULED, PlaybackState.PLAYING}:
+                if session.anchor_server_time_ms is None:
+                    return None, target_server_time_ms, 0
+                if (
+                    session.state is PlaybackState.SCHEDULED
+                    and session.anchor_server_time_ms > target_server_time_ms
+                ):
+                    target_server_time_ms = session.anchor_server_time_ms
+                start_position_ms = expected_position_ms(
+                    anchor_server_time_ms=session.anchor_server_time_ms,
+                    anchor_position_ms=session.anchor_position_ms,
+                    playback_rate=session.playback_rate,
+                    measured_server_time_ms=target_server_time_ms,
+                )
+                audience = "participant"
+            elif session.state is PlaybackState.PAUSED:
+                audience = "paused"
+                start_position_ms = session.anchor_position_ms
+            else:
+                return None, target_server_time_ms, 0
             await self._repository.save_session(self._to_persisted(session))
-            return True
+            return audience, target_server_time_ms, start_position_ms
 
     async def mark_playing_if_due(
         self,
@@ -248,6 +276,21 @@ class SessionManager:
                 and measured_server_time_ms >= session.anchor_server_time_ms
             ):
                 session.state = PlaybackState.PLAYING
+                await self._repository.save_session(self._to_persisted(session))
+            if (
+                self._sessions.get(session.jam_id) is session
+                and session.state is PlaybackState.PLAYING
+                and session.anchor_server_time_ms is not None
+                and expected_position_ms(
+                    anchor_server_time_ms=session.anchor_server_time_ms,
+                    anchor_position_ms=session.anchor_position_ms,
+                    playback_rate=session.playback_rate,
+                    measured_server_time_ms=measured_server_time_ms,
+                ) >= session.duration_ms
+            ):
+                session.state = PlaybackState.ENDED
+                session.anchor_position_ms = session.duration_ms
+                session.anchor_server_time_ms = measured_server_time_ms
                 await self._repository.save_session(self._to_persisted(session))
 
     async def pause(
@@ -339,6 +382,7 @@ class SessionManager:
         song_id: UUID,
         prepare_deadline_ms: int,
         stream_url: str | None = None,
+        duration_ms: int | None = None,
     ) -> tuple[SyncSession, bool]:
         async with self._lock:
             previous = self._request_results.get(request_id)
@@ -359,6 +403,7 @@ class SessionManager:
             session.queue_item_id = queue_item_id
             session.song_id = song_id
             session.stream_url = stream_url or f"/api/streaming/songs/{song_id}/audio"
+            session.duration_ms = duration_ms or 180_000
             session.state = PlaybackState.PREPARING
             session.anchor_server_time_ms = None
             session.anchor_position_ms = 0
@@ -455,6 +500,7 @@ class SessionManager:
             queue_item_id=session.queue_item_id,
             song_id=session.song_id,
             stream_url=session.stream_url,
+            duration_ms=session.duration_ms,
             owner_id=session.owner_id,
             participant_ids=tuple(session.participants),
             anchor_server_time_ms=session.anchor_server_time_ms,
@@ -470,6 +516,7 @@ class SessionManager:
             queue_item_id=value.queue_item_id,
             song_id=value.song_id,
             stream_url=value.stream_url,
+            duration_ms=value.duration_ms,
             owner_id=value.owner_id,
             generation=value.generation,
             state=PlaybackState(value.state),

@@ -21,6 +21,7 @@ async def repository_round_trip(tmp_path) -> None:
         current_queue_item_id=item.queue_item_id,
         sync_generation=2,
         participant_ids=[owner_id],
+        participant_usernames={owner_id: "owner"},
         queue=[item],
     )
     await repository.save(expected)

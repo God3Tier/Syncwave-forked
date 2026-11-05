@@ -46,12 +46,14 @@ class DependencyTimeoutError(DependencyError):
 class SongMetadata:
     song_id: UUID
     processing_status: SongProcessingStatus
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class StreamSource:
     song_id: UUID
     stream_url: str
+    duration_ms: int | None = None
 
 
 class CatalogueClient(Protocol):
@@ -96,7 +98,11 @@ class GrpcCatalogueClient:
         processing_status = statuses.get(response.processing_status)
         if response.song_id != str(song_id) or processing_status is None:
             raise DependencyError("catalogue returned an invalid song response")
-        return SongMetadata(song_id=song_id, processing_status=processing_status)
+        return SongMetadata(
+            song_id=song_id,
+            processing_status=processing_status,
+            duration_ms=response.duration_ms if response.duration_ms > 0 else None,
+        )
 
     async def close(self) -> None:
         await self._channel.close()
@@ -195,7 +201,7 @@ class FakeCatalogueClient:
         status = self.statuses.get(song_id, SongProcessingStatus.READY)
         if status is None:
             raise SongNotFoundError("song not found")
-        return SongMetadata(song_id=song_id, processing_status=status)
+        return SongMetadata(song_id=song_id, processing_status=status, duration_ms=180_000)
 
 
 @dataclass(slots=True)
@@ -237,7 +243,14 @@ class PlaybackDependencies:
             raise SongNotReadyError(
                 f"song is not ready: processing_status={song.processing_status.value}"
             )
-        return await self._with_timeout(self.streaming.get_stream(song_id), "streaming")
+        stream = await self._with_timeout(self.streaming.get_stream(song_id), "streaming")
+        if song.duration_ms is None:
+            raise SongNotReadyError("song duration is not ready")
+        return StreamSource(
+            song_id=stream.song_id,
+            stream_url=stream.stream_url,
+            duration_ms=song.duration_ms,
+        )
 
     async def _with_timeout(self, operation: Awaitable[T], dependency: str) -> T:
         started = time.perf_counter()

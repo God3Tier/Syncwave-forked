@@ -8,6 +8,7 @@
     "queue_item_id": "33333333-3333-4333-8333-333333333333",
     "song_id": "44444444-4444-4444-8444-444444444444",
     "stream_url": "/api/streaming/songs/44444444-4444-4444-8444-444444444444/audio",
+    "manifest_url": "/api/streaming/tracks/44444444-4444-4444-8444-444444444444/manifest",
     "start_position_ms": 0
   }
 }

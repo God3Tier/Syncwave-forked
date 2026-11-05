@@ -50,6 +50,8 @@ paths:
   /uploads:
     post:
       summary: Create Upload
+      security:
+      - cookieAuth: []
       description: Store media and queue its event. A 202 response does not mean processing
         is complete.
       operationId: create_upload_uploads_post
@@ -73,6 +75,12 @@ paths:
                 type: string
         '400':
           description: Invalid metadata, empty file or invalid lyrics encoding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          description: A signed-in account is required
           content:
             application/json:
               schema:
@@ -139,6 +147,11 @@ paths:
       tags:
       - upload
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: syncwave_session
   schemas:
     Body_create_upload_uploads_post:
       properties:

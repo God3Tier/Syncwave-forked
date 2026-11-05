@@ -59,6 +59,18 @@ export function leaveJam(jamId: string, participantId: string): Promise<void> {
   return call(jamId, `${id(jamId)}/members/${encodeURIComponent(participantId)}`, { method: 'DELETE' });
 }
 
+export function transferOwnership(jamId: string, participantId: string): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/owner`, { method: 'PUT', json: { participant_id: participantId } });
+}
+
+export function transferAndLeave(jamId: string, participantId: string): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/owner/transfer-and-leave`, { method: 'POST', json: { participant_id: participantId } });
+}
+
+export function endJam(jamId: string): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/end`, { method: 'POST' });
+}
+
 export function queueSong(jamId: string, songId: string): Promise<Jam> {
   return call(jamId, `${id(jamId)}/queue`, { method: 'POST', json: { song_id: songId } });
 }
@@ -124,6 +136,22 @@ export function rememberJam(jamId: string, owner: boolean): void {
   const next = [{ jam_id: jamId, owner, visited_at: new Date().toISOString() }, ...recentJams().filter((j) => j.jam_id !== jamId)].slice(0, 8);
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+export function removeRecentJam(jamId: string): void {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recentJams().filter((jam) => jam.jam_id !== jamId)));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearRecentJams(): void {
+  try {
+    localStorage.removeItem(RECENT_KEY);
   } catch {
     // ignore
   }

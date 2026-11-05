@@ -136,13 +136,14 @@ def server_frame(
     }
 
 
-def prepare_payload(session: Any) -> dict[str, object]:
+def prepare_payload(session: Any, start_position_ms: int = 0) -> dict[str, object]:
     return {
         "generation": session.generation,
         "queue_item_id": str(session.queue_item_id),
         "song_id": str(session.song_id),
         "stream_url": session.stream_url,
-        "start_position_ms": 0,
+        "manifest_url": f"/api/streaming/tracks/{session.song_id}/manifest",
+        "start_position_ms": start_position_ms,
     }
 
 
@@ -266,6 +267,7 @@ async def start_session(
         request,
         prepare_deadline_ms=epoch_ms() + settings.prepare_timeout_ms,
         stream_url=None if stream is None else stream.stream_url,
+        duration_ms=None if stream is None else stream.duration_ms,
     )
     log_event(
         "session_started",
@@ -302,6 +304,7 @@ async def get_session(
     session = manager.get(jam_id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    await manager.mark_playing_if_due(session, epoch_ms())
     return playback_snapshot(session)
 
 
@@ -543,6 +546,7 @@ async def skip_playback(
             request.song_id,
             epoch_ms() + settings.prepare_timeout_ms,
             stream_url=None if stream is None else stream.stream_url,
+            duration_ms=None if stream is None else stream.duration_ms,
         )
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
@@ -619,6 +623,7 @@ async def websocket_endpoint(
         await participant.connection.close(code=4001, reason="new connection replaced this client")
     participant.connection = websocket
     participant.last_seq = -1
+    participant.ready = False
     participant.correction_gate.reset()
     metrics.websocket_connections.inc()
     log_event(
@@ -645,43 +650,21 @@ async def websocket_endpoint(
     )
     now_ms = epoch_ms()
     await manager.mark_playing_if_due(session, now_ms)
-    if session.state is PlaybackState.PREPARING:
+    if session.state is not PlaybackState.ENDED:
+        if session.state is PlaybackState.PLAYING and session.anchor_server_time_ms is not None:
+            prepare_position_ms = expected_position_ms(
+                anchor_server_time_ms=session.anchor_server_time_ms,
+                anchor_position_ms=session.anchor_position_ms,
+                playback_rate=session.playback_rate,
+                measured_server_time_ms=now_ms,
+            )
+        else:
+            prepare_position_ms = session.anchor_position_ms
         await websocket.send_json(
             server_frame(
                 session=session,
                 message_type="PREPARE",
-                payload=prepare_payload(session),
-            )
-        )
-    elif session.state is PlaybackState.SCHEDULED and session.anchor_server_time_ms is not None:
-        await websocket.send_json(
-            server_frame(
-                session=session,
-                message_type="PLAY_AT",
-                payload=play_at_payload(
-                    session,
-                    target_server_time_ms=session.anchor_server_time_ms,
-                    start_position_ms=session.anchor_position_ms,
-                ),
-            )
-        )
-    elif session.state is PlaybackState.PLAYING and session.anchor_server_time_ms is not None:
-        catch_up_at_ms = now_ms + settings.start_lead_time_ms
-        catch_up_position_ms = expected_position_ms(
-            anchor_server_time_ms=session.anchor_server_time_ms,
-            anchor_position_ms=session.anchor_position_ms,
-            playback_rate=session.playback_rate,
-            measured_server_time_ms=catch_up_at_ms,
-        )
-        await websocket.send_json(
-            server_frame(
-                session=session,
-                message_type="PLAY_AT",
-                payload=play_at_payload(
-                    session,
-                    target_server_time_ms=catch_up_at_ms,
-                    start_position_ms=catch_up_position_ms,
-                ),
+                payload=prepare_payload(session, prepare_position_ms),
             )
         )
 
@@ -755,7 +738,7 @@ async def websocket_endpoint(
                             "READY generation is not active",
                         )
                         continue
-                    scheduled = await manager.mark_ready(
+                    audience, target_ms, start_position_ms = await manager.mark_ready(
                         session,
                         participant_id,
                         epoch_ms() + settings.start_lead_time_ms,
@@ -768,7 +751,7 @@ async def websocket_endpoint(
                         connection_id=connection_id,
                         generation=session.generation,
                         message_type="READY",
-                        outcome="scheduled" if scheduled else "waiting",
+                        outcome="scheduled" if audience else "waiting",
                     )
                     await manager.broadcast(
                         session,
@@ -783,7 +766,7 @@ async def websocket_endpoint(
                             },
                         ),
                     )
-                    if scheduled:
+                    if audience == "all":
                         metrics.prepare_duration_ms.observe(
                             max(
                                 0,
@@ -798,10 +781,35 @@ async def websocket_endpoint(
                                 message_type="PLAY_AT",
                                 payload=play_at_payload(
                                     session,
-                                    target_server_time_ms=session.anchor_server_time_ms,
-                                    start_position_ms=session.anchor_position_ms,
+                                    target_server_time_ms=target_ms,
+                                    start_position_ms=start_position_ms,
                                 ),
                             ),
+                        )
+                    elif audience == "participant":
+                        await websocket.send_json(
+                            server_frame(
+                                session=session,
+                                message_type="PLAY_AT",
+                                payload=play_at_payload(
+                                    session,
+                                    target_server_time_ms=target_ms,
+                                    start_position_ms=start_position_ms,
+                                ),
+                            )
+                        )
+                    elif audience == "paused":
+                        await websocket.send_json(
+                            server_frame(
+                                session=session,
+                                message_type="SEEK_TO",
+                                payload={
+                                    "generation": session.generation,
+                                    "target_server_time_ms": target_ms,
+                                    "position_ms": start_position_ms,
+                                    "resume_playback": False,
+                                },
+                            )
                         )
                 elif data.get("type") == "PLAYBACK_STATUS":
                     frame = PlaybackStatusFrame.model_validate(data)
