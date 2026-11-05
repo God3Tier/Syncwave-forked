@@ -302,6 +302,7 @@ export class SyncSession {
       return;
     }
     const { context } = this.options;
+    if (context.state === 'suspended') void context.resume();
     this.stopSource();
     const source = context.createBufferSource();
     source.buffer = this.buffer;

@@ -34,12 +34,7 @@ paths:
               $ref: "#/components/schemas/Credentials"
       responses:
         "201":
-          description: Account created and signed in.
-          headers:
-            Set-Cookie:
-              schema:
-                type: string
-              description: HttpOnly signed JWT session cookie.
+          description: Account created. The user must log in to start a session.
         "409":
           description: The normalized username is already taken.
         "422":

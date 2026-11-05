@@ -376,13 +376,27 @@ def test_reconnect_receives_existing_schedule_and_can_restart_sequence(client: T
         original_play_at = websocket.receive_json()
 
     with client.websocket_connect(path) as reconnected:
-        joined = reconnected.receive_json()
+        joined, prepare = receive_handshake(reconnected)
+        reconnected.send_json(
+            {
+                "type": "READY",
+                "jam_id": jam_id,
+                "seq": 0,
+                "sent_at_ms": 2_000,
+                "payload": {
+                    "generation": 1,
+                    "buffered_duration_ms": 5_000,
+                    "media_duration_ms": 180_000,
+                },
+            }
+        )
+        assert reconnected.receive_json()["type"] == "PARTICIPANT_STATE"
         replayed_play_at = reconnected.receive_json()
         reconnected.send_json(
             {
                 "type": "TIME_PING",
                 "jam_id": jam_id,
-                "seq": 0,
+                "seq": 1,
                 "sent_at_ms": 2_000,
                 "payload": {"sample_id": str(uuid4()), "client_sent_ms": 2_000},
             }
@@ -390,8 +404,14 @@ def test_reconnect_receives_existing_schedule_and_can_restart_sequence(client: T
         pong = reconnected.receive_json()
 
     assert joined["payload"]["state"] == "SCHEDULED"
+    assert prepare["type"] == "PREPARE"
     assert replayed_play_at["type"] == "PLAY_AT"
-    assert replayed_play_at["payload"] == original_play_at["payload"]
+    assert replayed_play_at["payload"]["generation"] == original_play_at["payload"]["generation"]
+    assert (
+        replayed_play_at["payload"]["target_server_time_ms"]
+        >= original_play_at["payload"]["target_server_time_ms"]
+    )
+    assert replayed_play_at["payload"]["start_position_ms"] >= 0
     assert pong["type"] == "TIME_PONG"
 
 
@@ -406,10 +426,25 @@ def test_late_joiner_receives_future_catch_up_position(client: TestClient) -> No
     path = f"/ws?jam_id={jam_id}&participant_id={participant_id}&token={PARTICIPANT_TOKEN}"
 
     with client.websocket_connect(path) as websocket:
-        joined = websocket.receive_json()
+        joined, prepare = receive_handshake(websocket)
+        websocket.send_json(
+            {
+                "type": "READY",
+                "jam_id": jam_id,
+                "seq": 0,
+                "sent_at_ms": 1_000,
+                "payload": {
+                    "generation": 1,
+                    "buffered_duration_ms": 5_000,
+                    "media_duration_ms": 180_000,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "PARTICIPANT_STATE"
         catch_up = websocket.receive_json()
 
     assert joined["payload"]["state"] == "PLAYING"
+    assert prepare["type"] == "PREPARE"
     assert catch_up["type"] == "PLAY_AT"
     assert catch_up["payload"]["target_server_time_ms"] > catch_up["sent_at_ms"]
     assert catch_up["payload"]["start_position_ms"] >= 5_000

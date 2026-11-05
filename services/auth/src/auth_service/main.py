@@ -99,7 +99,7 @@ async def jwks(request: Request) -> dict[str, list[dict[str, str]]]:
 
 
 @app.post("/signup", response_model=SessionUser, status_code=201)
-async def signup(body: Credentials, request: Request, response: Response) -> SessionUser:
+async def signup(body: Credentials, request: Request) -> SessionUser:
     check_origin(request)
     try:
         user = await request.app.state.users.create(
@@ -107,7 +107,6 @@ async def signup(body: Credentials, request: Request, response: Response) -> Ses
         )
     except UsernameTaken as error:
         raise HTTPException(status_code=409, detail="That username is already taken") from error
-    set_session(response, request.app.state.signer.issue(str(user.user_id)))
     return user_response(user)
 
 
@@ -121,7 +120,7 @@ async def login(body: Credentials, request: Request, response: Response) -> Sess
         request.app.state.hasher.verify(user.password_hash, body.password)
     except (VerifyMismatchError, VerificationError, InvalidHashError) as error:
         raise HTTPException(status_code=401, detail="Username or password is incorrect") from error
-    set_session(response, request.app.state.signer.issue(str(user.user_id)))
+    set_session(response, request.app.state.signer.issue(str(user.user_id), user.username))
     return user_response(user)
 
 

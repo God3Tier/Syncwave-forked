@@ -7,7 +7,7 @@ from auth_service.db import UserRecord
 from .conftest import TEST_DB
 
 
-def test_signup_normalizes_username_hashes_password_and_sets_jwt_cookie(client):
+def test_signup_normalizes_username_hashes_password_without_starting_session(client):
     response = client.post(
         "/signup",
         json={"username": "  MiXeD_User ", "password": "a-strong-password"},
@@ -15,10 +15,8 @@ def test_signup_normalizes_username_hashes_password_and_sets_jwt_cookie(client):
 
     assert response.status_code == 201
     assert response.json()["username"] == "mixed_user"
-    cookie = response.cookies.get("syncwave_session")
-    assert cookie
-    assert "HttpOnly" in response.headers["set-cookie"]
-    assert "SameSite=lax" in response.headers["set-cookie"]
+    assert response.cookies.get("syncwave_session") is None
+    assert client.get("/me").status_code == 401
 
     engine = create_engine(f"sqlite:///{TEST_DB.as_posix()}")
     with Session(engine) as session:
@@ -48,6 +46,7 @@ def test_login_and_me_return_the_account(client):
     )
 
     assert login.status_code == 200
+    assert login.cookies.get("syncwave_session")
     assert client.get("/me").json() == login.json()
 
 
@@ -67,6 +66,7 @@ def test_login_does_not_reveal_whether_username_exists(client):
 
 def test_logout_clears_the_cookie_and_me_requires_a_session(client):
     client.post("/signup", json={"username": "wave_user", "password": "a-strong-password"})
+    client.post("/login", json={"username": "wave_user", "password": "a-strong-password"})
 
     assert client.post("/logout").status_code == 204
     assert client.get("/me").status_code == 401

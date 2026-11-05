@@ -58,14 +58,14 @@ All three run in the browser at <http://localhost:8080>.
    Switch "For you right now" from General to "Match weather" to put songs
    whose mood suits the weather first. It uses your browser location, or a
    city you pick (browsers only share a location over HTTPS or localhost).
-2. **Upload & Process.** On Upload, add a title, an artist, an audio file
+2. **Upload & Process.** Sign in, then on Upload add a title, an artist, an audio file
    and optionally an `.lrc` file and a mood. The processing panel shows
    Lyrics and Waveform working in parallel until the song is READY; it then
    appears in Search and Discover.
-3. **Create & Synchronise a Jam.** Listening stays open to guests. Create an
-   account with a username and password to save playlists or host a Jam. Open
-   the invite link in a second tab or on another device to join as a guest;
-   guests can add songs to the shared queue. Tap "enable audio" on every
+3. **Create & Synchronise a Jam.** Listening and joining stay open to guests.
+   Create an account with a username and password to save playlists or host a Jam.
+   Open the invite link in a second tab or on another device;
+   members can add songs to the shared queue. Tap "enable audio" on every
    device, then press Play as the owner. Each device buffers the song and
    starts it at the same server time. The Sync stats panel shows the clock
    offset and start error.

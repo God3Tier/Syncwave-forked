@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROLLED = {"s3", "upload-publisher", "lyrics-worker", "waveform-worker", "playlist"}
@@ -88,6 +88,7 @@ class Scenario:
             "/api/sync/health",
         ):
             self.api.request(path)
+        self.api.authenticate()
 
     def control(self, action, service):
         require(service in CONTROLLED, "Unexpected disruption target")
@@ -124,7 +125,9 @@ class Scenario:
             self.args.base_url.rstrip("/") + path, data=body, headers=headers, method=method
         )
         try:
-            response = urlopen(request, timeout=seconds or self.args.request_timeout)
+            response = self.api.opener.open(
+                request, timeout=seconds or self.args.request_timeout
+            )
         except HTTPError as exc:
             response = exc
         with response:

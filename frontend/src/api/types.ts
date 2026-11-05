@@ -161,10 +161,12 @@ export interface Jam {
   jam_id: string;
   owner_id: string;
   participant_ids: string[];
+  participants: Array<{ participant_id: string; username: string; role: 'OWNER' | 'MEMBER' }>;
   queue: QueueItem[];
   current_queue_item_id: string | null;
   sync_generation: number | null;
   state: JamState;
+  lifecycle_state: 'ACTIVE' | 'ENDED';
   member_token: string | null;
   member_id: string | null;
 }

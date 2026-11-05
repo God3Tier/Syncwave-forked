@@ -38,13 +38,14 @@ def server_frame(
     }
 
 
-def prepare_payload(session: SyncSession) -> dict[str, object]:
+def prepare_payload(session: SyncSession, start_position_ms: int = 0) -> dict[str, object]:
     return {
         "generation": session.generation,
         "queue_item_id": str(session.queue_item_id),
         "song_id": str(session.song_id),
         "stream_url": session.stream_url,
-        "start_position_ms": 0,
+        "manifest_url": f"/api/streaming/tracks/{session.song_id}/manifest",
+        "start_position_ms": start_position_ms,
     }
 
 
@@ -182,6 +183,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             command,
             prepare_deadline_ms=epoch_ms() + self._settings.prepare_timeout_ms,
             stream_url=None if stream is None else stream.stream_url,
+            duration_ms=None if stream is None else stream.duration_ms,
         )
         log_event(
             "session_started",
@@ -329,6 +331,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 song_id,
                 epoch_ms() + self._settings.prepare_timeout_ms,
                 stream_url=None if stream is None else stream.stream_url,
+                duration_ms=None if stream is None else stream.duration_ms,
             )
         except ValueError as error:
             await self._abort_validation(context, error)
@@ -353,8 +356,6 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 await self._uuid(value, "participant_ids", context)
                 for value in request.participant_ids
             }
-            if session.owner_id not in participant_ids:
-                raise ValueError("owner must remain a participant")
             session, removed_connections = await self._manager.update_participants(
                 session, request_id, request.generation, participant_ids
             )
@@ -444,6 +445,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
     ) -> sync_pb2.GetPlaybackStateResponse:
         await self._authorize(context)
         session = await self._session(request.jam_id, context)
+        await self._manager.mark_playing_if_due(session, epoch_ms())
         return sync_pb2.GetPlaybackStateResponse(playback=playback_snapshot(session))
 
 

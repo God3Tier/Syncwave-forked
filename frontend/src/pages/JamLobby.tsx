@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { createJam, recentJams, rememberJam } from '../api/jam';
+import { clearRecentJams, createJam, recentJams, rememberJam, removeRecentJam } from '../api/jam';
 import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/Layout';
 import { Button, Icon, Notice, StatusChip } from '../components/ui';
@@ -21,7 +21,7 @@ export function JamLobby() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [joinError, setJoinError] = useState<string | null>(null);
-  const recent = recentJams();
+  const [recent, setRecent] = useState(recentJams);
 
   const create = useCallback(async () => {
     if (!account) {
@@ -55,7 +55,8 @@ export function JamLobby() {
       setJoinError('Paste a Jam link or its ID (a UUID).');
       return;
     }
-    navigate(`/jam/${match[0].toLowerCase()}`);
+    const destination = `/jam/${match[0].toLowerCase()}`;
+    navigate(destination);
   };
 
   return (
@@ -105,7 +106,7 @@ export function JamLobby() {
         <section className="flex flex-col border-t border-outline-variant/35 p-6 md:border-l md:border-t-0 md:p-8">
           <Icon name="group_add" className="mb-5 text-2xl text-secondary" />
           <h2 className="text-xl font-extrabold">Join a Jam</h2>
-          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Join as a guest and add songs to the queue.</p>
+          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Guests can join, listen, and add songs to the queue.</p>
           <form onSubmit={join} className="mt-4 flex gap-2">
             <input
               value={code}
@@ -123,14 +124,17 @@ export function JamLobby() {
           </form>
           {joinError && <p className="mt-2 text-xs text-error">{joinError}</p>}
           <p className="mt-auto pt-6 text-xs text-on-surface-variant">
-            You can join an invite without creating an account.
+            Joining is account-free. Only the host needs to sign in to create and control the Jam.
           </p>
         </section>
       </div>
 
       {recent.length > 0 && (
         <section className="mt-10">
-          <h2 className="mb-3 text-lg font-extrabold">Recent Jams</h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-extrabold">Recent Jams</h2>
+            <button type="button" onClick={() => { clearRecentJams(); setRecent([]); }} className="text-xs font-semibold text-on-surface-variant hover:text-error">Clear history</button>
+          </div>
           <ul className="divide-y divide-outline-variant/25 border-y border-outline-variant/35">
             {recent.map((jam) => (
               <li key={jam.jam_id} className="flex items-center gap-4 px-4 py-3">
@@ -140,6 +144,9 @@ export function JamLobby() {
                 <Link to={`/jam/${jam.jam_id}`} className="font-headline text-sm font-semibold text-primary">
                   Rejoin
                 </Link>
+                <button type="button" aria-label={`Remove Jam ${shortId(jam.jam_id)} from recents`} onClick={() => { removeRecentJam(jam.jam_id); setRecent(recentJams()); }} className="text-outline hover:text-error">
+                  <Icon name="close" className="text-base" />
+                </button>
               </li>
             ))}
           </ul>

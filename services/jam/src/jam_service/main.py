@@ -38,6 +38,7 @@ from jam_service.models import (
     ReorderQueueRequest,
     SeekRequest,
     StartPlaybackRequest,
+    TransferOwnershipRequest,
 )
 from jam_service.playlist_client import (
     PlaylistClientError,
@@ -108,11 +109,11 @@ async def ready() -> dict[str, str]:
 @app.post("/jams", response_model=JamResponse, status_code=201)
 async def create_jam(request: CreateJamRequest, http_request: Request) -> JamResponse:
     check_request_origin(http_request)
-    owner_id = optional_account(http_request)
-    if owner_id is None:
+    owner = optional_account(http_request)
+    if owner is None:
         raise HTTPException(status_code=401, detail="Sign in to host a Jam")
-    jam = await manager.create(owner_id, request.playlist_id)
-    return jam.model_copy(update={"member_id": owner_id})
+    jam = await manager.create(owner.user_id, owner.username, request.playlist_id)
+    return jam.model_copy(update={"member_id": owner.user_id})
 
 
 @app.get("/jams/{jam_id}", response_model=JamResponse)
@@ -124,22 +125,19 @@ async def get_jam(jam_id: UUID, request: Request) -> JamResponse:
 @app.post("/jams/{jam_id}/members", response_model=JamResponse)
 async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
     check_request_origin(request)
-    token = request.headers.get("x-jam-token")
-    account_id = optional_account(request) if not token else None
-    if token:
-        participant_id = member_actor(token, jam_id, settings)
-        jam = manager.get(jam_id)
-        if participant_id == jam.owner_id or participant_id not in jam.participant_ids:
-            raise HTTPException(status_code=403, detail="You are not a member of this Jam")
-    elif account_id is not None:
-        participant_id = account_id
-    else:
-        participant_id = uuid4()
-    joined = await manager.join(jam_id, participant_id)
-    member_token = (
-        None if account_id is not None else issue_member_token(settings, jam_id, participant_id)
+    account = optional_account(request)
+    if account is not None:
+        joined = await manager.join(jam_id, account.user_id, account.username)
+        return joined.model_copy(update={"member_id": account.user_id, "member_token": None})
+
+    participant_id = uuid4()
+    joined = await manager.join(jam_id, participant_id, f"Guest {str(participant_id)[:8]}")
+    return joined.model_copy(
+        update={
+            "member_id": participant_id,
+            "member_token": issue_member_token(settings, jam_id, participant_id),
+        }
     )
-    return joined.model_copy(update={"member_id": participant_id, "member_token": member_token})
 
 
 @app.delete("/jams/{jam_id}/members/{participant_id}", status_code=204)
@@ -151,6 +149,31 @@ async def leave_jam(jam_id: UUID, participant_id: UUID, request: Request) -> Res
         raise HTTPException(status_code=403, detail="You can only leave as yourself")
     await manager.leave(jam_id, actor.user_id)
     return Response(status_code=204)
+
+
+@app.put("/jams/{jam_id}/owner", response_model=JamResponse)
+async def transfer_ownership(
+    jam_id: UUID, body: TransferOwnershipRequest, request: Request
+) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.transfer(jam_id, owner_id, body.participant_id, leave=False)
+
+
+@app.post("/jams/{jam_id}/owner/transfer-and-leave", response_model=JamResponse)
+async def transfer_and_leave(
+    jam_id: UUID, body: TransferOwnershipRequest, request: Request
+) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.transfer(jam_id, owner_id, body.participant_id, leave=True)
+
+
+@app.post("/jams/{jam_id}/end", response_model=JamResponse)
+async def end_jam(jam_id: UUID, request: Request) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.end(jam_id, owner_id)
 
 
 @app.post("/jams/{jam_id}/queue", response_model=JamResponse)
@@ -249,9 +272,10 @@ async def jam_websocket(
             if actor_id == jam.owner_id or actor_id not in jam.participant_ids:
                 raise HTTPException(status_code=403, detail="not a Jam member")
         else:
-            actor_id = optional_account(websocket)
-            if actor_id is None or actor_id not in manager.get(jam_id).participant_ids:
+            account = optional_account(websocket)
+            if account is None or account.user_id not in manager.get(jam_id).participant_ids:
                 raise HTTPException(status_code=401, detail="sign in or join this Jam")
+            actor_id = account.user_id
         if participant_id is not None and actor_id != participant_id:
             raise HTTPException(status_code=403, detail="participant identity does not match")
     except HTTPException as error:

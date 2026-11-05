@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { usePlayer } from '../player/context';
+import { productColors } from '../theme';
 
 // Bars per side. The picture is mirrored like a music video's: the bass is in
 // the middle and higher notes spread out to both edges, spaced evenly in pitch
@@ -7,8 +8,6 @@ import { usePlayer } from '../player/context';
 const BARS = 40;
 const MIN_HZ = 60;
 const MAX_HZ = 10_000;
-const LOW = '#ba9eff';
-const HIGH = '#3adffa';
 
 /**
  * Live frequency bars for the song that is playing, the kind music videos
@@ -59,11 +58,11 @@ export function Visualizer({ active, height = 160 }: { active: boolean; height?:
       const centreX = width / 2;
       const centreY = height / 2;
       const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, HIGH);
-      gradient.addColorStop(0.5, LOW);
-      gradient.addColorStop(1, HIGH);
+      gradient.addColorStop(0, productColors.secondary);
+      gradient.addColorStop(0.5, productColors.primary);
+      gradient.addColorStop(1, productColors.secondary);
       ctx.fillStyle = gradient;
-      ctx.shadowColor = HIGH;
+      ctx.shadowColor = productColors.secondary;
       ctx.shadowBlur = 10;
       current.forEach((level, i) => {
         const barHeight = Math.max(3, level * (height - 12));

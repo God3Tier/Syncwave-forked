@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { productColors } from '../theme';
 
 interface WaveformProps {
   peaks: number[];
@@ -8,10 +9,6 @@ interface WaveformProps {
   height?: number;
   className?: string;
 }
-
-const PLAYED = '#ff7350';
-const UNPLAYED = 'rgba(121, 227, 195, 0.32)';
-const PLAYHEAD = '#f3f0e8';
 
 /** Canvas waveform from the Waveform Service's peaks, with played portion and a playhead. */
 export function Waveform({ peaks, durationMs, positionMs, onSeek, height = 120, className = '' }: WaveformProps) {
@@ -39,15 +36,15 @@ export function Waveform({ peaks, durationMs, positionMs, onSeek, height = 120, 
     values.forEach((peak, i) => {
       const x = i * step;
       const barHeight = Math.max(2, Math.min(1, peak) * (height - 8));
-      ctx.fillStyle = x + barWidth <= playedX ? PLAYED : UNPLAYED;
+      ctx.fillStyle = x + barWidth <= playedX ? productColors.primary : productColors.secondaryMuted;
       ctx.beginPath();
       ctx.roundRect(x, mid - barHeight / 2, barWidth, barHeight, barWidth / 2);
       ctx.fill();
     });
 
     if (durationMs > 0) {
-      ctx.fillStyle = PLAYHEAD;
-      ctx.shadowColor = PLAYED;
+      ctx.fillStyle = productColors.onSurface;
+      ctx.shadowColor = productColors.primary;
       ctx.shadowBlur = 8;
       ctx.fillRect(Math.max(0, playedX - 1), 0, 2, height);
       ctx.shadowBlur = 0;
