@@ -41,8 +41,8 @@ class Settings:
     prepare_timeout_ms: int = 10_000
     clock_sample_max_age_ms: int = 30_000
     target_sync_tolerance_ms: int = 100
-    drift_ignore_threshold_ms: int = 80
-    drift_seek_threshold_ms: int = 250
+    drift_ignore_threshold_ms: int = 30
+    drift_seek_threshold_ms: int = 70
     rate_correction_percent: float = 0.02
     correction_lead_time_ms: int = 500
     correction_hysteresis_ms: int = 20
@@ -76,8 +76,8 @@ def get_settings() -> Settings:
         prepare_timeout_ms=int(os.getenv("PREPARE_TIMEOUT_MS", "10000")),
         clock_sample_max_age_ms=int(os.getenv("CLOCK_SAMPLE_MAX_AGE_MS", "30000")),
         target_sync_tolerance_ms=int(os.getenv("TARGET_SYNC_TOLERANCE_MS", "100")),
-        drift_ignore_threshold_ms=int(os.getenv("DRIFT_IGNORE_THRESHOLD_MS", "80")),
-        drift_seek_threshold_ms=int(os.getenv("DRIFT_SEEK_THRESHOLD_MS", "250")),
+        drift_ignore_threshold_ms=int(os.getenv("DRIFT_IGNORE_THRESHOLD_MS", "30")),
+        drift_seek_threshold_ms=int(os.getenv("DRIFT_SEEK_THRESHOLD_MS", "70")),
         rate_correction_percent=float(os.getenv("RATE_CORRECTION_PERCENT", "0.02")),
         correction_lead_time_ms=int(os.getenv("CORRECTION_LEAD_TIME_MS", "500")),
         correction_hysteresis_ms=int(os.getenv("CORRECTION_HYSTERESIS_MS", "20")),
