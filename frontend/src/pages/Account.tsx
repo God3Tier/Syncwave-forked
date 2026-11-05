@@ -85,7 +85,7 @@ export function AccountPage({ mode }: { mode: Mode }) {
           Find a track.<br />Bring everyone in.
         </h1>
         <p className="mt-5 max-w-md text-sm leading-7 text-on-surface-variant">
-          Keep listening without an account. Sign in when you want to save a playlist or host a Jam with your friends.
+          Listening and joining a friend’s Jam stay open to everyone. Sign in to upload music, save playlists, or host a Jam.
         </p>
       </section>
 
@@ -99,7 +99,7 @@ export function AccountPage({ mode }: { mode: Mode }) {
           {isSignup ? 'Create your account' : 'Log in to SyncWave'}
         </h2>
         <p className="mt-2 text-sm leading-6 text-on-surface-variant">
-          {isSignup ? 'Save your playlists and start listening rooms.' : 'Your playlists and Jams are waiting.'}
+          {isSignup ? 'Upload music, save playlists, and host listening rooms.' : 'Your uploads, playlists, and Jams are waiting.'}
         </p>
         {!isSignup && params.get('created') === '1' && (
           <p role="status" className="mt-4 rounded-lg border border-primary/35 bg-primary/10 px-3 py-2.5 text-sm text-primary">

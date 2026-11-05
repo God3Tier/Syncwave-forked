@@ -15,11 +15,12 @@ import sys
 import time
 import uuid
 import wave
+from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 Json = dict[str, Any]
 DURATION_MS = 4000
@@ -43,6 +44,7 @@ class Api:
     def __init__(self, base_url: str, request_timeout: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.request_timeout = request_timeout
+        self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
 
     def request(
         self,
@@ -56,7 +58,7 @@ class Api:
         headers = {"Content-Type": content_type} if content_type else {}
         request = Request(self.base_url + path, data=data, headers=headers)
         try:
-            with urlopen(request, timeout=self.request_timeout) as response:
+            with self.opener.open(request, timeout=self.request_timeout) as response:
                 require(
                     response.status == expected_status,
                     f"{path}: expected HTTP {expected_status}, got {response.status}",
@@ -84,6 +86,27 @@ class Api:
             raise FlowError(f"{path}: response was not valid JSON") from exc
         require(isinstance(value, dict), f"{path}: expected a JSON object")
         return value
+
+    def authenticate(self) -> None:
+        """Create an isolated integration account and retain its session cookie."""
+        credentials = json.dumps(
+            {
+                "username": f"flow_{uuid.uuid4().hex[:12]}",
+                "password": "syncwave-integration-password",
+            }
+        ).encode()
+        self.json(
+            "/api/auth/signup",
+            data=credentials,
+            content_type="application/json",
+            expected_status=201,
+        )
+        self.json(
+            "/api/auth/login",
+            data=credentials,
+            content_type="application/json",
+            expected_status=200,
+        )
 
 
 def audio_fixture(frequency_hz: float = 440) -> bytes:
@@ -166,6 +189,8 @@ def run(
     ):
         api.request(path)
         print(f"PASS {path}", flush=True)
+    api.authenticate()
+    print("PASS isolated upload account", flush=True)
 
     audio = audio_fixture() if audio is None else audio
     title = f"upload-flow-{report['run_id']}"

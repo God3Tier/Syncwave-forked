@@ -37,6 +37,7 @@ import { useSongs } from '../hooks/useSongs';
 import { usePlayer, usePosition } from '../player/context';
 import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
+import { productColors } from '../theme';
 
 const JAM_CLOSE_REASONS: Record<number, string> = {
   4401: 'The Jam rejected this device’s token.',
@@ -98,22 +99,19 @@ export function JamRoom() {
   // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
   useEffect(() => {
     if (authLoading) return;
-    if (!account) {
-      navigate(`/login?returnTo=${encodeURIComponent(`/jam/${jamId}`)}`, { replace: true });
-      return;
-    }
     const controller = new AbortController();
-    joinJam(jamId)
+    const knownMember = jamMemberId(jamId, account?.id);
+    (knownMember ? getJam(jamId) : joinJam(jamId))
       .then((value) => {
         if (controller.signal.aborted) return;
-        const joinedAs = value.member_id ?? account?.id ?? jamMemberId(jamId);
+        const joinedAs = value.member_id ?? account?.id ?? knownMember;
         setParticipantId(joinedAs);
         setJam(value);
         rememberJam(jamId, value.owner_id === joinedAs);
       })
       .catch((error: unknown) => !controller.signal.aborted && setLoadError(error));
     return () => controller.abort();
-  }, [account, authLoading, jamId, navigate]);
+  }, [account, authLoading, jamId]);
 
   const member = Boolean(participantId && jam?.participant_ids.includes(participantId));
   const jamCloseCode = useJamSocket(jamId, participantId, member, setJam);
@@ -398,7 +396,11 @@ function Deck({
         <span className={`h-2 w-2 rounded-full ${sync?.phase === 'PLAYING' ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
         <span className="text-xs font-bold text-secondary">Now playing together</span>
       </div>
-      {songId ? <SongArt id={songId} size="lg" className="mx-auto max-w-72" /> : (
+      {songId ? (
+        <Link to={`/songs/${songId}`} aria-label={`Open ${song?.title ?? 'current song'}`} className="mx-auto block max-w-72 rounded-2xl">
+          <SongArt id={songId} size="lg" />
+        </Link>
+      ) : (
         <div className="mx-auto flex aspect-square max-w-72 items-center justify-center rounded-xl border border-dashed border-outline-variant/50 text-on-surface-variant">
           Nothing playing yet
         </div>
@@ -483,7 +485,9 @@ function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberI
               {drag.gap === i && <span className="absolute inset-x-2 -top-1.5 h-0.5 rounded-full bg-primary" />}
               <div className={`group flex items-center gap-3 rounded-xl border p-2.5 ${current ? 'border-primary/40 bg-surface-container-high' : 'border-outline-variant/20 bg-surface-container'}`}>
                 {owner && <Icon name="drag_indicator" className="cursor-grab text-base text-outline" />}
-                <SongArt id={item.song_id} size="sm" />
+                <Link to={`/songs/${item.song_id}`} aria-label={`Open ${song?.title ?? 'song'}`} className="shrink-0 rounded-[10px]">
+                  <SongArt id={item.song_id} size="sm" />
+                </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-headline text-sm font-semibold">{song?.title ?? '…'}</p>
@@ -542,7 +546,7 @@ function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam
                   <span className={`h-2 w-2 rounded-full ${connected ? 'bg-ok' : 'bg-outline-variant'}`} />
                 </span>
                 <span className="flex items-center gap-1" title="Buffered and ready">
-                  <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_#48e4ff]' : 'bg-outline-variant'}`} />
+                  <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_rgb(121_227_195/0.65)]' : 'bg-outline-variant'}`} />
                 </span>
                 {owner && id !== memberId && jam.lifecycle_state === 'ACTIVE' && (
                   <>
@@ -571,8 +575,8 @@ function Sparkline({ values }: { values: number[] }) {
   const points = values.map((v, i) => `${(i / (values.length - 1)) * 48},${8 - (v / max) * 7}`).join(' ');
   return (
     <svg viewBox="0 0 48 16" className="h-4 w-12 overflow-visible" aria-hidden="true">
-      <line x1="0" y1="8" x2="48" y2="8" stroke="#484750" strokeWidth="0.5" />
-      <polyline points={points} fill="none" stroke="#3adffa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="0" y1="8" x2="48" y2="8" stroke={productColors.outlineVariant} strokeWidth="0.5" />
+      <polyline points={points} fill="none" stroke={productColors.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

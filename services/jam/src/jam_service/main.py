@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     FastAPI,
@@ -16,6 +16,7 @@ from jam_service.auth import (
     AuthVerifier,
     actor_for_request,
     check_request_origin,
+    issue_member_token,
     member_actor,
     optional_account,
     owner_for_request,
@@ -125,10 +126,20 @@ async def get_jam(jam_id: UUID, request: Request) -> JamResponse:
 async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
     check_request_origin(request)
     account = optional_account(request)
-    if account is None:
-        raise HTTPException(status_code=401, detail="Sign in to join a Jam")
-    joined = await manager.join(jam_id, account.user_id, account.username)
-    return joined.model_copy(update={"member_id": account.user_id, "member_token": None})
+    if account is not None:
+        joined = await manager.join(jam_id, account.user_id, account.username)
+        return joined.model_copy(update={"member_id": account.user_id, "member_token": None})
+
+    participant_id = uuid4()
+    joined = await manager.join(
+        jam_id, participant_id, f"Guest {str(participant_id)[:8]}"
+    )
+    return joined.model_copy(
+        update={
+            "member_id": participant_id,
+            "member_token": issue_member_token(settings, jam_id, participant_id),
+        }
+    )
 
 
 @app.delete("/jams/{jam_id}/members/{participant_id}", status_code=204)

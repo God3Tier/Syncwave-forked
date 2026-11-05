@@ -56,7 +56,7 @@ export function JamLobby() {
       return;
     }
     const destination = `/jam/${match[0].toLowerCase()}`;
-    navigate(account ? destination : `/login?returnTo=${encodeURIComponent(destination)}`);
+    navigate(destination);
   };
 
   return (
@@ -106,7 +106,7 @@ export function JamLobby() {
         <section className="flex flex-col border-t border-outline-variant/35 p-6 md:border-l md:border-t-0 md:p-8">
           <Icon name="group_add" className="mb-5 text-2xl text-secondary" />
           <h2 className="text-xl font-extrabold">Join a Jam</h2>
-          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Sign in, join the room, and add songs to the queue.</p>
+          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Guests can join, listen, and add songs to the queue.</p>
           <form onSubmit={join} className="mt-4 flex gap-2">
             <input
               value={code}
@@ -124,7 +124,7 @@ export function JamLobby() {
           </form>
           {joinError && <p className="mt-2 text-xs text-error">{joinError}</p>}
           <p className="mt-auto pt-6 text-xs text-on-surface-variant">
-            Listening outside a Jam stays account-free. Jams require an account so names and room controls stay reliable.
+            Joining is account-free. Only the host needs to sign in to create and control the Jam.
           </p>
         </section>
       </div>

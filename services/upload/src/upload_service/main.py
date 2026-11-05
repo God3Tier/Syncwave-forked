@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 
+from upload_service.auth import AuthVerifier, require_account
 from upload_service.config import Settings
 from upload_service.db import Database, Status, UploadRecord
 from upload_service.service import UploadError, UploadService
@@ -56,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     storage = S3Storage(settings)
     app.state.database = database
     app.state.storage = storage
+    app.state.auth_verifier = AuthVerifier(settings.auth_jwks_url)
     app.state.service = UploadService(database.sessions, storage, settings)
     try:
         yield
@@ -131,6 +133,7 @@ async def create_upload(
     mood: Annotated[str | None, Form(max_length=64)] = None,
 ) -> Receipt:
     """Store media and queue its event. A 202 response does not mean processing is complete."""
+    require_account(request)
     service: UploadService = request.app.state.service
     record = await service.create(title, artist, duration_ms, audio, lyrics, mood)
     # Relative to the public gateway, without reflecting untrusted headers.

@@ -25,11 +25,18 @@ def create_jam(client: TestClient, owner_id: str) -> dict:
 
 
 def join_guest(client: TestClient, jam_id: str) -> tuple[dict, dict[str, str]]:
-    as_account(client, str(uuid4()))
+    as_guest(client)
     response = client.post(f"/jams/{jam_id}/members")
     assert response.status_code == 200, response.text
     body = response.json()
-    return body, {}
+    return body, {"X-Jam-Token": body["member_token"]}
+
+
+def join_account(client: TestClient, jam_id: str) -> dict:
+    as_account(client, str(uuid4()))
+    response = client.post(f"/jams/{jam_id}/members")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_health_and_hosting_requires_an_account(client: TestClient) -> None:
@@ -64,7 +71,7 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
     joined, guest_headers = join_guest(client, jam_id)
     member_id = joined["member_id"]
     assert member_id in joined["participant_ids"]
-    assert joined["member_token"] is None
+    assert joined["member_token"] is not None
 
     queued = client.post(
         f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}, headers=guest_headers
@@ -82,7 +89,7 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
         f"/jams/{jam_id}/playback/start",
         json={"request_id": str(uuid4())},
         headers=guest_headers,
-    ).status_code == 403
+    ).status_code == 401
 
     as_account(client, str(uuid4()))
     assert (
@@ -103,7 +110,7 @@ def test_members_can_join_and_queue_but_only_account_owner_controls(client: Test
 
 def test_account_membership_is_scoped_to_one_room(client: TestClient) -> None:
     first_id = create_jam(client, str(uuid4()))["jam_id"]
-    joined, _ = join_guest(client, first_id)
+    joined = join_account(client, first_id)
     member_id = joined["member_id"]
     second_id = create_jam(client, str(uuid4()))["jam_id"]
     as_account(client, member_id)
@@ -175,7 +182,7 @@ def test_ended_song_advances_to_the_next_queue_item(client: TestClient) -> None:
 def test_owner_can_transfer_leave_and_end_a_jam(client: TestClient) -> None:
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]
-    joined, _ = join_guest(client, jam_id)
+    joined = join_account(client, jam_id)
     next_owner_id = joined["member_id"]
     as_account(client, owner_id)
 

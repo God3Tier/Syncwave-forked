@@ -20,6 +20,7 @@ x-upload-environment: &upload-environment
   UPLOAD_MAX_AUDIO_BYTES: "199229440"
   UPLOAD_MAX_LYRICS_BYTES: "262144"
   UPLOAD_PUBLISH_POLL_SECONDS: "2"
+  AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
 
 services:
   upload:
@@ -30,6 +31,8 @@ services:
     image: ${IMAGE_REGISTRY:-syncwave}/upload:${IMAGE_TAG:-local}
     environment: *upload-environment
     depends_on:
+      auth:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       s3-init:
