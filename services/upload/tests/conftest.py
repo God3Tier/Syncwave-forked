@@ -1,5 +1,6 @@
 """Real API/SQLite transactions with deterministic storage and broker adapters."""
 
+import hashlib
 import io
 import wave
 from collections.abc import Iterator
@@ -33,6 +34,9 @@ class FakeStorage:
     def delete(self, key: str) -> None:
         self.deleted.append(key)
         self.objects.pop(key, None)
+
+    def content_sha256(self, key: str) -> str:
+        return hashlib.sha256(self.objects[key]).hexdigest()
 
     def ready(self) -> None:
         pass

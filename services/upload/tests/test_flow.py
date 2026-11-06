@@ -1,11 +1,13 @@
 import asyncio
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
+from upload_service.backfill import backfill_hashes
 from upload_service.db import Status, UploadRecord, now
 from upload_service.main import app
 from upload_service.publisher import dispatch_one
@@ -13,12 +15,21 @@ from upload_service.publisher import dispatch_one
 from .conftest import FakePublisher, FakeStorage, run
 
 
-def submit(client: TestClient, wav: bytes, *, lyrics: bool = False):
+def submit(
+    client: TestClient,
+    wav: bytes,
+    *,
+    lyrics: bool = False,
+    title: str = "  Test Song  ",
+    artist: str = " Artist ",
+):
     files = {"audio": ("../../my song.wav", wav, "audio/wav")}
     if lyrics:
         files["lyrics"] = ("song.lrc", b"[00:00.01]Hello", "text/plain")
     return client.post(
-        "/uploads", data={"title": "  Test Song  ", "artist": " Artist "}, files=files
+        "/uploads",
+        data={"title": title, "artist": artist},
+        files=files,
     )
 
 
@@ -62,6 +73,90 @@ def test_upload_requires_a_signed_in_account(
     assert response.json()["error"]["code"] == "HTTP_ERROR"
     assert response.json()["error"]["message"] == "Sign in to upload music"
     assert not storage.objects
+
+
+def test_upload_retains_uploader_in_receipt_and_event(client: TestClient, wav: bytes) -> None:
+    uploader_id = "00000000-0000-4000-8000-000000000001"
+    receipt = submit(client, wav).json()
+    assert receipt["uploader_id"] == uploader_id
+    assert len(receipt["content_sha256"]) == 64
+    assert receipt["duplicate"] is False
+
+    publisher = FakePublisher()
+    assert run(client, dispatch_one, app.state.database.sessions, publisher)
+    assert publisher.events[0]["payload"]["uploader_id"] == uploader_id
+
+
+def test_exact_duplicate_returns_canonical_without_second_object_or_event(
+    client: TestClient, storage: FakeStorage, wav: bytes
+) -> None:
+    owner = "00000000-0000-4000-8000-000000000001"
+    first = submit(client, wav).json()
+    duplicate = submit(
+        client,
+        wav,
+        title="Different title",
+        artist="Different artist",
+    )
+
+    assert duplicate.status_code == 200
+    body = duplicate.json()
+    assert body["duplicate"] is True
+    assert body["song_id"] == first["song_id"]
+    assert body["title"] == first["title"]
+    assert body["artist"] == first["artist"]
+    assert body["uploader_id"] == owner
+    assert list(storage.objects) == [first["audio_reference"]]
+
+    publisher = FakePublisher()
+    assert run(client, dispatch_one, app.state.database.sessions, publisher)
+    assert len(publisher.events) == 1
+    assert not run(client, dispatch_one, app.state.database.sessions, publisher)
+
+
+def test_concurrent_duplicates_share_one_canonical_upload(
+    client: TestClient, storage: FakeStorage, wav: bytes
+) -> None:
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: submit(client, wav), range(2)))
+
+    assert sorted(response.status_code for response in responses) == [200, 202]
+    bodies = [response.json() for response in responses]
+    assert len({body["song_id"] for body in bodies}) == 1
+    assert sorted(body["duplicate"] for body in bodies) == [False, True]
+    assert len(storage.objects) == 1
+
+
+def test_hash_backfill_keeps_oldest_canonical_and_is_idempotent(
+    client: TestClient, storage: FakeStorage, wav: bytes
+) -> None:
+    submit(client, wav)
+    second = submit(client, wav + b"\x00").json()
+    storage.objects[second["audio_reference"]] = wav
+
+    async def make_legacy_rows() -> None:
+        async with app.state.database.sessions.begin() as session:
+            await session.execute(
+                update(UploadRecord).values(
+                    status=Status.PUBLISHED,
+                    content_sha256=None,
+                )
+            )
+
+    run(client, make_legacy_rows)
+    assert run(client, backfill_hashes, app.state.database.sessions, storage) == (1, 1)
+
+    async def hashes() -> list[str | None]:
+        async with app.state.database.sessions() as session:
+            rows = (
+                await session.scalars(select(UploadRecord).order_by(UploadRecord.created_at))
+            ).all()
+            return [row.content_sha256 for row in rows]
+
+    first_pass = run(client, hashes)
+    assert len([digest for digest in first_pass if digest is not None]) == 1
+    assert run(client, backfill_hashes, app.state.database.sessions, storage) == (0, 1)
+    assert run(client, hashes) == first_pass
 
 
 def test_instrumental_and_optional_duration(client: TestClient, wav: bytes) -> None:
@@ -174,8 +269,14 @@ def test_storage_failure_cleans_objects_and_never_queues_event(
     record = run(client, failed_record)
     assert record.status == Status.FAILED
     assert record.event is None
+    assert record.content_sha256 is None
     assert client.get(f"/uploads/{record.song_id}").json()["status"] == "FAILED"
     assert not run(client, dispatch_one, app.state.database.sessions, FakePublisher())
+
+    storage.fail_extension = None
+    retry = submit(client, wav, lyrics=True)
+    assert retry.status_code == 202
+    assert retry.json()["duplicate"] is False
 
 
 @pytest.mark.parametrize(

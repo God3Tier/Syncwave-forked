@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Index, Integer, String, Uuid
+from sqlalchemy import CHAR, JSON, CheckConstraint, DateTime, Index, Integer, String, Uuid, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -34,6 +34,14 @@ class UploadRecord(Base):
         ),
         CheckConstraint("publish_attempts >= 0", name="uploads_attempts_valid"),
         Index("ix_uploads_dispatch", "status", "next_attempt_at"),
+        Index("ix_uploads_uploader_id", "uploader_id"),
+        Index(
+            "uq_uploads_content_sha256",
+            "content_sha256",
+            unique=True,
+            postgresql_where=text("content_sha256 IS NOT NULL"),
+            sqlite_where=text("content_sha256 IS NOT NULL"),
+        ),
     )
 
     song_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -41,6 +49,8 @@ class UploadRecord(Base):
     title: Mapped[str] = mapped_column(String(200))
     artist: Mapped[str] = mapped_column(String(200))
     mood: Mapped[str | None] = mapped_column(String(64))
+    uploader_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     audio_reference: Mapped[str] = mapped_column(String(512))
     lyrics_reference: Mapped[str | None] = mapped_column(String(512))

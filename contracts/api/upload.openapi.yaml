@@ -62,6 +62,12 @@ paths:
               $ref: '#/components/schemas/Body_create_upload_uploads_post'
         required: true
       responses:
+        '200':
+          description: Exact duplicate; returns the existing canonical upload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
         '202':
           description: Media stored and event queued; processing continues asynchronously
           content:
@@ -220,6 +226,17 @@ components:
           - type: string
           - type: 'null'
           title: Mood
+        uploader_id:
+          type: [string, 'null']
+          format: uuid
+          title: Uploader Id
+        content_sha256:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          title: Content Sha256
+        duplicate:
+          type: boolean
+          title: Duplicate
         duration_ms:
           anyOf:
           - type: integer
@@ -263,6 +280,9 @@ components:
       - title
       - artist
       - mood
+      - uploader_id
+      - content_sha256
+      - duplicate
       - duration_ms
       - audio_reference
       - lyrics_reference
