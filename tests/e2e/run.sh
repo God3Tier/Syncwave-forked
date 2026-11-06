@@ -4,6 +4,7 @@ set -eu
 project_name="${COMPOSE_PROJECT_NAME:-syncwave}"
 container_name="${project_name}-playwright-e2e"
 network_name="${project_name}_default"
+playwright_version="1.56.0"
 
 cleanup() {
   mkdir -p tests/e2e/artifacts
@@ -17,8 +18,14 @@ cleanup
 docker run --detach \
   --name "$container_name" \
   --network "$network_name" \
-  mcr.microsoft.com/playwright/python:v1.56.0-noble \
+  "mcr.microsoft.com/playwright/python:v${playwright_version}-noble" \
   sleep infinity >/dev/null
+
+# The official image contains browsers and OS dependencies, but language
+# bindings are installed separately so they can match the test suite exactly.
+docker exec "$container_name" \
+  python -m pip install --quiet --no-cache-dir --disable-pip-version-check \
+    --root-user-action=ignore "playwright==${playwright_version}"
 
 docker exec "$container_name" mkdir -p \
   /workspace/tests/e2e/artifacts \
