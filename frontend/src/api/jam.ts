@@ -1,5 +1,6 @@
 import { uuid } from '../uuid';
 import { getSignedInAccount } from '../auth/session';
+import { guestName } from '../guestName';
 import { request } from './http';
 import type { Jam, Readiness } from './types';
 
@@ -51,12 +52,17 @@ export function getJam(jamId: string, signal?: AbortSignal): Promise<Jam> {
   return call(jamId, id(jamId), { signal });
 }
 
+// Guests ask to keep their sidebar name; signed-in accounts join as themselves.
+function joinBody(): { guest_name?: string } {
+  return getSignedInAccount() ? {} : { guest_name: guestName };
+}
+
 export async function joinJam(jamId: string): Promise<Jam> {
-  return remember(await call<Jam>(jamId, `${id(jamId)}/members`, { method: 'POST' }));
+  return remember(await call<Jam>(jamId, `${id(jamId)}/members`, { method: 'POST', json: joinBody() }));
 }
 
 export async function joinJamByCode(joinCode: string): Promise<Jam> {
-  return remember(await call<Jam>(null, `/by-code/${encodeURIComponent(joinCode)}/members`, { method: 'POST' }));
+  return remember(await call<Jam>(null, `/by-code/${encodeURIComponent(joinCode)}/members`, { method: 'POST', json: joinBody() }));
 }
 
 export function leaveJam(jamId: string, participantId: string): Promise<void> {
