@@ -54,6 +54,7 @@ def test_get_song(client: TestClient, api_db: Engine) -> None:
         "title": "Demo",
         "artist": "Artist",
         "mood": None,
+        "uploader_id": None,
         "duration_ms": 213000,
         "audio_reference": f"audio/{song_id}.mp3",
         "lyrics_status": "READY",
@@ -132,6 +133,17 @@ def test_list_songs_filter_by_readiness(client: TestClient, api_db: Engine) -> N
     song_ids = {item["song_id"] for item in body["items"]}
     assert str(ready_id) in song_ids
     assert str(partial_id) not in song_ids
+
+
+def test_list_songs_filter_by_uploader(client: TestClient, api_db: Engine) -> None:
+    uploader_id = uuid.uuid4()
+    owned_id = seed(api_db, uploader_id=uploader_id)
+    seed(api_db, uploader_id=uuid.uuid4())
+    seed(api_db, uploader_id=None)
+
+    body = client.get(f"/songs?uploader_id={uploader_id}").json()
+    assert [item["song_id"] for item in body["items"]] == [str(owned_id)]
+    assert body["items"][0]["uploader_id"] == str(uploader_id)
 
 
 def test_unknown_path_uses_the_shared_error_shape(client: TestClient) -> None:

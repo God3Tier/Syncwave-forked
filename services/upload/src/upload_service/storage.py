@@ -1,5 +1,6 @@
 """Blocking S3 calls run in a thread; uploads use the spooled file, not bytes."""
 
+import hashlib
 from typing import BinaryIO
 
 import boto3
@@ -36,6 +37,18 @@ class S3Storage:
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def content_sha256(self, key: str) -> str:
+        """Stream an existing object for the rollout backfill."""
+        body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
+        digest = hashlib.sha256()
+        try:
+            for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+                if chunk:
+                    digest.update(chunk)
+        finally:
+            body.close()
+        return digest.hexdigest()
 
     def ready(self) -> None:
         self.client.head_bucket(Bucket=self.bucket)

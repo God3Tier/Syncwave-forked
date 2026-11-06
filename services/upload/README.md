@@ -120,8 +120,13 @@ task role: omit local endpoint/path-style settings and static AWS keys.
   Automatic reconciliation/resumable upload is future work; inspect receipts
   and S3 keys before manually cleaning these objects. No stale receipt is
   automatically announced as a completed upload.
-- Repeating `POST /uploads` creates a new song. HTTP request idempotency and
-  resuming partially transferred media are not implemented in this first flow.
+- Audio is hashed incrementally with SHA-256. Repeating `POST /uploads` with
+  exactly the same audio bytes returns the canonical receipt with HTTP `200`
+  and `duplicate: true`; it does not write another object or event. Different
+  encodings of the same performance are not considered duplicates.
+- The verified account cookie supplies the canonical uploader ID. The database
+  column remains nullable only for historical rows; every new upload is owned.
+  Duplicate attempts never transfer ownership.
 - `/ready` checks API dependencies; broker delivery problems are observable
   through pending receipts and publisher logs. The API can accept uploads
   while RabbitMQ is unavailable.
@@ -185,3 +190,16 @@ event contracts, and migration upgrade/downgrade. Live S3/RabbitMQ/Postgres
 integration still requires Docker. Alembic migrations run before API startup;
 the publisher waits for the API to become healthy. Both processes use the same
 image and the `upload` child pipeline builds/deploys that image.
+
+After deploying the nullable hash column, backfill published legacy uploads
+oldest-first with the service environment configured:
+
+```sh
+cd services/upload
+PYTHONPATH=src python -m upload_service.backfill
+```
+
+The backfill streams S3 objects, is safe to rerun, assigns each hash to the
+oldest matching row, and leaves later legacy duplicate rows unchanged so their
+existing song references continue to work. Historical `uploader_id` values
+remain null because ownership cannot be reconstructed safely.
