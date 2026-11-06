@@ -91,6 +91,12 @@ paths:
             type: string
             enum: [PROCESSING, PARTIAL, READY, FAILED]
           description: Only return songs in this processing state.
+        - in: query
+          name: uploader_id
+          schema:
+            type: string
+            format: uuid
+          description: Only return songs owned by this uploader account.
       responses:
         "200":
           description: A page of songs.
@@ -108,7 +114,7 @@ components:
   schemas:
     Song:
       type: object
-      required: [song_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, created_at, updated_at]
+      required: [song_id, uploader_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, created_at, updated_at]
       properties:
         song_id:
           type: string
@@ -120,6 +126,10 @@ components:
         mood:
           type: [string, "null"]
           description: Optional mood label for the song.
+        uploader_id:
+          type: [string, "null"]
+          format: uuid
+          description: Canonical uploader account; null for legacy songs.
         duration_ms:
           type: [integer, "null"]
           minimum: 0

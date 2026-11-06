@@ -26,6 +26,13 @@
           "type": "string",
           "minLength": 1
         },
+        "uploader_id": {
+          "description": "Account UUID of the canonical uploader. Null or absent for legacy uploads.",
+          "anyOf": [
+            { "type": "string", "format": "uuid" },
+            { "type": "null" }
+          ]
+        },
         "mood": {
           "description": "Optional mood label for the song, lowercase (Recommendation matches calm, mellow, upbeat and energetic to the weather). At most 64 characters, the Catalogue column size.",
           "anyOf": [

@@ -1,5 +1,6 @@
 """Real API/SQLite transactions with deterministic storage and broker adapters."""
 
+import hashlib
 import io
 import wave
 from collections.abc import Iterator
@@ -34,6 +35,9 @@ class FakeStorage:
         self.deleted.append(key)
         self.objects.pop(key, None)
 
+    def content_sha256(self, key: str) -> str:
+        return hashlib.sha256(self.objects[key]).hexdigest()
+
     def ready(self) -> None:
         pass
 
@@ -54,11 +58,16 @@ class FakePublisher:
 
 class FakeAuthVerifier:
     def account(self, token: str) -> AccountIdentity:
-        if token != "test-account-token":
+        accounts = {
+            "test-account-token": ("00000000-0000-4000-8000-000000000001", "uploader"),
+            "second-account-token": ("00000000-0000-4000-8000-000000000002", "second"),
+        }
+        if token not in accounts:
             raise AssertionError("unexpected account token")
+        user_id, username = accounts[token]
         return AccountIdentity(
-            user_id=UUID("00000000-0000-4000-8000-000000000001"),
-            username="uploader",
+            user_id=UUID(user_id),
+            username=username,
         )
 
 

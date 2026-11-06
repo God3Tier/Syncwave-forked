@@ -85,6 +85,23 @@ async def test_song_without_lyrics_has_lyrics_ready(
     assert record.processing_status == ProcessingStatus.PROCESSING
 
 
+async def test_song_uploaded_preserves_optional_uploader(
+    handler: CatalogueHandler,
+    repository,
+    song_uploaded: SongUploaded,
+    make_message: MakeMessage,
+) -> None:
+    uploader_id = uuid.uuid4()
+    event = song_uploaded(uploader_id=str(uploader_id))
+    message = make_message(event)
+
+    await handler(message, QUEUE_SONG_UPLOADED)
+
+    record = await repository.get(uuid.UUID(event["song_id"]))
+    assert record is not None
+    assert record.uploader_id == uploader_id
+
+
 async def test_duplicate_upload_event_first_write_wins(
     handler: CatalogueHandler,
     repository,
