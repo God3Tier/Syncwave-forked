@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from fastapi import WebSocket
 
+from jam_service.guest_names import pick_guest_name
 from jam_service.models import (
     JamLifecycle,
     JamParticipant,
@@ -176,19 +177,35 @@ class JamManager:
 
     async def join(self, jam_id: UUID, participant_id: UUID, username: str) -> JamResponse:
         async with self._lock:
-            jam = self._find(jam_id)
-            self._require_active(jam)
-            if participant_id not in jam.participant_ids:
-                updated_participants = [*jam.participant_ids, participant_id]
-                if jam.sync_generation is not None:
-                    await self._sync.update_participants(
-                        uuid4(), jam.jam_id, jam.sync_generation, updated_participants
-                    )
-                jam.participant_ids.append(participant_id)
-            jam.participant_usernames[participant_id] = username
-            await self._save(jam)
+            await self._add_member(jam_id, participant_id, username)
         await self.broadcast(jam_id)
         return self.get(jam_id)
+
+    async def join_guest(
+        self, jam_id: UUID, participant_id: UUID, requested_name: str | None
+    ) -> JamResponse:
+        """Adds a guest under a readable name that no one else in the Jam uses."""
+        async with self._lock:
+            jam = self._find(jam_id)
+            taken = (jam.participant_usernames.get(member) for member in jam.participant_ids)
+            name = pick_guest_name(requested_name, (value for value in taken if value))
+            await self._add_member(jam_id, participant_id, name)
+        await self.broadcast(jam_id)
+        return self.get(jam_id)
+
+    async def _add_member(self, jam_id: UUID, participant_id: UUID, username: str) -> None:
+        """Caller holds self._lock."""
+        jam = self._find(jam_id)
+        self._require_active(jam)
+        if participant_id not in jam.participant_ids:
+            updated_participants = [*jam.participant_ids, participant_id]
+            if jam.sync_generation is not None:
+                await self._sync.update_participants(
+                    uuid4(), jam.jam_id, jam.sync_generation, updated_participants
+                )
+            jam.participant_ids.append(participant_id)
+        jam.participant_usernames[participant_id] = username
+        await self._save(jam)
 
     async def leave(self, jam_id: UUID, participant_id: UUID) -> None:
         async with self._lock:

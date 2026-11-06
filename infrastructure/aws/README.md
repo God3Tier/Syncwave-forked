@@ -21,6 +21,7 @@ infrastructure/aws/
 │   ├── ecs-service/      one ECS service + task definition + logs + task role + optional ALB route
 │   └── service-database/ one service's database/role on the shared RDS + its password secret
 └── services/             one folder per service = its image name; ECS service names in brackets
+    ├── auth/             database, API (auth), token signing key; JWKS for Upload, Playlist, Jam, orchestrator
     ├── catalogue/        database, API + gRPC (catalogue), worker (catalogue-worker), internal token for Sync
     ├── search/           database, API (search), worker (search-worker)
     ├── upload/           database, API (upload, writes S3), outbox publisher (upload-publisher)
@@ -37,7 +38,7 @@ infrastructure/aws/
 
 Each service stack also has its ECR repository. Owners: Catalogue and
 Search Orvin, Upload Yonghuey, Streaming and the orchestrator Joseph, Lyrics
-and Waveform Jiawen, Playlist and Recommendation Hayyun, Jam and Sync Azeez
+and Waveform Jiawen, Playlist and Recommendation Hayyun, Jam, Sync and Auth Azeez
 (`plan.md` §2).
 
 - **platform** holds what every service needs and no single service owns.
@@ -75,6 +76,7 @@ Services reach each other inside the VPC by name, as they do in Compose:
 | sync | Streaming (HTTP) | `http://streaming.syncwave.internal:8081` | none |
 | jam | Sync (gRPC) | `sync.syncwave.internal:50051` | `syncwave/sync/internal-token` |
 | jam | Playlist (gRPC) | `playlist.syncwave.internal:50051` | `syncwave/playlist/internal-token` |
+| upload, playlist, jam, orchestrator | Auth (HTTP, JWKS) | `http://auth.syncwave.internal:8080/.well-known/jwks.json` | none |
 | orchestrator | Playlist, Streaming, Lyrics, Waveform (HTTP) | `playlist`/`lyrics`/`waveform` `:8080`, `streaming:8081` | none |
 
 - **Names:** pass `service_discovery = { namespace_id = local.platform.service_discovery_namespace_id, name = "<service>" }`
@@ -124,7 +126,7 @@ internet ──> CloudFront https://<id>.cloudfront.net (no caching; WebSockets 
 | Network | Public subnets for tasks, **no NAT gateway** | A NAT gateway costs more than everything else here. Tasks only accept traffic from the ALB; RDS has no internet route at all. |
 | RabbitMQ | **One container on ECS** (Cloud Map DNS) | Cheapest. Plain AMQP inside the VPC needs no client changes (Amazon MQ requires TLS). There is no volume, so a restart loses queued messages; the topology is reloaded from `infrastructure/rabbitmq/definitions.json` by an init container. |
 | Postgres | **One `db.t4g.small` RDS instance**, one database and login role per service | Keeps the database-per-service rule of `infrastructure/postgres/init.sql` at the price of one small instance. A micro's connection limit is too low for nine services' pools (`-var db_instance_class=db.t4g.micro` is fine for a few). The master password is managed by RDS in Secrets Manager. |
-| Secrets | Secrets Manager `syncwave/<service>/db`, `syncwave/rabbitmq`, `syncwave/<service>/internal-token` | Injected as `DB_PASSWORD` / `AMQP_PASSWORD` / the tokens; never in Terraform variables, images or Git. Every service takes `DB_*` with the password on its own (Jam, Sync and the orchestrator were changed to accept it as well as `DATABASE_URL`). |
+| Secrets | Secrets Manager `syncwave/<service>/db`, `syncwave/rabbitmq`, `syncwave/<service>/internal-token`, `syncwave/auth/jwt-signing-key` | Injected as `DB_PASSWORD` / `AMQP_PASSWORD` / the tokens; never in Terraform variables, images or Git. Every service takes `DB_*` with the password on its own (Jam, Sync and the orchestrator were changed to accept it as well as `DATABASE_URL`). |
 | S3 access | Per-task IAM roles, limited to a key prefix | Upload's API writes `audio/*` and `lyrics/*`; Streaming and the waveform worker read `audio/*`; the lyrics worker reads `lyrics/*`. Every other task has no S3 access. |
 | Workers | `FARGATE_SPOT` | About 70% cheaper. An interrupted message is redelivered (or, for Upload's publisher, picked up again from the outbox), and the consumers are idempotent. |
 | Worker start | Each worker waits for its API (`wait_for_steady_state`) | The API runs the migrations; a worker started first on an empty database would dead-letter its first messages. |
@@ -180,6 +182,7 @@ here in the same merge request as the stack.
 | 99 | sync (block) | `/api/sync/internal/*` → 404 |
 | 100 | sync | `/api/sync/*` |
 | 110 | orchestrator | `/api/orchestrator/*` |
+| 120 | auth | `/api/auth/*` |
 | 900 | platform | any other `/api/*` → 404 `UNKNOWN_SERVICE` |
 | 1000 | frontend | `/*`, no rewrite; must stay the last rule |
 
