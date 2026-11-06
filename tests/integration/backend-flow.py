@@ -681,6 +681,7 @@ def main() -> int:
                 audio=upload.audio_fixture(
                     frequency_hz=frequency,
                     duration_ms=BACKEND_FIXTURE_DURATION_MS,
+                    nonce=song["run_id"],
                 ),
                 expected_duration_ms=BACKEND_FIXTURE_DURATION_MS,
             )

@@ -59,7 +59,7 @@ ci:test-coverage:
     paths:
       - tests/integration/ci-test-coverage-report.json
   rules:
-    - changes: [.gitlab-ci.yml, docker-compose.yml, services/**/*, frontend/**/*, ci/**/*]
+    - changes: [.gitlab-ci.yml, docker-compose.yml, services/**/*, frontend/**/*, tests/**/*, ci/**/*]
 
 contracts:proto:
   stage: validate
@@ -217,7 +217,7 @@ jam:
     include: services/jam/.gitlab-ci.yml
   rules:
     - exists: [services/jam/.gitlab-ci.yml]
-      changes: [services/jam/**/*, contracts/websocket/**/*, contracts/grpc/**/*, contracts/api/catalogue.openapi.yaml, tests/integration/backend-flow.py, ci/**/*]
+      changes: [services/jam/**/*, contracts/websocket/**/*, contracts/grpc/**/*, contracts/api/catalogue.openapi.yaml, tests/integration/backend-flow.py, tests/integration/jam-expiry.py, ci/**/*]
 
 sync:
   extends: .service-trigger
@@ -268,12 +268,16 @@ integration:
     - docker compose cp tests/integration/upload-flow.py jam:/tmp/upload-flow.py
     - docker compose cp tests/integration/backend-flow.py jam:/tmp/backend-flow.py
     - docker compose exec -T jam python /tmp/backend-flow.py --check-reconnect --check-resync --report /tmp/backend-flow-report.json
+    # Durable lifecycle: expire a backdated Jam while no room page is connected.
+    - docker compose cp tests/integration/jam-expiry.py jam:/tmp/jam-expiry.py
+    - docker compose exec -T jam python /tmp/jam-expiry.py --report /tmp/jam-expiry-report.json
     # Run disruptions sequentially after the happy paths; the runner restores services.
     - python3 tests/integration/failure-recovery.py --base-url http://docker:8080 --report tests/integration/failure-recovery-report.json
     - if [ -f tests/e2e/run.sh ]; then sh tests/e2e/run.sh docker; fi
   after_script:
     - docker compose cp upload:/tmp/ingestion-flow-report.json tests/integration/ingestion-flow-report.json || true
     - docker compose cp jam:/tmp/backend-flow-report.json tests/integration/backend-flow-report.json || true
+    - docker compose cp jam:/tmp/jam-expiry-report.json tests/integration/jam-expiry-report.json || true
     - docker compose ps --all > compose-ps.txt 2>&1 || true
     - docker compose logs --no-color --timestamps > compose-logs.txt 2>&1 || true
   artifacts:
@@ -284,6 +288,7 @@ integration:
       - compose-logs.txt
       - tests/integration/ingestion-flow-report.json
       - tests/integration/backend-flow-report.json
+      - tests/integration/jam-expiry-report.json
       - tests/integration/failure-recovery-report.json
       - tests/e2e/artifacts/
   rules:

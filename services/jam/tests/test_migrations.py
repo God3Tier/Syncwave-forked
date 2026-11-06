@@ -21,6 +21,9 @@ def test_initial_migration_upgrades_and_downgrades(tmp_path: Path) -> None:
             "jam_members",
             "jam_queue_items",
         } <= set(inspect(engine).get_table_names())
+        assert "last_listener_active_at" in {
+            column["name"] for column in inspect(engine).get_columns("jams")
+        }
         engine.dispose()
 
         command.downgrade(config, "base")

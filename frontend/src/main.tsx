@@ -15,6 +15,7 @@ import { PlayerProvider } from './player/PlayerProvider';
 import { AuthProvider } from './auth/AuthProvider';
 import { AccountPage } from './pages/Account';
 import { RequireAccount } from './auth/RequireAccount';
+import { JamProvider } from './jam/JamProvider';
 import './index.css';
 
 const router = createBrowserRouter([
@@ -45,7 +46,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <PlayerProvider>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <JamProvider>
+          <RouterProvider router={router} />
+        </JamProvider>
       </AuthProvider>
     </PlayerProvider>
   </StrictMode>,

@@ -103,6 +103,7 @@ export class SyncSession {
   private pendingGeneration: number | null = null;
   private pendingSongId: string | null = null;
   private gain: GainNode;
+  private analyserNode: AnalyserNode;
   private anchorContextTime = 0;
   private anchorPositionMs = 0;
   private rate = 1;
@@ -117,7 +118,11 @@ export class SyncSession {
     this.options = options;
     this.frame = makeFrameFactory(options.jamId);
     this.gain = options.context.createGain();
-    this.gain.connect(options.context.destination);
+    this.analyserNode = options.context.createAnalyser();
+    this.analyserNode.fftSize = 2048;
+    this.analyserNode.smoothingTimeConstant = 0.75;
+    this.gain.connect(this.analyserNode);
+    this.analyserNode.connect(options.context.destination);
   }
 
   get state(): SyncSnapshot {
@@ -155,10 +160,16 @@ export class SyncSession {
     this.socket?.close(1000, 'leaving');
     this.socket = null;
     this.gain.disconnect();
+    this.analyserNode.disconnect();
   }
 
   setVolume(value: number): void {
     this.gain.gain.value = value;
+  }
+
+  /** Frequency data for visualizing this synchronized audio session. */
+  analyser(): AnalyserNode {
+    return this.analyserNode;
   }
 
   async resumeAudio(): Promise<boolean> {
