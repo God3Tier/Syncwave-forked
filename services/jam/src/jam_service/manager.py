@@ -278,9 +278,7 @@ class JamManager:
         if participant_id not in jam.participant_ids:
             updated_participants = [*jam.participant_ids, participant_id]
             if jam.sync_generation is not None:
-                await self._sync.update_participants(
-                    uuid4(), jam.jam_id, jam.sync_generation, updated_participants
-                )
+                await self._update_sync_participants(jam, updated_participants)
             jam.participant_ids.append(participant_id)
         jam.participant_usernames[participant_id] = username
         await self._save(jam)
@@ -301,9 +299,7 @@ class JamManager:
                     value for value in jam.participant_ids if value != participant_id
                 ]
                 if jam.sync_generation is not None:
-                    await self._sync.update_participants(
-                        uuid4(), jam.jam_id, jam.sync_generation, updated_participants
-                    )
+                    await self._update_sync_participants(jam, updated_participants)
                 jam.participant_ids.remove(participant_id)
                 jam.participant_usernames.pop(participant_id, None)
                 await self._save(jam)
@@ -526,15 +522,13 @@ class JamManager:
             self._require_owner(jam, actor_id)
             if participant_id == actor_id or participant_id not in jam.participant_ids:
                 raise JamConflictError("new owner must be another current participant")
-            jam.owner_id = participant_id
             if leave:
                 updated = [value for value in jam.participant_ids if value != actor_id]
                 if jam.sync_generation is not None:
-                    await self._sync.update_participants(
-                        uuid4(), jam.jam_id, jam.sync_generation, updated
-                    )
+                    await self._update_sync_participants(jam, updated)
                 jam.participant_ids = updated
                 jam.participant_usernames.pop(actor_id, None)
+            jam.owner_id = participant_id
             await self._save(jam)
         if leave:
             await self._disconnect_participant(jam_id, actor_id)
@@ -568,9 +562,7 @@ class JamManager:
             jam = self._find(jam_id)
             if jam.sync_generation is not None:
                 try:
-                    await self._sync.update_participants(
-                        uuid4(), jam.jam_id, jam.sync_generation, []
-                    )
+                    await self._update_sync_participants(jam, [])
                 except SyncClientError as error:
                     logger.warning(
                         "expired Jam Sync cleanup failed",
@@ -584,7 +576,7 @@ class JamManager:
         if jam.lifecycle_state is JamLifecycle.ENDED:
             return
         if clear_sync and jam.sync_generation is not None:
-            await self._sync.update_participants(uuid4(), jam.jam_id, jam.sync_generation, [])
+            await self._update_sync_participants(jam, [])
         jam.lifecycle_state = JamLifecycle.ENDED
         jam.state = JamState.ENDED
         jam.ended_at = self._now()
@@ -654,6 +646,26 @@ class JamManager:
         if jam.sync_generation is None or jam.current_queue_item_id is None:
             return
         await self._sync.update_queue(uuid4(), jam.jam_id, jam.sync_generation, jam.queue)
+
+    async def _update_sync_participants(self, jam: Jam, participant_ids: list[UUID]) -> None:
+        """Apply membership to the current generation despite boundary races."""
+        for attempt in range(3):
+            snapshot = await self._sync.playback_state(jam.jam_id)
+            if snapshot.queue_item_id is not None:
+                jam.current_queue_item_id = snapshot.queue_item_id
+            self._apply_snapshot(jam, snapshot.generation, snapshot.state)
+            try:
+                updated = await self._sync.update_participants(
+                    uuid4(), jam.jam_id, snapshot.generation, participant_ids
+                )
+            except SyncConflictError:
+                if attempt == 2:
+                    raise
+                continue
+            if updated.queue_item_id is not None:
+                jam.current_queue_item_id = updated.queue_item_id
+            self._apply_snapshot(jam, updated.generation, updated.state)
+            return
 
     async def _locked_queue_item_ids(self, jam: Jam) -> set[UUID]:
         locked = {jam.current_queue_item_id} if jam.current_queue_item_id is not None else set()
