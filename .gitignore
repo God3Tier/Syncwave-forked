@@ -35,6 +35,7 @@ tests/e2e/artifacts/
 .idea/
 *.iml
 .vscode/
+.serena/
 .DS_Store
 Thumbs.db
 desktop.ini

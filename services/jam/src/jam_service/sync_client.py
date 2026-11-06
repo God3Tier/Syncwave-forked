@@ -21,6 +21,12 @@ class SyncConflictError(SyncClientError):
 class SyncSnapshot:
     generation: int
     state: JamState
+    queue_item_id: UUID | None = None
+    pending_queue_item_id: UUID | None = None
+    duration_ms: int = 0
+    anchor_server_time_ms: int | None = None
+    anchor_position_ms: int = 0
+    playback_rate: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +37,8 @@ class ReadinessStatus:
     decision_required: bool
     ready_participant_ids: list[UUID]
     unready_participant_ids: list[UUID]
+    target_generation: int | None = None
+    transition: bool = False
 
 
 class Command(StrEnum):
@@ -98,6 +106,11 @@ class SyncClient:
     ) -> SyncSnapshot:
         raise NotImplementedError
 
+    async def update_queue(
+        self, request_id: UUID, jam_id: UUID, generation: int, queue: list[QueueItem]
+    ) -> SyncSnapshot:
+        raise NotImplementedError
+
     async def close(self) -> None:
         return None
 
@@ -153,6 +166,9 @@ class FakeSyncClient(SyncClient):
     async def update_participants(self, request_id, jam_id, generation, participant_ids):
         return self._check(jam_id, generation)
 
+    async def update_queue(self, request_id, jam_id, generation, queue):
+        return self._check(jam_id, generation)
+
     def _check(self, jam_id: UUID, generation: int) -> SyncSnapshot:
         snapshot = self._snapshots.get(jam_id)
         if snapshot is None:
@@ -177,7 +193,16 @@ class GrpcSyncClient(SyncClient):
                 raise SyncConflictError(error.details() or "Sync rejected the command") from error
             raise SyncClientError(error.details() or "Sync is unavailable") from error
         playback = response.playback
-        return SyncSnapshot(playback.generation, _PROTO_STATES[playback.state])
+        return SyncSnapshot(
+            playback.generation,
+            _PROTO_STATES[playback.state],
+            UUID(playback.queue_item_id) if playback.queue_item_id else None,
+            UUID(playback.pending_queue_item_id) if playback.pending_queue_item_id else None,
+            playback.duration_ms,
+            playback.anchor_server_time_ms or None,
+            playback.anchor_position_ms,
+            playback.playback_rate or 1.0,
+        )
 
     async def start(self, request_id, jam_id, owner_id, selection, participant_ids):
         request = sync_pb2.StartPlaybackRequest(
@@ -255,6 +280,8 @@ class GrpcSyncClient(SyncClient):
             decision_required=response.decision_required,
             ready_participant_ids=[UUID(value) for value in response.ready_participant_ids],
             unready_participant_ids=[UUID(value) for value in response.unready_participant_ids],
+            target_generation=response.target_generation or None,
+            transition=response.transition,
         )
 
     async def playback_state(self, jam_id):
@@ -271,6 +298,22 @@ class GrpcSyncClient(SyncClient):
                 jam_id=str(jam_id),
                 generation=generation,
                 participant_ids=[str(value) for value in participant_ids],
+            ),
+        )
+
+    async def update_queue(self, request_id, jam_id, generation, queue):
+        return await self._call(
+            self._stub.UpdateQueue,
+            sync_pb2.UpdateQueueRequest(
+                request_id=str(request_id),
+                jam_id=str(jam_id),
+                generation=generation,
+                selections=[
+                    sync_pb2.PlaybackSelection(
+                        queue_item_id=str(item.queue_item_id), song_id=str(item.song_id)
+                    )
+                    for item in queue
+                ],
             ),
         )
 

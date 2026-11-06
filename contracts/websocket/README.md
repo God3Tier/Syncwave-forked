@@ -8,7 +8,7 @@ hosts the timing/readiness/playback-coordination socket; it does not accept
 queue edits or owner playback commands directly from browsers.
 
 > Status: **in progress**. `JOINED`, `TIME_PING`, `TIME_PONG`, `PREPARE`,
-> `READY`, `PARTICIPANT_STATE`, `PLAY_AT`, `PAUSE_AT`, `RESUME_AT`,
+> `READY`, `NOT_READY`, `PARTICIPANT_STATE`, `PLAY_AT`, `PRELOAD`, `TRANSITION_AT`, `PAUSE_AT`, `RESUME_AT`,
 > `SEEK_TO`, `PLAYBACK_STATUS`, `SYNC_CORRECTION`, and `ERROR` have JSON
 > Schemas and examples validated by CI. Add each remaining message contract
 > with its implementation slice.

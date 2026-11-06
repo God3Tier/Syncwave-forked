@@ -456,8 +456,13 @@ def test_jam_can_continue_without_unready_participant(client: TestClient) -> Non
     ready_id, unready_id = session["participant_ids"]
     path = f"/ws?jam_id={jam_id}&participant_id={ready_id}&token={PARTICIPANT_TOKEN}"
 
-    with client.websocket_connect(path) as websocket:
+    unready_path = f"/ws?jam_id={jam_id}&participant_id={unready_id}&token={PARTICIPANT_TOKEN}"
+    with (
+        client.websocket_connect(path) as websocket,
+        client.websocket_connect(unready_path) as unready_websocket,
+    ):
         receive_handshake(websocket)
+        receive_handshake(unready_websocket)
         websocket.send_json(
             {
                 "type": "READY",
@@ -504,35 +509,39 @@ def test_jam_can_continue_without_unready_participant(client: TestClient) -> Non
 def test_jam_can_wait_then_cancel_after_timeout(client: TestClient) -> None:
     session = activate(client, participant_count=2)
     jam_id = session["jam_id"]
-    active_session = manager.get(UUID(jam_id))
-    assert active_session is not None
-    active_session.prepare_deadline_ms = 0
+    participant_id = session["participant_ids"][0]
+    path = f"/ws?jam_id={jam_id}&participant_id={participant_id}&token={PARTICIPANT_TOKEN}"
+    with client.websocket_connect(path) as websocket:
+        receive_handshake(websocket)
+        active_session = manager.get(UUID(jam_id))
+        assert active_session is not None
+        active_session.prepare_deadline_ms = 0
 
-    wait_response = client.post(
-        f"/internal/v1/sessions/{jam_id}/readiness-decision",
-        headers=INTERNAL_HEADERS,
-        json={
-            "request_id": str(uuid4()),
-            "generation": 1,
-            "decision": "WAIT",
-        },
-    )
-    assert wait_response.status_code == 200
-    assert wait_response.json()["state"] == "PREPARING"
-    assert active_session.prepare_deadline_ms > 0
+        wait_response = client.post(
+            f"/internal/v1/sessions/{jam_id}/readiness-decision",
+            headers=INTERNAL_HEADERS,
+            json={
+                "request_id": str(uuid4()),
+                "generation": 1,
+                "decision": "WAIT",
+            },
+        )
+        assert wait_response.status_code == 200
+        assert wait_response.json()["state"] == "PREPARING"
+        assert active_session.prepare_deadline_ms > 0
 
-    active_session.prepare_deadline_ms = 0
-    cancel_response = client.post(
-        f"/internal/v1/sessions/{jam_id}/readiness-decision",
-        headers=INTERNAL_HEADERS,
-        json={
-            "request_id": str(uuid4()),
-            "generation": 1,
-            "decision": "CANCEL",
-        },
-    )
-    assert cancel_response.status_code == 200
-    assert cancel_response.json()["state"] == "ENDED"
+        active_session.prepare_deadline_ms = 0
+        cancel_response = client.post(
+            f"/internal/v1/sessions/{jam_id}/readiness-decision",
+            headers=INTERNAL_HEADERS,
+            json={
+                "request_id": str(uuid4()),
+                "generation": 1,
+                "decision": "CANCEL",
+            },
+        )
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["state"] == "ENDED"
 
 
 def test_jam_controls_pause_resume_seek_and_skip(client: TestClient) -> None:

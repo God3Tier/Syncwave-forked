@@ -118,6 +118,14 @@ export function decideReadiness(jamId: string, decision: 'CONTINUE' | 'WAIT' | '
   });
 }
 
+/** Select how an exhausted Jam queue should continue. */
+export function decideAutoplay(jamId: string, mode: 'TOP_HITS' | 'LOOP'): Promise<Jam> {
+  return call(jamId, `${id(jamId)}/playback/autoplay`, {
+    method: 'POST',
+    json: { mode },
+  });
+}
+
 export function jamSocketUrl(jamId: string, participantId: string): string {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const params = new URLSearchParams({ participant_id: participantId });

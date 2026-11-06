@@ -62,6 +62,7 @@ def test_get_song(client: TestClient, api_db: Engine) -> None:
         "processing_status": "READY",
         "created_at": "2026-10-08T12:00:01.250000Z",
         "updated_at": "2026-10-08T12:00:01.250000Z",
+        "play_count": 0,
     }
 
 
@@ -144,6 +145,45 @@ def test_list_songs_filter_by_uploader(client: TestClient, api_db: Engine) -> No
     body = client.get(f"/songs?uploader_id={uploader_id}").json()
     assert [item["song_id"] for item in body["items"]] == [str(owned_id)]
     assert body["items"][0]["uploader_id"] == str(uploader_id)
+
+
+def test_record_play_is_idempotent_and_top_sorts(client: TestClient, api_db: Engine) -> None:
+    popular_id = seed(api_db, title="Popular")
+    other_id = seed(api_db, title="Other")
+    playback_id = uuid.uuid4()
+
+    first = client.post(
+        f"/songs/{popular_id}/plays",
+        json={"playback_id": str(playback_id), "source": "JAM"},
+    )
+    duplicate = client.post(
+        f"/songs/{popular_id}/plays",
+        json={"playback_id": str(playback_id), "source": "JAM"},
+    )
+
+    assert first.status_code == 200
+    assert first.json() == {"song_id": str(popular_id), "play_count": 1, "counted": True}
+    assert duplicate.json() == {
+        "song_id": str(popular_id),
+        "play_count": 1,
+        "counted": False,
+    }
+    ranked = client.get("/songs?sort=top&processing_status=READY&limit=10").json()
+    assert [item["song_id"] for item in ranked["items"]][:2] == [
+        str(popular_id),
+        str(other_id),
+    ]
+
+
+def test_top_cursor_cannot_be_reused_for_newest(client: TestClient, api_db: Engine) -> None:
+    seed(api_db)
+    seed(api_db)
+    first = client.get("/songs?sort=top&limit=1").json()
+
+    response = client.get(f"/songs?sort=newest&limit=1&cursor={first['next_cursor']}")
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_CURSOR"
 
 
 def test_unknown_path_uses_the_shared_error_shape(client: TestClient) -> None:

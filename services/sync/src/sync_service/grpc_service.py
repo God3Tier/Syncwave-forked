@@ -49,6 +49,34 @@ def prepare_payload(session: SyncSession, start_position_ms: int = 0) -> dict[st
     }
 
 
+def preload_payload(session: SyncSession) -> dict[str, object]:
+    pending = session.pending
+    if pending is None:
+        raise RuntimeError("pending track is required")
+    return {
+        "generation": pending.generation,
+        "queue_item_id": str(pending.queue_item_id),
+        "song_id": str(pending.song_id),
+        "stream_url": pending.stream_url,
+        "manifest_url": f"/api/streaming/tracks/{pending.song_id}/manifest",
+        "start_position_ms": 0,
+    }
+
+
+def transition_payload(session: SyncSession) -> dict[str, object]:
+    pending = session.pending
+    if pending is None or pending.transition_server_time_ms is None:
+        raise RuntimeError("committed pending track is required")
+    return {
+        "generation": pending.generation,
+        "queue_item_id": str(pending.queue_item_id),
+        "song_id": str(pending.song_id),
+        "target_server_time_ms": pending.transition_server_time_ms,
+        "start_position_ms": 0,
+        "playback_rate": 1.0,
+    }
+
+
 _PLAYBACK_STATES = {
     PlaybackState.PREPARING: sync_pb2.PLAYBACK_STATE_PREPARING,
     PlaybackState.SCHEDULED: sync_pb2.PLAYBACK_STATE_SCHEDULED,
@@ -65,6 +93,7 @@ _READINESS_DECISIONS = {
 
 
 def playback_snapshot(session: SyncSession) -> sync_pb2.PlaybackSnapshot:
+    pending = session.pending
     return sync_pb2.PlaybackSnapshot(
         jam_id=str(session.jam_id),
         generation=session.generation,
@@ -74,6 +103,16 @@ def playback_snapshot(session: SyncSession) -> sync_pb2.PlaybackSnapshot:
         anchor_position_ms=session.anchor_position_ms,
         playback_rate=session.playback_rate,
         prepare_deadline_ms=session.prepare_deadline_ms,
+        queue_item_id=str(session.queue_item_id),
+        duration_ms=session.duration_ms,
+        pending_generation=0 if pending is None else pending.generation,
+        pending_queue_item_id="" if pending is None else str(pending.queue_item_id),
+        pending_song_id="" if pending is None else str(pending.song_id),
+        transition_server_time_ms=(
+            0
+            if pending is None or pending.transition_server_time_ms is None
+            else pending.transition_server_time_ms
+        ),
     )
 
 
@@ -263,6 +302,14 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 ),
                 ready_only=True,
             )
+            if (
+                session.pending is not None
+                and session.pending.transition_server_time_ms is not None
+            ):
+                await self._manager.broadcast(
+                    session,
+                    server_frame(session, "TRANSITION_AT", transition_payload(session)),
+                )
         return sync_pb2.ResumePlaybackResponse(playback=playback_snapshot(session))
 
     async def SeekPlayback(
@@ -299,6 +346,14 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 ),
                 ready_only=True,
             )
+            if (
+                session.pending is not None
+                and session.pending.transition_server_time_ms is not None
+            ):
+                await self._manager.broadcast(
+                    session,
+                    server_frame(session, "TRANSITION_AT", transition_payload(session)),
+                )
         return sync_pb2.SeekPlaybackResponse(playback=playback_snapshot(session))
 
     async def SkipPlayback(
@@ -366,6 +421,61 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             await connection.close(code=4403, reason="Jam membership removed")
         return sync_pb2.UpdateParticipantsResponse(playback=playback_snapshot(session))
 
+    async def UpdateQueue(
+        self,
+        request: sync_pb2.UpdateQueueRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> sync_pb2.UpdateQueueResponse:
+        await self._authorize(context)
+        session = await self._session(request.jam_id, context)
+        request_id = await self._uuid(request.request_id, "request_id", context)
+        previous = self._manager.request_result(request_id)
+        if previous is not None:
+            if previous is not session:
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "request_id belongs to another Jam",
+                )
+            return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
+        if request.generation != session.generation:
+            await context.abort(grpc.StatusCode.ABORTED, "stale generation")
+        selections: list[tuple[UUID, UUID]] = []
+        for value in request.selections:
+            selections.append(
+                (
+                    await self._uuid(value.queue_item_id, "selections.queue_item_id", context),
+                    await self._uuid(value.song_id, "selections.song_id", context),
+                )
+            )
+        current_index = next(
+            (index for index, value in enumerate(selections) if value[0] == session.queue_item_id),
+            -1,
+        )
+        if current_index < 0 or current_index + 1 >= len(selections):
+            await self._manager.clear_pending(session)
+            await self._manager.remember_request(session, request_id)
+            return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
+        queue_item_id, song_id = selections[current_index + 1]
+        if session.pending is not None and session.pending.queue_item_id == queue_item_id:
+            await self._manager.remember_request(session, request_id)
+            return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
+        stream = await self._resolve_dependencies(song_id, context)
+        prepared = await self._manager.prepare_next(
+            session,
+            queue_item_id=queue_item_id,
+            song_id=song_id,
+            stream_url=stream.stream_url,
+            duration_ms=stream.duration_ms or 180_000,
+            prepare_deadline_ms=epoch_ms() + self._settings.prepare_timeout_ms,
+        )
+        if prepared:
+            await self._manager.broadcast(
+                session,
+                server_frame(session, "PRELOAD", preload_payload(session)),
+            )
+        await self._manager.remember_request(session, request_id)
+        return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
+
     async def SubmitReadinessDecision(
         self,
         request: sync_pb2.SubmitReadinessDecisionRequest,
@@ -379,6 +489,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
             raise AssertionError("context.abort must terminate the RPC")
         now_ms = epoch_ms()
         _, _, required = self._manager.readiness_status(session, now_ms)
+        transition = session.pending is not None
         request_id = await self._uuid(request.request_id, "request_id", context)
         try:
             if request.generation != session.generation:
@@ -403,20 +514,26 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                     now_ms - (session.prepare_deadline_ms - self._settings.prepare_timeout_ms),
                 )
             )
-            await self._manager.broadcast(
-                session,
-                server_frame(
+            if transition:
+                await self._manager.broadcast(
                     session,
-                    "PLAY_AT",
-                    {
-                        "generation": session.generation,
-                        "target_server_time_ms": session.anchor_server_time_ms,
-                        "start_position_ms": session.anchor_position_ms,
-                        "playback_rate": session.playback_rate,
-                    },
-                ),
-                ready_only=True,
-            )
+                    server_frame(session, "TRANSITION_AT", transition_payload(session)),
+                )
+            else:
+                await self._manager.broadcast(
+                    session,
+                    server_frame(
+                        session,
+                        "PLAY_AT",
+                        {
+                            "generation": session.generation,
+                            "target_server_time_ms": session.anchor_server_time_ms,
+                            "start_position_ms": session.anchor_position_ms,
+                            "playback_rate": session.playback_rate,
+                        },
+                    ),
+                    ready_only=True,
+                )
         return sync_pb2.SubmitReadinessDecisionResponse(playback=playback_snapshot(session))
 
     async def GetReadinessStatus(
@@ -428,14 +545,22 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
         session = await self._session(request.jam_id, context)
         now_ms = epoch_ms()
         ready, unready, required = self._manager.readiness_status(session, now_ms)
+        pending = session.pending
         return sync_pb2.GetReadinessStatusResponse(
             jam_id=str(session.jam_id),
             generation=session.generation,
-            prepare_deadline_ms=session.prepare_deadline_ms,
-            timed_out=now_ms >= session.prepare_deadline_ms,
+            prepare_deadline_ms=(
+                pending.prepare_deadline_ms if pending is not None else session.prepare_deadline_ms
+            ),
+            timed_out=now_ms
+            >= (
+                pending.prepare_deadline_ms if pending is not None else session.prepare_deadline_ms
+            ),
             decision_required=required,
             ready_participant_ids=[str(value) for value in ready],
             unready_participant_ids=[str(value) for value in unready],
+            target_generation=pending.generation if pending is not None else session.generation,
+            transition=pending is not None,
         )
 
     async def GetPlaybackState(

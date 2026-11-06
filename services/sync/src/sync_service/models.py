@@ -107,6 +107,11 @@ class ReadyPayload(StrictModel):
     media_duration_ms: int = Field(gt=0)
 
 
+class NotReadyPayload(StrictModel):
+    generation: int = Field(ge=1)
+    reason: Literal["AUDIO_LOCKED", "AUDIO_SUSPENDED", "AUDIO_ERROR", "BUFFER_LOST"]
+
+
 class PlaybackStatusPayload(StrictModel):
     generation: int = Field(ge=1)
     measured_server_time_ms: int = Field(ge=0)
@@ -125,6 +130,11 @@ class TimePingFrame(ClientFrame):
 class ReadyFrame(ClientFrame):
     type: Literal["READY"]
     payload: ReadyPayload
+
+
+class NotReadyFrame(ClientFrame):
+    type: Literal["NOT_READY"]
+    payload: NotReadyPayload
 
 
 class PlaybackStatusFrame(ClientFrame):

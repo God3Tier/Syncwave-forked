@@ -6,15 +6,17 @@ export type ServerType =
   | 'JOINED'
   | 'TIME_PONG'
   | 'PREPARE'
+  | 'PRELOAD'
   | 'PARTICIPANT_STATE'
   | 'PLAY_AT'
+  | 'TRANSITION_AT'
   | 'RESUME_AT'
   | 'PAUSE_AT'
   | 'SEEK_TO'
   | 'SYNC_CORRECTION'
   | 'ERROR';
 
-export type ClientType = 'TIME_PING' | 'READY' | 'PLAYBACK_STATUS';
+export type ClientType = 'TIME_PING' | 'READY' | 'NOT_READY' | 'PLAYBACK_STATUS';
 
 export interface Frame<T extends string = string, P = Record<string, unknown>> {
   type: T;
@@ -38,6 +40,12 @@ export interface PlayAtPayload {
   target_server_time_ms: number;
   start_position_ms: number;
   playback_rate?: number;
+}
+
+/** A committed next-track transition scheduled before the current source ends. */
+export interface TransitionAtPayload extends PlayAtPayload {
+  readonly queue_item_id: string;
+  readonly song_id: string;
 }
 
 export interface PauseAtPayload {
