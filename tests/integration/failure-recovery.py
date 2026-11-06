@@ -157,7 +157,11 @@ class Scenario:
         return self.wait(check, f"{path}: {field}={target}")
 
     def submit(self, label, *, audio=None):
-        audio = self.upload.audio_fixture() if audio is None else audio
+        audio = (
+            self.upload.audio_fixture(nonce=f"{self.report['run_id']}:{label}")
+            if audio is None
+            else audio
+        )
         title = f"fault-{self.report['run_id']}-{label}"
         body, content_type = self.upload.multipart(title, audio)
         receipt = self.api.json(
@@ -178,7 +182,8 @@ class Scenario:
     def corrupt_audio(self):
         # Recognizable WAV signature passes ingestion; missing RIFF chunks must
         # fail in the real decoder rather than in Upload's header validation.
-        receipt, _ = self.submit("corrupt", audio=b"RIFF\x08\x00\x00\x00WAVEbroken")
+        corrupt = b"RIFF\x08\x00\x00\x00WAVEbroken" + self.report["run_id"].encode()
+        receipt, _ = self.submit("corrupt", audio=corrupt)
         song_id = receipt["song_id"]
         wave = self.wait_status(f"/api/waveform/songs/{song_id}/waveform", "status", "FAILED")
         require(
@@ -198,7 +203,8 @@ class Scenario:
         self.control("stop", "s3")
         try:
             body, content_type = self.upload.multipart(
-                f"fault-{self.report['run_id']}-s3-down", self.upload.audio_fixture()
+                f"fault-{self.report['run_id']}-s3-down",
+                self.upload.audio_fixture(nonce=f"{self.report['run_id']}:s3-down"),
             )
             failed = self.http(
                 "POST",
