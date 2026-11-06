@@ -1,9 +1,12 @@
 """Browser smoke test for the three user journeys against a running stack."""
 
 import argparse
+import math
 import re
+import struct
 import time
 import uuid
+import wave
 from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
@@ -13,17 +16,43 @@ ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = Path(__file__).with_name("artifacts")
 
 
+def short_audio_fixture() -> Path:
+    """Create a deterministic track short enough to exercise instant autoplay."""
+    path = ARTIFACTS / "seamless-autoplay.wav"
+    sample_rate = 44_100
+    with wave.open(str(path), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(
+            b"".join(
+                struct.pack(
+                    "<h",
+                    round(8_000 * math.sin(2 * math.pi * 440 * index / sample_rate)),
+                )
+                for index in range(sample_rate * 3)
+            )
+        )
+    return path
+
+
 def watch_errors(page: Page, errors: list[str]) -> None:
     page.on("pageerror", lambda error: errors.append(f"page: {error}"))
 
     def record_response(response) -> None:
-        expected_guest_session_check = response.status == 401 and "/api/auth/me" in response.url
+        expected_guest_session_check = (
+            response.status == 401 and "/api/auth/me" in response.url
+        )
         expected_upload_poll = (
             response.status == 404
             and "/api/catalogue/songs/" in response.url
             and page.url.endswith("/upload")
         )
-        if response.status >= 400 and not expected_upload_poll and not expected_guest_session_check:
+        if (
+            response.status >= 400
+            and not expected_upload_poll
+            and not expected_guest_session_check
+        ):
             errors.append(f"HTTP {response.status}: {response.url}")
 
     page.on(
@@ -34,6 +63,7 @@ def watch_errors(page: Page, errors: list[str]) -> None:
 
 def run(base_url: str) -> None:
     ARTIFACTS.mkdir(exist_ok=True)
+    audio_fixture = short_audio_fixture()
     title = f"browser-e2e-{int(time.time())}"
     seeded_title = "Daisy Bell (Bicycle Built for Two)"
     errors: list[str] = []
@@ -47,21 +77,27 @@ def run(base_url: str) -> None:
         owner.goto(base_url, wait_until="networkidle")
         expect(owner.get_by_role("heading", name="For you right now")).to_be_visible()
         expect(owner.get_by_role("navigation", name="Main").first).to_be_visible()
-        expect(owner.get_by_role("link", name=re.compile(r"^Open .+")).first).to_be_visible()
+        expect(
+            owner.get_by_role("link", name=re.compile(r"^Open .+")).first
+        ).to_be_visible()
         owner.screenshot(path=ARTIFACTS / "discover-desktop.png", full_page=True)
         print("PASS discover desktop")
 
         owner.get_by_role("link", name="Search", exact=True).click()
-        owner.get_by_role("searchbox", name="Search songs or artists").fill(seeded_title)
-        expect(owner.get_by_text(re.compile(rf"result.*{re.escape(seeded_title)}", re.I))).to_be_visible(
-            timeout=20_000
+        owner.get_by_role("searchbox", name="Search songs or artists").fill(
+            seeded_title
         )
+        expect(
+            owner.get_by_text(re.compile(rf"result.*{re.escape(seeded_title)}", re.I))
+        ).to_be_visible(timeout=20_000)
         owner.locator('a[href^="/songs/"]').filter(has_text=seeded_title).first.click()
         expect(owner.get_by_role("heading", name=seeded_title)).to_be_visible()
         expect(owner.get_by_text("Lyrics READY", exact=True)).to_be_visible()
         expect(owner.get_by_text("Waveform READY", exact=True)).to_be_visible()
         owner.get_by_role("button", name="Play", exact=True).click()
-        expect(owner.get_by_role("button", name="Pause", exact=True).first).to_be_visible()
+        expect(
+            owner.get_by_role("button", name="Pause", exact=True).first
+        ).to_be_visible()
         print("PASS discover, search and listen")
 
         owner.goto(f"{base_url}/jam", wait_until="networkidle")
@@ -87,11 +123,15 @@ def run(base_url: str) -> None:
         owner.get_by_label("Title").fill(title)
         owner.get_by_label("Artist").fill("Browser integration")
         files = owner.locator('input[type="file"]')
-        files.nth(0).set_input_files(ROOT / "services/upload/samples/upload-test.mp3")
+        files.nth(0).set_input_files(audio_fixture)
         files.nth(1).set_input_files(ROOT / "infrastructure/seed/daisy-bell.lrc")
         owner.get_by_role("button", name="Upload & process").click()
-        expect(owner.get_by_text(re.compile(rf'Uploaded “{re.escape(title)}”'))).to_be_visible(timeout=20_000)
-        expect(owner.get_by_role("link", name="Open song page")).to_be_visible(timeout=120_000)
+        expect(
+            owner.get_by_text(re.compile(rf"Uploaded “{re.escape(title)}”"))
+        ).to_be_visible(timeout=20_000)
+        expect(owner.get_by_role("link", name="Open song page")).to_be_visible(
+            timeout=120_000
+        )
         owner.get_by_role("link", name="Open song page").click()
         expect(owner.get_by_role("heading", name=title)).to_be_visible()
         expect(owner.get_by_text("Song READY", exact=True)).to_be_visible()
@@ -125,39 +165,59 @@ def run(base_url: str) -> None:
         member.goto(jam_url, wait_until="networkidle")
         expect(member.get_by_text("MEMBER", exact=True)).to_be_visible()
         member.get_by_role("tab", name="People").click()
-        expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(timeout=20_000)
-        expect(owner.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(timeout=20_000)
+        expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(
+            timeout=20_000
+        )
+        expect(owner.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(
+            timeout=20_000
+        )
         owner.get_by_role("button", name="Join Jam (Enable Audio)").click()
         member.get_by_role("button", name="Join Jam (Enable Audio)").click()
         owner.get_by_role("button", name="Start", exact=True).click()
         expect(owner.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
         expect(member.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
-        assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        expect(owner.get_by_label("Connected to live playback")).to_have_count(2)
+        expect(owner.get_by_label("Audio running, buffered and ready")).to_have_count(2)
+        expect(owner.get_by_text(re.compile(r"Shared queue\s*\(6\)"))).to_be_visible(
+            timeout=20_000
+        )
+        expect(owner.locator("h2")).not_to_have_text(title, timeout=30_000)
+        assert member.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth"
+        )
         member.screenshot(path=ARTIFACTS / "jam-mobile.png", full_page=True)
-        print("PASS two-browser Jam playback")
+        print("PASS two-browser gapless transition and Top Hits default autoplay")
 
         member.get_by_role("button", name="Leave").click()
         expect(member).to_have_url(f"{base_url}/jam")
-        expect(owner.get_by_text(re.compile(r"Participants \(1\)"))).to_be_visible(timeout=20_000)
+        expect(owner.get_by_text(re.compile(r"Participants \(1\)"))).to_be_visible(
+            timeout=20_000
+        )
         member.get_by_label("Jam code or invite link").fill(jam_code)
         member.get_by_role("button", name="Join", exact=True).click()
         expect(member).to_have_url(jam_url)
         expect(member.get_by_text("MEMBER", exact=True)).to_be_visible()
         member.get_by_role("button", name="Join Jam (Enable Audio)").click()
         member.get_by_role("tab", name="People").click()
-        expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(timeout=20_000)
+        expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(
+            timeout=20_000
+        )
         expect(member.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
         print("PASS member leaves, rejoins by 8-digit code and catches up")
 
         member.goto(base_url, wait_until="networkidle")
         expect(member.get_by_role("navigation", name="Main")).to_be_visible()
-        assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert member.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth"
+        )
         member.screenshot(path=ARTIFACTS / "discover-mobile.png", full_page=True)
         print("PASS mobile layout")
 
         member.set_viewport_size({"width": 768, "height": 1024})
         member.goto(base_url, wait_until="networkidle")
-        assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert member.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth"
+        )
         member.screenshot(path=ARTIFACTS / "discover-tablet.png", full_page=True)
         print("PASS tablet layout")
 
