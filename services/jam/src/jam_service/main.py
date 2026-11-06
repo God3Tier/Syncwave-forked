@@ -32,6 +32,7 @@ from jam_service.models import (
     AddQueueItemRequest,
     CreateJamRequest,
     JamResponse,
+    JoinJamRequest,
     PlaybackCommandRequest,
     ReadinessDecisionRequest,
     ReadinessStatusResponse,
@@ -123,15 +124,19 @@ async def get_jam(jam_id: UUID, request: Request) -> JamResponse:
 
 
 @app.post("/jams/{jam_id}/members", response_model=JamResponse)
-async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
+async def join_jam(
+    jam_id: UUID, request: Request, body: JoinJamRequest | None = None
+) -> JamResponse:
     check_request_origin(request)
     account = optional_account(request)
     if account is not None:
         joined = await manager.join(jam_id, account.user_id, account.username)
         return joined.model_copy(update={"member_id": account.user_id, "member_token": None})
 
+    # Guests get a readable name: the one the browser picked if it is free in
+    # this Jam, otherwise a random one (guest_names.py)
     participant_id = uuid4()
-    joined = await manager.join(jam_id, participant_id, f"Guest {str(participant_id)[:8]}")
+    joined = await manager.join_guest(jam_id, participant_id, body.guest_name if body else None)
     return joined.model_copy(
         update={
             "member_id": participant_id,
@@ -141,10 +146,12 @@ async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
 
 
 @app.post("/jams/by-code/{join_code}/members", response_model=JamResponse)
-async def join_jam_by_code(join_code: str, request: Request) -> JamResponse:
+async def join_jam_by_code(
+    join_code: str, request: Request, body: JoinJamRequest | None = None
+) -> JamResponse:
     if len(join_code) != 8 or not join_code.isdigit():
         raise HTTPException(status_code=422, detail="Jam code must contain exactly 8 digits")
-    return await join_jam(manager.find_by_code(join_code), request)
+    return await join_jam(manager.find_by_code(join_code), request, body)
 
 
 @app.delete("/jams/{jam_id}/members/{participant_id}", status_code=204)
