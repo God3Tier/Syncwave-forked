@@ -99,6 +99,11 @@ def run(base_url: str) -> None:
         owner.get_by_role("button", name="Create Jam").click()
         owner.wait_for_url(re.compile(r"/jam/[0-9a-f-]{36}$"))
         expect(owner.get_by_text("OWNER", exact=True)).to_be_visible()
+        jam_code_label = owner.get_by_label(re.compile(r"Jam code \d{8}"))
+        expect(jam_code_label).to_be_visible()
+        jam_code = jam_code_label.get_attribute("aria-label").rsplit(" ", 1)[-1]
+        assert re.fullmatch(r"\d{8}", jam_code)
+        expect(owner.get_by_role("button", name="Copy invite link")).to_be_visible()
         print("PASS authenticated Jam hosting")
         jam_url = owner.url
         owner.goto(f"{base_url}/playlists", wait_until="networkidle")
@@ -128,6 +133,19 @@ def run(base_url: str) -> None:
         assert member.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         member.screenshot(path=ARTIFACTS / "jam-mobile.png", full_page=True)
         print("PASS two-browser Jam playback")
+
+        member.get_by_role("button", name="Leave").click()
+        expect(member).to_have_url(f"{base_url}/jam")
+        expect(owner.get_by_text(re.compile(r"Participants \(1\)"))).to_be_visible(timeout=20_000)
+        member.get_by_label("Jam code or invite link").fill(jam_code)
+        member.get_by_role("button", name="Join", exact=True).click()
+        expect(member).to_have_url(jam_url)
+        expect(member.get_by_text("MEMBER", exact=True)).to_be_visible()
+        member.get_by_role("button", name="Join Jam (Enable Audio)").click()
+        member.get_by_role("tab", name="People").click()
+        expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(timeout=20_000)
+        expect(member.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
+        print("PASS member leaves, rejoins by 8-digit code and catches up")
 
         member.goto(base_url, wait_until="networkidle")
         expect(member.get_by_role("navigation", name="Main")).to_be_visible()

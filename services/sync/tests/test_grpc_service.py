@@ -209,9 +209,10 @@ async def test_grpc_maps_invalid_input_and_honors_deadline(
         request: StartSessionRequest,
         prepare_deadline_ms: int,
         stream_url: str | None = None,
+        duration_ms: int | None = None,
     ) -> SyncSession:
         await asyncio.sleep(0.1)
-        return await original_start(request, prepare_deadline_ms, stream_url)
+        return await original_start(request, prepare_deadline_ms, stream_url, duration_ms)
 
     monkeypatch.setattr(manager, "start", delayed_start)
     with pytest.raises(grpc.aio.AioRpcError) as deadline:

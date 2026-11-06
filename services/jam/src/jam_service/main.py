@@ -140,6 +140,13 @@ async def join_jam(jam_id: UUID, request: Request) -> JamResponse:
     )
 
 
+@app.post("/jams/by-code/{join_code}/members", response_model=JamResponse)
+async def join_jam_by_code(join_code: str, request: Request) -> JamResponse:
+    if len(join_code) != 8 or not join_code.isdigit():
+        raise HTTPException(status_code=422, detail="Jam code must contain exactly 8 digits")
+    return await join_jam(manager.find_by_code(join_code), request)
+
+
 @app.delete("/jams/{jam_id}/members/{participant_id}", status_code=204)
 async def leave_jam(jam_id: UUID, participant_id: UUID, request: Request) -> Response:
     check_request_origin(request)

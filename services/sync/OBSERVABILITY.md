@@ -51,7 +51,7 @@ the final run:
    timer-start error, maximum absolute drift, and correction count.
 4. Calculate each run's client-to-client spread as `max(start error) -
    min(start error)`, then report P50, P95, and maximum across the 20 runs.
-5. Introduce one delayed client and show its drift returning to 80 ms or less.
+5. Introduce one delayed client and show its drift returning to 30 ms or less.
 6. Disconnect and reconnect one client; record recovery time and verify the
    room timeline does not restart.
 7. Repeat a subset with injected latency/jitter/packet loss if the test

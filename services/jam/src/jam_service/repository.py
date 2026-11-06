@@ -17,6 +17,7 @@ class JamRecord(Base):
     __tablename__ = "jams"
 
     jam_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    join_code: Mapped[str] = mapped_column(String(8), unique=True, index=True)
     owner_id: Mapped[str] = mapped_column(String(36))
     state: Mapped[str] = mapped_column(String(32))
     current_queue_item_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -48,6 +49,7 @@ class JamQueueRecord(Base):
 @dataclass(slots=True)
 class PersistedJam:
     jam_id: UUID
+    join_code: str
     owner_id: UUID
     state: JamState
     current_queue_item_id: UUID | None
@@ -87,6 +89,7 @@ class JamRepository:
         return [
             PersistedJam(
                 jam_id=UUID(row.jam_id),
+                join_code=row.join_code,
                 owner_id=UUID(row.owner_id),
                 state=JamState(row.state),
                 current_queue_item_id=(
@@ -124,6 +127,7 @@ class JamRepository:
         async with self._sessions.begin() as database:
             row = await database.get(JamRecord, jam_id)
             values = {
+                "join_code": jam.join_code,
                 "owner_id": str(jam.owner_id),
                 "state": jam.state.value,
                 "current_queue_item_id": (
