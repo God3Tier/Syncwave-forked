@@ -16,6 +16,7 @@ async def repository_round_trip(tmp_path) -> None:
     item = QueueItem(queue_item_id=uuid4(), song_id=uuid4(), added_by=owner_id, position=0)
     expected = PersistedJam(
         jam_id=uuid4(),
+        join_code="12345678",
         owner_id=owner_id,
         state=JamState.PREPARING,
         current_queue_item_id=item.queue_item_id,

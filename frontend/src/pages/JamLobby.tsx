@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { clearRecentJams, createJam, recentJams, rememberJam, removeRecentJam } from '../api/jam';
+import { clearRecentJams, createJam, joinJamByCode, recentJams, rememberJam, removeRecentJam } from '../api/jam';
 import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/Layout';
 import { Button, Icon, Notice, StatusChip } from '../components/ui';
@@ -48,11 +48,25 @@ export function JamLobby() {
     }
   }, [account, authLoading, create, searchParams]);
 
-  const join = (event: FormEvent) => {
+  const join = async (event: FormEvent) => {
     event.preventDefault();
+    const digits = code.trim();
+    if (/^\d{8}$/.test(digits)) {
+      setBusy(true);
+      try {
+        const jam = await joinJamByCode(digits);
+        rememberJam(jam.jam_id, false);
+        navigate(`/jam/${jam.jam_id}`);
+      } catch (cause) {
+        setJoinError(errorMessage(cause));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const match = code.match(UUID);
     if (!match) {
-      setJoinError('Paste a Jam link or its ID (a UUID).');
+      setJoinError('Enter the 8-digit Jam code or paste its invite link.');
       return;
     }
     const destination = `/jam/${match[0].toLowerCase()}`;
@@ -106,7 +120,7 @@ export function JamLobby() {
         <section className="flex flex-col border-t border-outline-variant/35 p-6 md:border-l md:border-t-0 md:p-8">
           <Icon name="group_add" className="mb-5 text-2xl text-secondary" />
           <h2 className="text-xl font-extrabold">Join a Jam</h2>
-          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Use the link your friend sent. Guests can join, listen, and add songs to the queue.</p>
+          <p className="mt-2 text-sm leading-6 text-on-surface-variant">Enter the 8-digit code or use the link your friend sent. Guests can join, listen, and add songs to the queue.</p>
           <form onSubmit={join} className="mt-4 flex gap-2">
             <input
               value={code}
@@ -114,8 +128,8 @@ export function JamLobby() {
                 setCode(event.target.value);
                 setJoinError(null);
               }}
-              placeholder="Paste a Jam link or ID"
-              aria-label="Jam link or ID"
+              placeholder="8-digit code or invite link"
+              aria-label="Jam code or invite link"
               className="min-h-11 min-w-0 flex-1 rounded-xl bg-surface-container px-3 py-2.5 text-sm ring-1 ring-outline-variant/45 focus:ring-secondary focus:outline-none"
             />
             <Button type="submit" variant="cyan">

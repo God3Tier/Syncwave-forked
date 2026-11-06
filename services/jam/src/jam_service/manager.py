@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -40,6 +41,7 @@ class JamConflictError(ValueError):
 @dataclass(slots=True)
 class Jam:
     jam_id: UUID
+    join_code: str
     owner_id: UUID
     participant_ids: list[UUID]
     participant_usernames: dict[UUID, str]
@@ -69,6 +71,7 @@ class JamManager:
         for value in await self._repository.load():
             self._jams[value.jam_id] = Jam(
                 jam_id=value.jam_id,
+                join_code=value.join_code,
                 owner_id=value.owner_id,
                 participant_ids=value.participant_ids,
                 participant_usernames=value.participant_usernames,
@@ -89,6 +92,7 @@ class JamManager:
         jam = self._find(jam_id)
         return JamResponse(
             jam_id=jam.jam_id,
+            join_code=jam.join_code,
             owner_id=jam.owner_id,
             participant_ids=jam.participant_ids,
             participants=[
@@ -116,6 +120,7 @@ class JamManager:
         async with self._lock:
             jam = Jam(
                 jam_id=uuid4(),
+                join_code=self._new_join_code(),
                 owner_id=owner_id,
                 participant_ids=[owner_id],
                 participant_usernames={owner_id: username},
@@ -132,6 +137,20 @@ class JamManager:
             self._jams[jam.jam_id] = jam
             await self._save(jam)
         return self.get(jam.jam_id)
+
+    def find_by_code(self, join_code: str) -> UUID:
+        for jam in self._jams.values():
+            if jam.join_code == join_code:
+                return jam.jam_id
+        raise JamNotFoundError("Jam code not found")
+
+    def _new_join_code(self) -> str:
+        used = {jam.join_code for jam in self._jams.values()}
+        for _ in range(20):
+            code = f"{secrets.randbelow(100_000_000):08d}"
+            if code not in used:
+                return code
+        raise JamConflictError("could not allocate a unique Jam code")
 
     async def refresh(self, jam_id: UUID) -> JamResponse:
         async with self._lock:
@@ -467,6 +486,7 @@ class JamManager:
         await self._repository.save(
             PersistedJam(
                 jam_id=jam.jam_id,
+                join_code=jam.join_code,
                 owner_id=jam.owner_id,
                 state=jam.state,
                 current_queue_item_id=jam.current_queue_item_id,
