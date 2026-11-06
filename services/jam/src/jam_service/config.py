@@ -37,6 +37,8 @@ class Settings:
     sync_timeout_ms: int = 1_000
     playlist_timeout_ms: int = 750
     catalogue_http_url: str = "http://catalogue:8080"
+    inactivity_ttl_seconds: int = 86_400
+    expiry_sweep_seconds: int = 60
 
 
 @lru_cache
@@ -58,4 +60,6 @@ def get_settings() -> Settings:
         sync_timeout_ms=int(os.getenv("SYNC_TIMEOUT_MS", "1000")),
         playlist_timeout_ms=int(os.getenv("PLAYLIST_TIMEOUT_MS", "750")),
         catalogue_http_url=os.getenv("CATALOGUE_HTTP_URL", "http://catalogue:8080"),
+        inactivity_ttl_seconds=int(os.getenv("JAM_INACTIVITY_TTL_SECONDS", "86400")),
+        expiry_sweep_seconds=int(os.getenv("JAM_EXPIRY_SWEEP_SECONDS", "60")),
     )

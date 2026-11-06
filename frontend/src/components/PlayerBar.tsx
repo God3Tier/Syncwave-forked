@@ -56,8 +56,8 @@ export function PlayerBar() {
           durationMs={durationMs}
           positionMs={position}
           onSeek={player.seek}
-          height={30}
-          className="min-w-0 flex-1"
+          height={40}
+          className="min-w-0 flex-1 rounded-md bg-surface-container-low focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         />
         <span className="hidden w-9 font-mono text-[10px] tabular-nums text-on-surface-variant sm:block">{formatDuration(durationMs)}</span>
         {player.error ? <span className="sr-only" role="alert">{player.error}</span> : null}

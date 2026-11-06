@@ -1,5 +1,9 @@
+import asyncio
+import json
+import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -58,6 +62,7 @@ playlist_client = create_playlist_client(settings)
 catalogue_client = create_catalogue_client(settings.catalogue_http_url)
 manager = JamManager(repository, sync_client, playlist_client, catalogue_client)
 auth_verifier = AuthVerifier(settings.auth_jwks_url)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -65,8 +70,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     app.state.auth_verifier = auth_verifier
     await repository.initialize()
     await manager.initialize()
-    yield
-    await manager.close()
+
+    async def expire_inactive_jams() -> None:
+        ttl = timedelta(seconds=settings.inactivity_ttl_seconds)
+        while True:
+            try:
+                await manager.expire_inactive(ttl)
+            except Exception:
+                logger.exception("Jam inactivity sweep failed")
+            await asyncio.sleep(settings.expiry_sweep_seconds)
+
+    expiry_task = asyncio.create_task(expire_inactive_jams())
+    try:
+        yield
+    finally:
+        expiry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await expiry_task
+        await manager.close()
 
 
 app = FastAPI(title="SyncWave Jam Service", version="1.0.0", lifespan=lifespan)
@@ -317,8 +338,17 @@ async def jam_websocket(
     except JamPermissionError:
         await websocket.close(code=4403, reason="not a Jam member")
         return
+    except JamConflictError:
+        await websocket.close(code=4408, reason="Jam has ended")
+        return
     try:
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(message, dict) and message.get("type") == "HEARTBEAT":
+                await manager.touch_listener_activity(jam_id)
     except WebSocketDisconnect:
-        manager.disconnect(jam_id, websocket)
+        await manager.disconnect(jam_id, websocket)

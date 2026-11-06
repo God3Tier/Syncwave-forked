@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, delete, select, text
@@ -24,6 +24,9 @@ class JamRecord(Base):
     sync_generation: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     lifecycle_state: Mapped[str] = mapped_column(String(16), default=JamLifecycle.ACTIVE.value)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_listener_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
     autoplay_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     autoplay_seen_song_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     autoplay_prompt_deadline_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -64,6 +67,7 @@ class PersistedJam:
     queue: list[QueueItem]
     lifecycle_state: JamLifecycle = JamLifecycle.ACTIVE
     ended_at: datetime | None = None
+    last_listener_active_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     autoplay_mode: str | None = None
     autoplay_seen_song_ids: list[UUID] = field(default_factory=list)
     autoplay_prompt_deadline_ms: int | None = None
@@ -128,6 +132,11 @@ class JamRepository:
                 ],
                 lifecycle_state=JamLifecycle(row.lifecycle_state),
                 ended_at=row.ended_at,
+                last_listener_active_at=(
+                    row.last_listener_active_at
+                    if row.last_listener_active_at.tzinfo is not None
+                    else row.last_listener_active_at.replace(tzinfo=UTC)
+                ),
                 autoplay_mode=row.autoplay_mode,
                 autoplay_seen_song_ids=[
                     UUID(value) for value in (row.autoplay_seen_song_ids or [])
@@ -153,6 +162,7 @@ class JamRepository:
                 "sync_generation": jam.sync_generation,
                 "lifecycle_state": jam.lifecycle_state.value,
                 "ended_at": jam.ended_at,
+                "last_listener_active_at": jam.last_listener_active_at,
                 "autoplay_mode": jam.autoplay_mode,
                 "autoplay_seen_song_ids": [
                     str(value) for value in (jam.autoplay_seen_song_ids or [])
@@ -188,3 +198,27 @@ class JamRepository:
                     for item in jam.queue
                 ]
             )
+
+    async def touch_listener_activity(self, jam_id: UUID, active_at: datetime) -> None:
+        """Persist listener presence without rewriting room membership or queue rows."""
+        async with self._sessions.begin() as database:
+            row = await database.get(JamRecord, str(jam_id))
+            if row is not None:
+                row.last_listener_active_at = active_at
+
+    async def listener_activity(self) -> dict[UUID, datetime]:
+        """Return durable activity for active rooms so expiry does not trust process cache."""
+        async with self._sessions() as database:
+            rows = (
+                await database.execute(
+                    select(JamRecord.jam_id, JamRecord.last_listener_active_at).where(
+                        JamRecord.lifecycle_state == JamLifecycle.ACTIVE.value
+                    )
+                )
+            ).all()
+        return {
+            UUID(jam_id): (
+                active_at if active_at.tzinfo is not None else active_at.replace(tzinfo=UTC)
+            )
+            for jam_id, active_at in rows
+        }

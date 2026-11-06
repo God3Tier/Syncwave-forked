@@ -126,10 +126,20 @@ def run(base_url: str) -> None:
         expect(owner.get_by_role("heading", name=title)).to_be_visible()
         expect(owner.get_by_text("Lyrics READY", exact=True)).to_be_visible()
         expect(owner.get_by_text("Waveform READY", exact=True)).to_be_visible()
+        lyrics_toggle = owner.get_by_role("button", name=re.compile(r"Lyrics.*synced"))
+        expect(lyrics_toggle).to_have_attribute("aria-expanded", "false")
+        lyrics_toggle.press("Enter")
+        expect(lyrics_toggle).to_have_attribute("aria-expanded", "true")
+        expect(owner.get_by_role("heading", name="Synced lyrics")).to_be_focused()
+        details = owner.get_by_text("Playback details", exact=True)
+        details.press("Enter")
+        expect(owner.get_by_text(re.compile("preloads the next songs"))).to_be_visible()
         owner.get_by_role("button", name="Play", exact=True).click()
         expect(
             owner.get_by_role("button", name="Pause", exact=True).first
         ).to_be_visible()
+        expect(owner.get_by_label("Audio visualiser")).to_be_visible()
+        expect(owner.get_by_role("slider", name="Waveform")).to_be_visible()
         print("PASS discover, search and listen")
 
         owner.goto(f"{base_url}/jam", wait_until="networkidle")
@@ -173,6 +183,9 @@ def run(base_url: str) -> None:
         expect(member.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
         expect(owner.get_by_label("Connected to live playback")).to_have_count(2)
         expect(owner.get_by_label("Audio running, buffered and ready")).to_have_count(2)
+        expect(owner.get_by_role("button", name="Make owner")).to_be_visible()
+        expect(owner.get_by_role("button", name="Remove")).to_be_visible()
+        expect(owner.get_by_role("heading", name=re.compile("Synced lyrics"))).to_be_visible()
         expect(owner.get_by_text(re.compile(r"Shared queue\s*\(6\)"))).to_be_visible(
             timeout=20_000
         )
@@ -184,6 +197,24 @@ def run(base_url: str) -> None:
         )
         member.screenshot(path=ARTIFACTS / "jam-mobile.png", full_page=True)
         print("PASS two-browser gapless transition and Top Hits default autoplay")
+
+        owner.get_by_role("link", name="Home", exact=True).click()
+        expect(owner.get_by_role("link", name="Open Jam")).to_be_visible()
+        compact_waveform = owner.get_by_role("slider", name="Waveform")
+        first_position = int(compact_waveform.get_attribute("aria-valuenow"))
+        owner.wait_for_timeout(1200)
+        assert int(compact_waveform.get_attribute("aria-valuenow")) >= first_position
+        owner.get_by_role("link", name="Open Jam").click()
+        expect(owner).to_have_url(jam_url)
+        expect(owner.get_by_label("Connected to live playback")).to_have_count(2)
+        print("PASS Jam persists across in-app navigation")
+
+        owner.get_by_role("button", name="Leave").click()
+        expect(owner.get_by_role("dialog", name="Choose the next owner")).to_be_visible()
+        expect(owner.get_by_role("button", name=re.compile("Transfer to"))).to_be_visible()
+        owner.get_by_role("button", name="Stay in Jam").click()
+        expect(owner).to_have_url(jam_url)
+        print("PASS owner must choose a successor before leaving")
 
         member.get_by_role("button", name="Leave").click()
         expect(member).to_have_url(f"{base_url}/jam")

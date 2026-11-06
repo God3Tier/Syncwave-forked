@@ -63,7 +63,7 @@ export function Waveform({ peaks, durationMs, positionMs, onSeek, height = 120, 
     <canvas
       ref={canvasRef}
       style={{ height }}
-      className={`block w-full ${seekable ? 'cursor-pointer' : ''} ${className}`}
+      className={`block min-h-10 w-full touch-none ${seekable ? 'cursor-pointer' : ''} ${className}`}
       role={seekable ? 'slider' : 'img'}
       aria-label="Waveform"
       aria-valuemin={seekable ? 0 : undefined}

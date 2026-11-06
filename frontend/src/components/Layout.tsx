@@ -3,7 +3,9 @@ import { guestName } from '../guestName';
 import { userId } from '../identity';
 import { useAuth } from '../auth/AuthProvider';
 import { PlayerBar } from './PlayerBar';
+import { CompactJamBar } from './CompactJamBar';
 import { Icon } from './ui';
+import { useJamSession } from '../jam/JamProvider';
 
 const primaryNav = [
   { to: '/', label: 'Home', icon: 'home', end: true },
@@ -58,6 +60,8 @@ export function Layout() {
   const { pathname } = useLocation();
   const inJamRoom = /^\/jam\/[^/]+/.test(pathname);
   const { account, loading, logOut } = useAuth();
+  const jam = useJamSession();
+  const hasActiveJam = Boolean(jam.jam && jam.jam.lifecycle_state === 'ACTIVE');
 
   return (
     <div className="flex h-full flex-col bg-background lg:flex-row">
@@ -132,7 +136,7 @@ export function Layout() {
         <main id="main-content" className="app-canvas min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
-        {!inJamRoom ? <PlayerBar /> : null}
+        {!inJamRoom ? (hasActiveJam ? <CompactJamBar /> : <PlayerBar />) : null}
         <nav className="grid grid-cols-4 border-t border-outline-variant/40 bg-surface-container-lowest pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="Main">
           {mobileNav.map((item) => (
             <NavLink
