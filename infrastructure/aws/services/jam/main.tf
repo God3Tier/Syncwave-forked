@@ -25,6 +25,19 @@ data "terraform_remote_state" "platform" {
   }
 }
 
+# Optional: empty when the Auth stack is not applied (RUNBOOK.md §2.3 order)
+data "terraform_remote_state" "auth" {
+  backend = "s3"
+  config = {
+    bucket = local.state_bucket
+    key    = "services/auth/terraform.tfstate"
+    region = var.region
+  }
+  defaults = {
+    jwks_url = ""
+  }
+}
+
 # Optional: empty when the Sync stack is not applied
 data "terraform_remote_state" "sync" {
   backend = "s3"
@@ -84,6 +97,17 @@ locals {
     },
     local.playlist.internal_token_secret_arn == null ? {} : {
       PLAYLIST_INTERNAL_TOKEN = local.playlist.internal_token_secret_arn
+    },
+  )
+
+  # Session tokens are checked against the Auth Service's JWKS, fetched by name.
+  # Without the Auth stack AUTH_JWKS_URL stays unset and hosting a Jam (which
+  # needs an account) fails; guests are unaffected. APP_ORIGIN is the site
+  # address the browser sends as Origin.
+  auth_environment = merge(
+    { APP_ORIGIN = local.platform.base_url },
+    data.terraform_remote_state.auth.outputs.jwks_url == "" ? {} : {
+      AUTH_JWKS_URL = data.terraform_remote_state.auth.outputs.jwks_url
     },
   )
 
@@ -154,7 +178,7 @@ module "api" {
   cpu           = var.cpu
   memory        = var.memory
   desired_count = var.desired_count
-  environment   = local.environment
+  environment   = merge(local.environment, local.auth_environment)
   secrets       = local.secrets
 
   cluster_arn        = local.task_network.cluster_arn

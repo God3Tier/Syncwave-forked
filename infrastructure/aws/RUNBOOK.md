@@ -211,9 +211,9 @@ it, mostly in parallel, so run them in the same terminal: they share
 
 ```sh
 # In apply order (see below). Add new services here (and in §8).
-SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
+SERVICES="auth catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
 # The ones with a database (audio_transmitter, recommendation and frontend have none)
-DB_SERVICES="catalogue search upload lyrics waveform playlist sync jam song_request_orchestrator"
+DB_SERVICES="auth catalogue search upload lyrics waveform playlist sync jam song_request_orchestrator"
 
 cd infrastructure/aws                  # from the repo root
 . ./parallel.sh                        # defines each (below)
@@ -251,13 +251,16 @@ the token to send), so the stack being called goes first:
 |---|---|---|
 | sync | catalogue | Sync uses its built-in fake catalogue (every song READY) |
 | jam | sync, playlist | Jam uses its built-in fake for the missing one |
+| upload, playlist, jam, song_request_orchestrator | auth | `AUTH_JWKS_URL` stays unset: actions that need an account fail, and the orchestrator runs without account checks |
 
 The others only call services by their private DNS name
 (`catalogue.syncwave.internal`, `streaming.syncwave.internal`, ...), which
-works in any order once everything is up. The frontend goes last because its
-`/*` rule only makes sense once the `/api` routes exist. So step d applies all
-the other stacks at once, then sync, jam and frontend one after another, and
-§8 destroys them in the reverse order. A new stack that reads another stack's
+works in any order once everything is up. Auth goes first: its apply waits
+until it is healthy, because the orchestrator loads Auth's JWKS when it
+starts and exits if it can't. The frontend goes last because its `/*` rule
+only makes sense once the `/api` routes exist. So step d applies auth, then
+all the other stacks at once, then sync, jam and frontend one after another,
+and §8 destroys them in the reverse order. A new stack that reads another stack's
 outputs goes in this table and in the `grep` lists of step d and §8.
 
 **a) Image repositories and databases first.** The tasks can't start without either.
@@ -328,10 +331,12 @@ of `SERVICES` for this session.
 
 ```sh
 cd infrastructure/aws                  # from the repo root
-# The stacks that read no other stack's outputs at once, then the rest in order
-FIRST=$(echo $SERVICES | tr ' ' '\n' | grep -vxE 'sync|jam|frontend')
+# Auth, then the stacks that read no other stack's outputs at once, then the rest in order
+EARLY=$(echo $SERVICES | tr ' ' '\n' | grep -xE 'auth')
+FIRST=$(echo $SERVICES | tr ' ' '\n' | grep -vxE 'auth|sync|jam|frontend')
 LATER=$(echo $SERVICES | tr ' ' '\n' | grep -xE 'sync|jam|frontend')
-each 'terraform -chdir=services/$SVC apply -auto-approve' $FIRST &&
+{ [ -z "$EARLY" ] || each 'terraform -chdir=services/$SVC apply -auto-approve' $EARLY; } &&
+  each 'terraform -chdir=services/$SVC apply -auto-approve' $FIRST &&
   for SVC in $LATER; do each 'terraform -chdir=services/$SVC apply -auto-approve' $SVC || break; done
 for SVC in $SERVICES; do
   # ecs_services lists the stack's ECS services, e.g. ["lyrics","lyrics-worker"]
@@ -662,17 +667,18 @@ deleted together with their contents.
 
 The services go in three rounds, each destroying its stacks at once with
 `each` (§2.3): first every stack no other stack reads, then sync and playlist
-(read by jam), then catalogue (read by sync).
+(read by jam), then catalogue (read by sync) and auth (read by upload,
+playlist, jam and the orchestrator).
 
 ```sh
 # The same list as §2.3
-SERVICES="catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
+SERVICES="auth catalogue search upload audio_transmitter lyrics waveform playlist recommendation sync jam song_request_orchestrator frontend"
 
 cd infrastructure/aws                  # from the repo root
 . ./parallel.sh                        # defines each (§2.3)
-each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -vxE 'sync|playlist|catalogue') &&
+each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -vxE 'sync|playlist|catalogue|auth') &&
   each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -xE 'sync|playlist') &&
-  each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -x catalogue)
+  each 'terraform -chdir=services/$SVC destroy -auto-approve' $(echo $SERVICES | tr ' ' '\n' | grep -xE 'catalogue|auth')
 terraform -chdir=platform destroy                        # type "yes"; ~15 minutes, mostly RDS and CloudFront
 terraform -chdir=bootstrap destroy                       # last; type "yes"
 cd -

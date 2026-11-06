@@ -19,6 +19,19 @@ data "terraform_remote_state" "platform" {
   }
 }
 
+# Optional: empty when the Auth stack is not applied (RUNBOOK.md §2.3 order)
+data "terraform_remote_state" "auth" {
+  backend = "s3"
+  config = {
+    bucket = "syncwave-tfstate-${data.aws_caller_identity.current.account_id}"
+    key    = "services/auth/terraform.tfstate"
+    region = var.region
+  }
+  defaults = {
+    jwks_url = ""
+  }
+}
+
 locals {
   platform = data.terraform_remote_state.platform.outputs
   image    = "${aws_ecr_repository.this.repository_url}:${var.image_tag}"
@@ -26,7 +39,7 @@ locals {
 
   # Same variables as services/song_request_orchestrator/compose.yaml. The
   # services it calls are the names their stacks register in the private DNS.
-  # Cognito authentication stays off: no COGNITO_* variables are set.
+  # Account checks use the Auth Service (AUTH_JWKS_URL, below).
   environment = {
     DB_HOST              = local.platform.db_address
     DB_PORT              = tostring(local.platform.db_port)
@@ -41,6 +54,15 @@ locals {
   secrets = {
     DB_PASSWORD = module.db.password_secret_arn
   }
+
+  # Session tokens are checked against the Auth Service's JWKS, fetched by name.
+  # Without the Auth stack AUTH_JWKS_URL stays unset and the orchestrator runs
+  # without account checks.
+  auth_environment = merge(
+    data.terraform_remote_state.auth.outputs.jwks_url == "" ? {} : {
+      AUTH_JWKS_URL = data.terraform_remote_state.auth.outputs.jwks_url
+    },
+  )
 
   task_network = {
     cluster_arn        = local.platform.cluster_arn
@@ -111,7 +133,7 @@ module "api" {
   cpu           = var.cpu
   memory        = var.memory
   desired_count = var.desired_count
-  environment   = local.environment
+  environment   = merge(local.environment, local.auth_environment)
   secrets       = local.secrets
 
   cluster_arn        = local.task_network.cluster_arn

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jam_service.guest_names import GUEST_NAME_PATTERN
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -52,6 +54,11 @@ class JamResponse(StrictModel):
 
 class CreateJamRequest(StrictModel):
     playlist_id: UUID | None = None
+
+
+class JoinJamRequest(StrictModel):
+    # Ignored for signed-in accounts, which join under their own username
+    guest_name: str | None = Field(default=None, pattern=GUEST_NAME_PATTERN)
 
 
 class AddQueueItemRequest(StrictModel):
