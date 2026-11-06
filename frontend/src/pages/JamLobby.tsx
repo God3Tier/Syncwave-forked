@@ -7,6 +7,7 @@ import { Button, Icon, Notice, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
 import { relativeTime, shortId } from '../format';
 import { usePlaylists } from '../hooks/usePlaylists';
+import { useJamSession } from '../jam/JamProvider';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -15,6 +16,7 @@ export function JamLobby() {
   const [searchParams] = useSearchParams();
   const hostIntentHandled = useRef(false);
   const { account, loading: authLoading } = useAuth();
+  const { adoptJam } = useJamSession();
   const playlists = usePlaylists(account?.id ?? null);
   const [playlistId, setPlaylistId] = useState('');
   const [code, setCode] = useState('');
@@ -33,13 +35,14 @@ export function JamLobby() {
     try {
       const jam = await createJam(playlistId || null);
       rememberJam(jam.jam_id, true);
+      adoptJam(jam);
       navigate(`/jam/${jam.jam_id}`);
     } catch (cause) {
       setError(cause);
     } finally {
       setBusy(false);
     }
-  }, [account, navigate, playlistId]);
+  }, [account, adoptJam, navigate, playlistId]);
 
   useEffect(() => {
     if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
@@ -56,6 +59,7 @@ export function JamLobby() {
       try {
         const jam = await joinJamByCode(digits);
         rememberJam(jam.jam_id, false);
+        adoptJam(jam);
         navigate(`/jam/${jam.jam_id}`);
       } catch (cause) {
         setJoinError(errorMessage(cause));

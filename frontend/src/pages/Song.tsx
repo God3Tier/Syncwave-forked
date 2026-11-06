@@ -3,20 +3,21 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { getSong } from '../api/catalogue';
 import { ApiError } from '../api/http';
 import { useAuth } from '../auth/AuthProvider';
-import { getLyrics, getWaveform } from '../api/media';
+import { getLyrics } from '../api/media';
 import { createJam, queueSong, rememberJam } from '../api/jam';
 import { formatDuration } from '../format';
 import { AddToPlaylist } from '../components/AddToPlaylist';
 import { Page } from '../components/Layout';
 import { LyricsView } from '../components/LyricsView';
 import { Visualizer } from '../components/Visualizer';
-import { Waveform } from '../components/Waveform';
-import { Button, Card, Icon, Notice, SongArt, Spinner, StatusChip } from '../components/ui';
+import { LyricsDisclosure } from '../components/LyricsDisclosure';
+import { Button, Icon, Notice, SongArt, Spinner, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { rememberSong, useSongs } from '../hooks/useSongs';
 import { usePlayer, usePosition, type BufferState } from '../player/context';
 import { bufferSlots } from '../player/chunkBuffer';
+import { useJamSession } from '../jam/JamProvider';
 
 function optional<T>(promise: Promise<T>): Promise<T | null> {
   return promise.catch((error: unknown) => {
@@ -34,6 +35,7 @@ export function SongPage() {
   const hostIntentHandled = useRef(false);
   const [jamError, setJamError] = useState<unknown>();
   const player = usePlayer();
+  const liveJam = useJamSession();
 
   const song = useAsync(async (signal) => {
     const value = await getSong(songId, signal);
@@ -41,26 +43,33 @@ export function SongPage() {
     return value;
   }, [songId]);
   const lyrics = useAsync((signal) => optional(getLyrics(songId, signal)), [songId]);
-  const waveform = useAsync((signal) => optional(getWaveform(songId, 600, signal)), [songId]);
 
   // While processing is still running, refresh until both stages settle.
-  const processing = song.data?.processing_status === 'PROCESSING' || lyrics.data?.status === 'PROCESSING' || waveform.data?.status === 'PROCESSING';
+  const processing = song.data?.processing_status === 'PROCESSING' || lyrics.data?.status === 'PROCESSING';
   useInterval(
     () => {
       void getSong(songId).then(song.setData).catch(() => undefined);
       if (lyrics.data?.status !== 'READY') lyrics.reload();
-      if (waveform.data?.status !== 'READY') waveform.reload();
     },
     3000,
     processing,
   );
 
-  const isCurrent = player.currentId === songId;
-  const position = usePosition(player.positionMs, isCurrent && player.playing);
+  const jamCurrent = liveJam.sync?.songId === songId;
+  const soloCurrent = player.currentId === songId;
+  const isCurrent = jamCurrent || soloCurrent;
+  const jamPlaying = jamCurrent && liveJam.sync?.phase === 'PLAYING' && liveJam.localAudioState === 'RUNNING';
+  const playing = jamPlaying || (soloCurrent && player.playing);
+  const getPosition = useCallback(
+    () => (jamCurrent ? liveJam.positionMs() : player.positionMs()),
+    [jamCurrent, liveJam, player],
+  );
+  const position = usePosition(getPosition, playing);
   const positionMs = isCurrent ? position : 0;
-  const durationMs = (isCurrent && player.durationMs) || song.data?.duration_ms || waveform.data?.duration_ms || 0;
+  const durationMs = (jamCurrent ? liveJam.sync?.mediaMs : soloCurrent ? player.durationMs : 0) || song.data?.duration_ms || 0;
   const seek = (ms: number) => {
-    if (isCurrent) player.seek(ms);
+    if (jamCurrent && liveJam.owner) void liveJam.control('seek', { position_ms: ms });
+    else if (soloCurrent) player.seek(ms);
   };
 
   const startJam = useCallback(async () => {
@@ -71,13 +80,14 @@ export function SongPage() {
     }
     try {
       const jam = await createJam();
-      await queueSong(jam.jam_id, songId);
+      const queued = await queueSong(jam.jam_id, songId);
       rememberJam(jam.jam_id, true);
+      liveJam.adoptJam(queued);
       navigate(`/jam/${jam.jam_id}`);
     } catch (cause) {
       setJamError(cause);
     }
-  }, [account, authLoading, navigate, songId]);
+  }, [account, authLoading, liveJam, navigate, songId]);
 
   useEffect(() => {
     if (account && !authLoading && searchParams.get('intent') === 'host' && !hostIntentHandled.current) {
@@ -114,12 +124,16 @@ export function SongPage() {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
-              icon={isCurrent && player.playing ? 'pause' : 'play_arrow'}
-              disabled={!playable}
-              onClick={() => (isCurrent ? player.toggle() : player.playQueue([songId]))}
+              icon={playing ? 'pause' : 'play_arrow'}
+              disabled={!playable || (jamCurrent && !liveJam.owner)}
+              onClick={() => {
+                if (jamCurrent) void liveJam.control(playing ? 'pause' : 'resume');
+                else if (soloCurrent) player.toggle();
+                else player.playQueue([songId]);
+              }}
               className="px-6 py-3 text-base"
             >
-              {isCurrent && player.playing ? 'Pause' : 'Play'}
+              {jamCurrent && !liveJam.owner ? 'Playing in Jam' : playing ? 'Pause' : 'Play'}
             </Button>
             <Button variant="cyan" icon="sensors" disabled={!playable || authLoading} onClick={() => void startJam()}>
               {account ? 'Start a Jam with this song' : 'Sign in to host this song'}
@@ -131,54 +145,32 @@ export function SongPage() {
 
       {jamError !== undefined && <Notice tone="error">{errorMessage(jamError)}</Notice>}
 
-      <section className="mb-8 rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
-        {waveform.data?.status === 'READY' ? (
-          <>
-            <Waveform peaks={waveform.data.peaks} durationMs={durationMs} positionMs={positionMs} onSeek={isCurrent ? seek : undefined} height={140} />
-            <div className="mt-2 flex justify-between font-mono text-xs tabular-nums text-on-surface-variant">
-              <span className="text-secondary">{formatDuration(positionMs)}</span>
-              <span>{formatDuration(durationMs)}</span>
-            </div>
-          </>
-        ) : (
-          <p className="py-10 text-center font-mono text-sm text-on-surface-variant">
-            {waveform.data?.status === 'FAILED'
-              ? `Waveform failed: ${waveform.data.error?.message ?? 'unknown error'}`
-              : waveform.data?.status === 'PROCESSING' || data.waveform_status === 'PROCESSING' || data.waveform_status === 'PENDING'
-                ? 'Waveform is being generated…'
-                : 'No waveform for this song.'}
-          </p>
-        )}
+      <section className="mb-8 overflow-hidden rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="font-headline text-lg font-semibold">Live sound</h2>
+          <span className="font-mono text-xs tabular-nums text-on-surface-variant">{formatDuration(positionMs)} / {formatDuration(durationMs)}</span>
+        </div>
+        <Visualizer active={playing} source={jamCurrent ? liveJam.analyser : undefined} height={180} />
+        {!playing && <p className="mt-3 font-mono text-[11px] text-outline">Press play to see the music move.</p>}
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card className="min-h-80">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
-            Lyrics <span className="font-mono text-xs font-normal text-secondary">· synced</span>
-          </h2>
-          {lyrics.data?.status === 'READY' && lyrics.data.lines.length > 0 ? (
-            <LyricsView lines={lyrics.data.lines} positionMs={positionMs} onSeek={isCurrent ? seek : undefined} />
-          ) : (
-            <p className="py-6 text-sm text-on-surface-variant">
-              {lyrics.data?.status === 'FAILED'
-                ? `Lyrics failed: ${lyrics.data.error?.message ?? 'unknown error'}`
-                : lyrics.data?.status === 'PROCESSING'
-                  ? 'Lyrics are being processed…'
-                  : 'No lyrics were uploaded for this song.'}
-            </p>
-          )}
-          {!isCurrent && lyrics.data?.status === 'READY' && <p className="mt-3 font-mono text-[11px] text-outline">Press play to follow along.</p>}
-        </Card>
+        <LyricsDisclosure>
+              {lyrics.data?.status === 'READY' && lyrics.data.lines.length > 0 ? (
+                <LyricsView lines={lyrics.data.lines} positionMs={positionMs} onSeek={isCurrent && (!jamCurrent || liveJam.owner) ? seek : undefined} />
+              ) : (
+                <p className="py-6 text-sm text-on-surface-variant">
+                  {lyrics.data?.status === 'FAILED'
+                    ? `Lyrics failed: ${lyrics.data.error?.message ?? 'unknown error'}`
+                    : lyrics.data?.status === 'PROCESSING'
+                      ? 'Lyrics are being processed…'
+                      : 'No lyrics were uploaded for this song.'}
+                </p>
+              )}
+              {!isCurrent && lyrics.data?.status === 'READY' && <p className="mt-3 font-mono text-[11px] text-outline">Press play to follow along.</p>}
+        </LyricsDisclosure>
         <BufferWindowCard />
       </div>
-
-      <Card className="mt-6">
-        <h2 className="mb-4 flex items-center gap-2 font-headline text-lg font-semibold">
-          Visualiser <span className="font-mono text-xs font-normal text-secondary">· live</span>
-        </h2>
-        <Visualizer active={isCurrent && player.playing} />
-        {!(isCurrent && player.playing) && <p className="mt-3 font-mono text-[11px] text-outline">Press play to see the music move.</p>}
-      </Card>
     </Page>
   );
 }
@@ -191,9 +183,13 @@ function BufferWindowCard() {
   const fill: Record<BufferState | 'none', string> = { ready: 'w-full bg-secondary', loading: 'w-1/2 animate-pulse bg-secondary/60', error: 'w-full bg-error', none: 'w-0' };
 
   return (
-    <details className="h-fit rounded-2xl bg-surface-container-low p-5 ring-1 ring-outline-variant/45">
-      <summary className="cursor-pointer list-none text-sm font-extrabold">Playback details</summary>
-      <p className="mb-4 mt-2 text-xs leading-5 text-on-surface-variant">SyncWave preloads the next songs in this browser. Open this when playback needs troubleshooting.</p>
+    <details className="group h-fit rounded-2xl bg-surface-container-low ring-1 ring-outline-variant/45 open:bg-surface-container open:ring-primary/45">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-5 text-sm font-extrabold hover:bg-surface-container-high focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        Playback details
+        <Icon name="expand_more" className="text-xl text-primary transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="px-5 pb-5">
+      <p className="mb-4 text-xs leading-5 text-on-surface-variant">SyncWave preloads the next songs in this browser. Open this when playback needs troubleshooting.</p>
       {slots.length === 0 && <p className="font-mono text-xs text-outline">Queue is empty.</p>}
       <ul className="space-y-2">
         {slots.map(({ songId: id, offset }) => {
@@ -215,6 +211,7 @@ function BufferWindowCard() {
           </ul>
         </>
       )}
+      </div>
     </details>
   );
 }

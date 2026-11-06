@@ -13,17 +13,27 @@ function stamp(ms: number): string {
  * accent. Every line keeps the same font and size, so the list never reflows
  * as the current line moves.
  */
-export function LyricsView({ lines, positionMs, onSeek }: { lines: LyricLine[]; positionMs: number; onSeek?: (ms: number) => void }) {
+export function LyricsView({
+  lines,
+  positionMs,
+  onSeek,
+  layout = 'contained',
+}: {
+  lines: LyricLine[];
+  positionMs: number;
+  onSeek?: (ms: number) => void;
+  layout?: 'contained' | 'natural';
+}) {
   const active = activeLineIndex(lines, positionMs);
   const listRef = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
     const element = listRef.current?.querySelector<HTMLElement>(`[data-line="${active}"]`);
-    element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [active]);
+    if (layout === 'contained') element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [active, layout]);
 
   return (
-    <ol ref={listRef} className="max-h-[28rem] space-y-1 overflow-y-auto pr-2" aria-live="off">
+    <ol ref={listRef} className={layout === 'contained' ? 'max-h-[28rem] space-y-1 overflow-y-auto pr-2' : 'space-y-1'} aria-live="off">
       {lines.map((line, i) => {
         const state = i === active ? 'current' : i < active ? 'past' : 'next';
         return (
