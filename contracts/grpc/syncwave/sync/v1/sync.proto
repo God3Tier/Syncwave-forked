@@ -10,6 +10,7 @@ service SyncControlService {
   rpc SeekPlayback(SeekPlaybackRequest) returns (SeekPlaybackResponse);
   rpc SkipPlayback(SkipPlaybackRequest) returns (SkipPlaybackResponse);
   rpc UpdateParticipants(UpdateParticipantsRequest) returns (UpdateParticipantsResponse);
+  rpc UpdateQueue(UpdateQueueRequest) returns (UpdateQueueResponse);
   rpc SubmitReadinessDecision(SubmitReadinessDecisionRequest) returns (SubmitReadinessDecisionResponse);
   rpc GetReadinessStatus(GetReadinessStatusRequest) returns (GetReadinessStatusResponse);
   rpc GetPlaybackState(GetPlaybackStateRequest) returns (GetPlaybackStateResponse);
@@ -78,6 +79,13 @@ message UpdateParticipantsRequest {
   repeated string participant_ids = 4;
 }
 
+message UpdateQueueRequest {
+  string request_id = 1;
+  string jam_id = 2;
+  int64 generation = 3;
+  repeated PlaybackSelection selections = 4;
+}
+
 message SubmitReadinessDecisionRequest {
   string request_id = 1;
   string jam_id = 2;
@@ -102,6 +110,12 @@ message PlaybackSnapshot {
   int64 anchor_position_ms = 6;
   double playback_rate = 7;
   int64 prepare_deadline_ms = 8;
+  string queue_item_id = 9;
+  int64 duration_ms = 10;
+  int64 pending_generation = 11;
+  string pending_queue_item_id = 12;
+  string pending_song_id = 13;
+  int64 transition_server_time_ms = 14;
 }
 
 message StartPlaybackResponse {
@@ -128,6 +142,10 @@ message UpdateParticipantsResponse {
   PlaybackSnapshot playback = 1;
 }
 
+message UpdateQueueResponse {
+  PlaybackSnapshot playback = 1;
+}
+
 message SubmitReadinessDecisionResponse {
   PlaybackSnapshot playback = 1;
 }
@@ -140,6 +158,8 @@ message GetReadinessStatusResponse {
   bool decision_required = 5;
   repeated string ready_participant_ids = 6;
   repeated string unready_participant_ids = 7;
+  int64 target_generation = 8;
+  bool transition = 9;
 }
 
 message GetPlaybackStateResponse {

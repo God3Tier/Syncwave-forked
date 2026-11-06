@@ -44,7 +44,9 @@ Unsafe or missing values are replaced with a generated identifier.
 The loopback result in the main README is not physical-device evidence. For
 the final run:
 
-1. Use at least one laptop and two phones on the same documented Wi-Fi.
+1. Use desktop Chrome, desktop Safari, iPhone Safari and Android Chrome on the
+   same documented Wi-Fi. If necessary, use two laptops so both desktop
+   browsers can participate in the same run.
 2. Synchronize each device through `/api/sync/demo` and confirm five clock
    samples complete before readiness.
 3. Perform at least 20 fresh starts. Record every device's target timestamp,
@@ -54,9 +56,15 @@ the final run:
 5. Introduce one delayed client and show its drift returning to 30 ms or less.
 6. Disconnect and reconnect one client; record recovery time and verify the
    room timeline does not restart.
-7. Repeat a subset with injected latency/jitter/packet loss if the test
+7. On each phone, lock/background and restore the browser. Verify it remains
+   Connected, becomes Not Ready, shows **Tap to resume audio** when automatic
+   resume is blocked, and catches up after the tap. Exercise silent mode,
+   media volume, speaker output, wired/Bluetooth output and route changes.
+8. Pause from the owner and verify playback animation and local position stop
+   on every device; resume and verify synchronized audio/animation returns.
+9. Repeat a subset with injected latency/jitter/packet loss if the test
    environment supports it, recording the exact settings.
-8. Export `/metrics`, the relevant correlation-filtered logs, device/browser
+10. Export `/metrics`, the relevant correlation-filtered logs, device/browser
    versions, network conditions, and final configuration with the results.
 
 Do not replace missing measurements with estimates. If P95 exceeds 100 ms,

@@ -26,6 +26,8 @@ class SyncSessionRecord(Base):
     anchor_position_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     playback_rate: Mapped[float] = mapped_column(Float, default=1.0)
     prepare_deadline_ms: Mapped[int] = mapped_column(BigInteger)
+    pending_track: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    ignored_participant_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class SyncCommandRecord(Base):
@@ -50,6 +52,8 @@ class PersistedSession:
     anchor_position_ms: int
     playback_rate: float
     prepare_deadline_ms: int
+    pending_track: dict[str, object] | None = None
+    ignored_participant_ids: tuple[UUID, ...] = ()
 
 
 class SessionRepository:
@@ -91,6 +95,10 @@ class SessionRepository:
                 anchor_position_ms=row.anchor_position_ms,
                 playback_rate=row.playback_rate,
                 prepare_deadline_ms=row.prepare_deadline_ms,
+                pending_track=row.pending_track,
+                ignored_participant_ids=tuple(
+                    UUID(value) for value in (row.ignored_participant_ids or [])
+                ),
             )
             for row in session_rows
         ]
@@ -134,6 +142,8 @@ class SessionRepository:
             "anchor_position_ms": value.anchor_position_ms,
             "playback_rate": value.playback_rate,
             "prepare_deadline_ms": value.prepare_deadline_ms,
+            "pending_track": value.pending_track,
+            "ignored_participant_ids": [str(value) for value in value.ignored_participant_ids],
         }
         if row is None:
             database.add(SyncSessionRecord(jam_id=str(value.jam_id), **fields))

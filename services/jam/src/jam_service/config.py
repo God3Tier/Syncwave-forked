@@ -36,6 +36,7 @@ class Settings:
     app_origin: str = "http://localhost:8080"
     sync_timeout_ms: int = 1_000
     playlist_timeout_ms: int = 750
+    catalogue_http_url: str = "http://catalogue:8080"
 
 
 @lru_cache
@@ -56,4 +57,5 @@ def get_settings() -> Settings:
         app_origin=os.getenv("APP_ORIGIN", "http://localhost:8080").rstrip("/"),
         sync_timeout_ms=int(os.getenv("SYNC_TIMEOUT_MS", "1000")),
         playlist_timeout_ms=int(os.getenv("PLAYLIST_TIMEOUT_MS", "750")),
+        catalogue_http_url=os.getenv("CATALOGUE_HTTP_URL", "http://catalogue:8080"),
     )
