@@ -55,6 +55,10 @@ export async function joinJam(jamId: string): Promise<Jam> {
   return remember(await call<Jam>(jamId, `${id(jamId)}/members`, { method: 'POST' }));
 }
 
+export async function joinJamByCode(joinCode: string): Promise<Jam> {
+  return remember(await call<Jam>(null, `/by-code/${encodeURIComponent(joinCode)}/members`, { method: 'POST' }));
+}
+
 export function leaveJam(jamId: string, participantId: string): Promise<void> {
   return call(jamId, `${id(jamId)}/members/${encodeURIComponent(participantId)}`, { method: 'DELETE' });
 }

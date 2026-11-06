@@ -9,7 +9,6 @@ only this run's playlist is deleted. Uses Python's standard library.
 import argparse
 import importlib.util
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -115,17 +114,15 @@ class Scenario:
         content_type="application/json",
         expected=200,
         seconds=None,
+        api=None,
     ):
-        headers = {
-            "Content-Type": content_type,
-            "X-Jam-Token": os.getenv("MOCK_JAM_TOKEN", "local-jam-member-token"),
-        }
+        headers = {"Content-Type": content_type}
         body = data if isinstance(data, bytes) or data is None else json.dumps(data).encode()
         request = Request(
             self.args.base_url.rstrip("/") + path, data=body, headers=headers, method=method
         )
         try:
-            response = self.api.opener.open(
+            response = (api or self.api).opener.open(
                 request, timeout=seconds or self.args.request_timeout
             )
         except HTTPError as exc:
@@ -265,11 +262,10 @@ class Scenario:
     def playlist_and_timeout(self):
         ready = self.api.json("/api/catalogue/songs?processing_status=READY&limit=2")["items"]
         require(len(ready) == 2, "Need two READY songs from prior scenarios")
-        owner = str(uuid.uuid4())
         playlist = self.http(
             "POST",
             "/api/playlist/playlists",
-            data={"owner_id": owner, "name": f"fault-{self.report['run_id']}"},
+            data={"name": f"fault-{self.report['run_id']}"},
             expected=201,
         )
         playlist_id = playlist["playlist_id"]
@@ -283,7 +279,7 @@ class Scenario:
         require(after == before, "Playlist content/order did not survive restart")
 
         # Warm Jam's real Playlist gRPC channel before freezing the dependency.
-        request = {"owner_id": owner, "playlist_id": playlist_id}
+        request = {"playlist_id": playlist_id}
         warm = self.http("POST", "/api/jam/jams", data=request, expected=201)
         self.report["retained_jams"].append(warm["jam_id"])
         self.control("pause", "playlist")
@@ -313,28 +309,35 @@ class Scenario:
         }
 
     def owner_permissions(self):
-        owner, member = str(uuid.uuid4()), str(uuid.uuid4())
-        jam = self.http("POST", "/api/jam/jams", data={"owner_id": owner}, expected=201)
+        jam = self.http("POST", "/api/jam/jams", data={}, expected=201)
         jam_id = jam["jam_id"]
         self.report["retained_jams"].append(jam_id)
         path = f"/api/jam/jams/{jam_id}"
-        self.http("POST", path + "/members", data={"participant_id": member})
+        member_api = self.upload.Api(self.args.base_url, self.args.request_timeout)
+        member_api.authenticate()
+        self.http("POST", path + "/members", data={}, api=member_api)
         ready = self.api.json("/api/catalogue/songs?processing_status=READY&limit=1")["items"]
         require(bool(ready), "Need a READY fixture for active Jam authorization checks")
-        self.http("POST", path + "/queue", data={"actor_id": owner, "song_id": ready[0]["song_id"]})
+        self.http("POST", path + "/queue", data={"song_id": ready[0]["song_id"]})
         self.http(
             "POST",
             path + "/playback/start",
-            data={"actor_id": owner, "request_id": str(uuid.uuid4())},
+            data={"request_id": str(uuid.uuid4())},
         )
         before = self.http("GET", path)
         require(before["sync_generation"] is not None, "Jam has no active playback generation")
         rejected = []
         for action in ("start", "pause", "resume", "seek", "skip"):
-            body = {"actor_id": member, "request_id": str(uuid.uuid4())}
+            body = {"request_id": str(uuid.uuid4())}
             if action == "seek":
                 body["position_ms"] = 1000
-            self.http("POST", path + f"/playback/{action}", data=body, expected=403)
+            self.http(
+                "POST",
+                path + f"/playback/{action}",
+                data=body,
+                expected=403,
+                api=member_api,
+            )
             require(self.http("GET", path) == before, f"Unauthorized {action} changed Jam state")
             rejected.append(action)
         return {"jam_id": jam_id, "rejected_actions": rejected, "state_unchanged": True}

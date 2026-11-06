@@ -66,11 +66,11 @@ def test_expected_position_uses_timeline_anchor() -> None:
 def test_small_drift_is_ignored() -> None:
     assert (
         choose_correction(
-            drift_ms=80,
+            drift_ms=30,
             expected_position_at_apply_ms=5_000,
             apply_at_server_time_ms=15_000,
-            ignore_threshold_ms=80,
-            seek_threshold_ms=250,
+            ignore_threshold_ms=30,
+            seek_threshold_ms=70,
             rate_correction_percent=0.02,
         )
         is None
@@ -79,42 +79,42 @@ def test_small_drift_is_ignored() -> None:
 
 def test_medium_drift_uses_rate_correction() -> None:
     correction = choose_correction(
-        drift_ms=-150,
+        drift_ms=-50,
         expected_position_at_apply_ms=5_000,
         apply_at_server_time_ms=15_000,
-        ignore_threshold_ms=80,
-        seek_threshold_ms=250,
+        ignore_threshold_ms=30,
+        seek_threshold_ms=70,
         rate_correction_percent=0.02,
     )
     assert correction is not None
     assert correction.method is CorrectionMethod.RATE
     assert correction.playback_rate == 1.02
-    assert correction.duration_ms == 3_500
+    assert correction.duration_ms == 1_000
 
 
 def test_rate_correction_duration_returns_delayed_client_to_tolerance() -> None:
     correction = choose_correction(
-        drift_ms=-150,
+        drift_ms=-50,
         expected_position_at_apply_ms=5_000,
         apply_at_server_time_ms=15_000,
-        ignore_threshold_ms=80,
-        seek_threshold_ms=250,
+        ignore_threshold_ms=30,
+        seek_threshold_ms=70,
         rate_correction_percent=0.02,
     )
 
     assert correction is not None
     assert correction.duration_ms is not None
-    corrected_drift_ms = -150 + correction.duration_ms * (correction.playback_rate - 1)
-    assert abs(corrected_drift_ms) <= 80
+    corrected_drift_ms = -50 + correction.duration_ms * (correction.playback_rate - 1)
+    assert abs(corrected_drift_ms) <= 30
 
 
 def test_large_drift_uses_scheduled_seek() -> None:
     correction = choose_correction(
-        drift_ms=400,
+        drift_ms=71,
         expected_position_at_apply_ms=5_000,
         apply_at_server_time_ms=15_000,
-        ignore_threshold_ms=80,
-        seek_threshold_ms=250,
+        ignore_threshold_ms=30,
+        seek_threshold_ms=70,
         rate_correction_percent=0.02,
     )
     assert correction is not None
@@ -144,7 +144,7 @@ def test_correction_gate_uses_hysteresis_before_first_correction() -> None:
     )
 
 
-def test_correction_gate_suppresses_repeats_but_allows_rate_to_seek_escalation() -> None:
+def test_correction_gate_suppresses_during_cooldown_and_retries_persistent_seek() -> None:
     gate = CorrectionGate()
     rate = choose_correction(
         drift_ms=150,
@@ -189,7 +189,7 @@ def test_correction_gate_suppresses_repeats_but_allows_rate_to_seek_escalation()
         hysteresis_ms=20,
         cooldown_ms=3_000,
     )
-    assert not gate.should_issue(
+    assert gate.should_issue(
         seek,
         drift_ms=400,
         now_ms=17_000,

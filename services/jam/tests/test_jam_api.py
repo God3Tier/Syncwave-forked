@@ -45,6 +45,22 @@ def test_health_and_hosting_requires_an_account(client: TestClient) -> None:
     assert client.post("/jams", json={}).status_code == 401
 
 
+def test_jam_has_unique_eight_digit_code_and_guests_can_join_with_it(
+    client: TestClient,
+) -> None:
+    first = create_jam(client, str(uuid4()))
+    second = create_jam(client, str(uuid4()))
+    assert first["join_code"].isdigit() and len(first["join_code"]) == 8
+    assert first["join_code"] != second["join_code"]
+
+    as_guest(client)
+    joined = client.post(f"/jams/by-code/{first['join_code']}/members")
+    assert joined.status_code == 200
+    assert joined.json()["jam_id"] == first["jam_id"]
+    assert joined.json()["member_token"]
+    assert client.post("/jams/by-code/123/members").status_code == 422
+
+
 def test_create_jam_imports_playlist_in_saved_order(client: TestClient) -> None:
     owner_id = str(uuid4())
     playlist_id = uuid4()

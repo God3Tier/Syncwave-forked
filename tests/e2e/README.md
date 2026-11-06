@@ -5,8 +5,9 @@
 1. Discover, Search, song details, media playback and processed assets.
 2. A real browser upload followed through to Catalogue `READY`.
 3. Account gates for upload and Jam hosting, plus sign-up, login/logout, and playlist creation.
-4. A signed-in host and account-free guest joining the same Jam.
-5. Desktop, tablet, and mobile layouts, screenshots, overflow and browser errors.
+4. A signed-in host and account-free guest joining the same Jam by invite link and 8-digit code.
+5. A guest leaving active playback, rejoining, enabling audio and catching up again.
+6. Desktop, tablet, and mobile layouts, screenshots, overflow and browser errors.
 
 Run locally after `docker compose up -d --build --wait`:
 
@@ -16,7 +17,6 @@ python -m playwright install chromium
 python tests/e2e/test_app.py
 ```
 
-Screenshots are written to `tests/e2e/artifacts/`. The test is intentionally
-not wired into `run.sh` yet: the current `docker:29-cli` integration runner has
-no browser runtime. CI should use a pinned Playwright image or a separate
-browser job instead of downloading Chromium during every integration job.
+Screenshots are written to `tests/e2e/artifacts/`. On staging, `run.sh` launches
+a pinned Playwright container on the Compose network and runs the same journey
+against the gateway without installing a browser into the Docker CLI runner.

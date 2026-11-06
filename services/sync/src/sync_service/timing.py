@@ -69,7 +69,7 @@ class Correction:
 
 @dataclass(slots=True)
 class CorrectionGate:
-    """Suppress correction chatter until drift settles or meaningfully escalates."""
+    """Suppress correction chatter while allowing persistent seek drift to recover."""
 
     active: bool = False
     last_method: CorrectionMethod | None = None
@@ -106,7 +106,14 @@ class CorrectionGate:
             if absolute_drift <= ignore_threshold_ms + hysteresis_ms:
                 return False
         elif not (
-            self.last_method is CorrectionMethod.RATE and correction.method is CorrectionMethod.SEEK
+            (
+                self.last_method is CorrectionMethod.RATE
+                and correction.method is CorrectionMethod.SEEK
+            )
+            or (
+                self.last_method is CorrectionMethod.SEEK
+                and correction.method is CorrectionMethod.SEEK
+            )
         ):
             return False
 
