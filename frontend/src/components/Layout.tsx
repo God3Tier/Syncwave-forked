@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
-import { shortId } from '../format';
+import { guestName } from '../guestName';
 import { userId } from '../identity';
 import { useAuth } from '../auth/AuthProvider';
 import { PlayerBar } from './PlayerBar';
@@ -91,11 +91,11 @@ export function Layout() {
 
         <div className="mt-auto flex items-center gap-3 border-t border-outline-variant/35 px-1 pt-4">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary/15 text-xs font-extrabold text-secondary">
-            {(account?.username ?? userId).slice(0, 2).toUpperCase()}
+            {(account?.username ?? guestName).slice(0, 2).toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold" title={account?.username ?? userId}>
-              {loading ? 'Checking account…' : account?.username ?? `Guest ${shortId(userId)}`}
+            <p className="truncate text-xs font-semibold" title={account ? account.username : `Guest · ${userId}`}>
+              {loading ? 'Checking account…' : account?.username ?? guestName}
             </p>
             {account ? (
               <button type="button" onClick={() => void logOut().catch(() => undefined)} className="mt-0.5 text-xs text-on-surface-variant underline-offset-4 hover:text-on-surface hover:underline">

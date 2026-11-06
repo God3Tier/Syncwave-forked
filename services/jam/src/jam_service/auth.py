@@ -101,7 +101,10 @@ def actor_for_request(request: Request, jam_id: UUID, manager) -> Actor:
         jam = manager.get(jam_id)
         if user_id == jam.owner_id or user_id not in jam.participant_ids:
             raise HTTPException(status_code=403, detail="You are not a member of this Jam")
-        return Actor(user_id=user_id, account=False, username=f"Member {str(user_id)[:8]}")
+        username = next(
+            (p.username for p in jam.participants if p.participant_id == user_id), "Guest"
+        )
+        return Actor(user_id=user_id, account=False, username=username)
     identity = optional_account(request)
     if identity is None:
         raise HTTPException(status_code=401, detail="Sign in to continue")
