@@ -16,6 +16,7 @@ export interface Song {
   processing_status: ProcessingStatus;
   created_at: string;
   updated_at: string;
+  play_count: number;
 }
 
 export interface Page<T> {
@@ -174,6 +175,8 @@ export interface Jam {
   lifecycle_state: 'ACTIVE' | 'ENDED';
   member_token: string | null;
   member_id: string | null;
+  autoplay_mode: 'TOP_HITS' | 'LOOP' | null;
+  autoplay_decision_required: boolean;
 }
 
 export interface Readiness {
@@ -183,4 +186,6 @@ export interface Readiness {
   decision_required: boolean;
   ready_participant_ids: string[];
   unready_participant_ids: string[];
+  target_generation: number | null;
+  transition: boolean;
 }

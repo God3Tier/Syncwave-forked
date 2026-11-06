@@ -17,6 +17,18 @@ class Participant:
     ready: bool = False
     connection: WebSocket | None = None
     correction_gate: CorrectionGate = field(default_factory=CorrectionGate)
+    pending_ready: bool = False
+
+
+@dataclass(slots=True)
+class PendingTrack:
+    generation: int
+    queue_item_id: UUID
+    song_id: UUID
+    stream_url: str
+    duration_ms: int
+    prepare_deadline_ms: int
+    transition_server_time_ms: int | None = None
 
 
 @dataclass(slots=True)
@@ -35,6 +47,8 @@ class SyncSession:
     prepare_deadline_ms: int = 0
     participants: dict[UUID, Participant] = field(default_factory=dict)
     server_seq: int = 0
+    pending: PendingTrack | None = None
+    ignored_participant_ids: set[UUID] = field(default_factory=set)
 
     def next_server_seq(self) -> int:
         value = self.server_seq
@@ -160,15 +174,28 @@ class SessionManager:
         session: SyncSession,
         now_ms: int,
     ) -> tuple[list[UUID], list[UUID], bool]:
+        if session.pending is not None and session.pending.transition_server_time_ms is None:
+            connected = {
+                participant_id: participant
+                for participant_id, participant in session.participants.items()
+                if participant.connection is not None
+                and participant_id not in session.ignored_participant_ids
+            }
+            ready = [participant_id for participant_id, p in connected.items() if p.pending_ready]
+            unready = [
+                participant_id for participant_id, p in connected.items() if not p.pending_ready
+            ]
+            required = now_ms >= session.pending.prepare_deadline_ms and bool(unready)
+            return ready, unready, required
         ready = [
             participant_id
             for participant_id, participant in session.participants.items()
-            if participant.ready
+            if participant.connection is not None and participant.ready
         ]
         unready = [
             participant_id
             for participant_id, participant in session.participants.items()
-            if not participant.ready
+            if participant.connection is not None and not participant.ready
         ]
         decision_required = (
             session.state is PlaybackState.PREPARING
@@ -193,14 +220,30 @@ class SessionManager:
                 return previous, False
 
             if decision is ReadinessDecision.CONTINUE:
-                if not any(participant.ready for participant in session.participants.values()):
+                if session.pending is not None:
+                    session.ignored_participant_ids.update(
+                        participant_id
+                        for participant_id, participant in session.participants.items()
+                        if participant.connection is not None and not participant.pending_ready
+                    )
+                    target = self._transition_time(session)
+                    session.pending.transition_server_time_ms = max(
+                        target or now_ms + start_lead_time_ms,
+                        now_ms + start_lead_time_ms,
+                    )
+                    scheduled = True
+                elif not any(participant.ready for participant in session.participants.values()):
                     raise ValueError("at least one participant must be ready")
-                session.state = PlaybackState.SCHEDULED
-                session.anchor_server_time_ms = now_ms + start_lead_time_ms
-                session.anchor_position_ms = 0
-                scheduled = True
+                else:
+                    session.state = PlaybackState.SCHEDULED
+                    session.anchor_server_time_ms = now_ms + start_lead_time_ms
+                    session.anchor_position_ms = 0
+                    scheduled = True
             elif decision is ReadinessDecision.WAIT:
-                session.prepare_deadline_ms = now_ms + prepare_timeout_ms
+                if session.pending is not None:
+                    session.pending.prepare_deadline_ms = now_ms + prepare_timeout_ms
+                else:
+                    session.prepare_deadline_ms = now_ms + prepare_timeout_ms
                 scheduled = False
             else:
                 session.state = PlaybackState.ENDED
@@ -231,9 +274,15 @@ class SessionManager:
                 return None, target_server_time_ms, 0
 
             session.participants[participant_id].ready = True
+            session.ignored_participant_ids.discard(participant_id)
             metrics.ready_participants.set(self.ready_participant_count())
             if session.state is PlaybackState.PREPARING:
-                if not all(participant.ready for participant in session.participants.values()):
+                connected = [
+                    participant
+                    for participant in session.participants.values()
+                    if participant.connection is not None
+                ]
+                if not connected or not all(participant.ready for participant in connected):
                     return None, target_server_time_ms, 0
                 session.state = PlaybackState.SCHEDULED
                 session.anchor_server_time_ms = target_server_time_ms
@@ -260,8 +309,92 @@ class SessionManager:
                 start_position_ms = session.anchor_position_ms
             else:
                 return None, target_server_time_ms, 0
+            self._refresh_pending_transition(session)
             await self._repository.save_session(self._to_persisted(session))
             return audience, target_server_time_ms, start_position_ms
+
+    async def prepare_next(
+        self,
+        session: SyncSession,
+        *,
+        queue_item_id: UUID,
+        song_id: UUID,
+        stream_url: str,
+        duration_ms: int,
+        prepare_deadline_ms: int,
+    ) -> bool:
+        """Prepare one next track without disturbing current playback."""
+        async with self._lock:
+            if session.queue_item_id == queue_item_id:
+                return False
+            if session.pending is not None and session.pending.queue_item_id == queue_item_id:
+                return False
+            session.pending = PendingTrack(
+                generation=session.generation + 1,
+                queue_item_id=queue_item_id,
+                song_id=song_id,
+                stream_url=stream_url,
+                duration_ms=duration_ms,
+                prepare_deadline_ms=prepare_deadline_ms,
+            )
+            for participant in session.participants.values():
+                participant.pending_ready = False
+            await self._repository.save_session(self._to_persisted(session))
+            return True
+
+    async def clear_pending(self, session: SyncSession) -> None:
+        async with self._lock:
+            session.pending = None
+            for participant in session.participants.values():
+                participant.pending_ready = False
+            await self._repository.save_session(self._to_persisted(session))
+
+    async def mark_pending_ready(self, session: SyncSession, participant_id: UUID) -> int | None:
+        """Mark the next generation ready and return its transition target when committed."""
+        async with self._lock:
+            pending = session.pending
+            if pending is None:
+                return None
+            participant = session.participants[participant_id]
+            participant.pending_ready = True
+            target = self._refresh_pending_transition(session)
+            await self._repository.save_session(self._to_persisted(session))
+            return target
+
+    async def mark_not_ready(self, session: SyncSession, participant_id: UUID) -> None:
+        async with self._lock:
+            participant = session.participants[participant_id]
+            participant.ready = False
+            participant.pending_ready = False
+            await self._repository.save_session(self._to_persisted(session))
+
+    @staticmethod
+    def _transition_time(session: SyncSession) -> int | None:
+        if session.anchor_server_time_ms is None or session.playback_rate <= 0:
+            return None
+        remaining_ms = max(0, session.duration_ms - session.anchor_position_ms)
+        return session.anchor_server_time_ms + round(remaining_ms / session.playback_rate)
+
+    @classmethod
+    def _refresh_pending_transition(cls, session: SyncSession) -> int | None:
+        pending = session.pending
+        if pending is None:
+            return None
+        connected = [
+            participant
+            for participant_id, participant in session.participants.items()
+            if participant.connection is not None
+            and participant_id not in session.ignored_participant_ids
+        ]
+        if (
+            session.state not in {PlaybackState.SCHEDULED, PlaybackState.PLAYING}
+            or not connected
+            or not all(participant.pending_ready for participant in connected)
+        ):
+            pending.transition_server_time_ms = None
+            return None
+        pending.transition_server_time_ms = cls._transition_time(session)
+        return pending.transition_server_time_ms
 
     async def mark_playing_if_due(
         self,
@@ -269,6 +402,28 @@ class SessionManager:
         measured_server_time_ms: int,
     ) -> None:
         async with self._lock:
+            if (
+                session.pending is not None
+                and session.pending.transition_server_time_ms is not None
+                and measured_server_time_ms >= session.pending.transition_server_time_ms
+            ):
+                pending = session.pending
+                session.generation = pending.generation
+                session.queue_item_id = pending.queue_item_id
+                session.song_id = pending.song_id
+                session.stream_url = pending.stream_url
+                session.duration_ms = pending.duration_ms
+                session.anchor_server_time_ms = pending.transition_server_time_ms
+                session.anchor_position_ms = 0
+                session.playback_rate = 1.0
+                session.state = PlaybackState.PLAYING
+                session.prepare_deadline_ms = pending.prepare_deadline_ms
+                session.pending = None
+                for participant in session.participants.values():
+                    participant.ready = participant.pending_ready
+                    participant.pending_ready = False
+                    participant.correction_gate.reset()
+                await self._repository.save_session(self._to_persisted(session))
             if (
                 self._sessions.get(session.jam_id) is session
                 and session.state is PlaybackState.SCHEDULED
@@ -322,6 +477,7 @@ class SessionManager:
             session.anchor_server_time_ms = apply_at_ms
             session.playback_rate = 1.0
             session.state = PlaybackState.PAUSED
+            self._refresh_pending_transition(session)
             await self._save_command(request_id, session)
             self._log_control(session, request_id, "PAUSE", "applied")
             return session, True
@@ -342,6 +498,7 @@ class SessionManager:
             session.anchor_server_time_ms = apply_at_ms
             session.playback_rate = 1.0
             session.state = PlaybackState.SCHEDULED
+            self._refresh_pending_transition(session)
             await self._save_command(request_id, session)
             self._log_control(session, request_id, "RESUME", "applied")
             return session, True
@@ -370,6 +527,7 @@ class SessionManager:
             session.playback_rate = 1.0
             if resulting_state is not PlaybackState.PAUSED:
                 session.state = PlaybackState.SCHEDULED
+            self._refresh_pending_transition(session)
             await self._save_command(request_id, session)
             self._log_control(session, request_id, "SEEK", "applied")
             return session, True, resulting_state
@@ -410,6 +568,7 @@ class SessionManager:
             session.anchor_position_ms = 0
             session.playback_rate = 1.0
             session.prepare_deadline_ms = prepare_deadline_ms
+            session.pending = None
             for participant in session.participants.values():
                 participant.ready = False
                 participant.correction_gate.reset()
@@ -471,6 +630,8 @@ class SessionManager:
             participant = session.participants.get(participant_id)
             if participant is not None and participant.connection is websocket:
                 participant.connection = None
+                participant.ready = False
+                participant.pending_ready = False
 
     async def broadcast(
         self,
@@ -491,6 +652,8 @@ class SessionManager:
                 dead.append(participant)
         for participant in dead:
             participant.connection = None
+            participant.ready = False
+            participant.pending_ready = False
 
     @staticmethod
     def _to_persisted(session: SyncSession) -> PersistedSession:
@@ -508,6 +671,20 @@ class SessionManager:
             anchor_position_ms=session.anchor_position_ms,
             playback_rate=session.playback_rate,
             prepare_deadline_ms=session.prepare_deadline_ms,
+            pending_track=(
+                {
+                    "generation": session.pending.generation,
+                    "queue_item_id": str(session.pending.queue_item_id),
+                    "song_id": str(session.pending.song_id),
+                    "stream_url": session.pending.stream_url,
+                    "duration_ms": session.pending.duration_ms,
+                    "prepare_deadline_ms": session.pending.prepare_deadline_ms,
+                    "transition_server_time_ms": session.pending.transition_server_time_ms,
+                }
+                if session.pending is not None
+                else None
+            ),
+            ignored_participant_ids=tuple(session.ignored_participant_ids),
         )
 
     @staticmethod
@@ -525,6 +702,24 @@ class SessionManager:
             anchor_position_ms=value.anchor_position_ms,
             playback_rate=value.playback_rate,
             prepare_deadline_ms=value.prepare_deadline_ms,
+            pending=(
+                PendingTrack(
+                    generation=int(value.pending_track["generation"]),
+                    queue_item_id=UUID(str(value.pending_track["queue_item_id"])),
+                    song_id=UUID(str(value.pending_track["song_id"])),
+                    stream_url=str(value.pending_track["stream_url"]),
+                    duration_ms=int(value.pending_track["duration_ms"]),
+                    prepare_deadline_ms=int(value.pending_track["prepare_deadline_ms"]),
+                    transition_server_time_ms=(
+                        int(value.pending_track["transition_server_time_ms"])
+                        if value.pending_track.get("transition_server_time_ms") is not None
+                        else None
+                    ),
+                )
+                if value.pending_track is not None
+                else None
+            ),
+            ignored_participant_ids=set(value.ignored_participant_ids),
             participants={
                 participant_id: Participant(participant_id)
                 for participant_id in value.participant_ids

@@ -34,6 +34,7 @@ from sync_service.dependencies import (
 )
 from sync_service.manager import SessionManager
 from sync_service.models import (
+    NotReadyFrame,
     PlaybackCommandRequest,
     PlaybackSnapshotResponse,
     PlaybackState,
@@ -645,6 +646,13 @@ async def websocket_endpoint(
                 "generation": session.generation,
                 "state": session.state,
                 "song_id": str(session.song_id),
+                "participants": {
+                    str(member_id): {
+                        "connected": member.connection is not None,
+                        "ready": member.ready,
+                    }
+                    for member_id, member in session.participants.items()
+                },
             },
         )
     )
@@ -667,6 +675,14 @@ async def websocket_endpoint(
                 payload=prepare_payload(session, prepare_position_ms),
             )
         )
+        if session.pending is not None:
+            from sync_service.grpc_service import preload_payload
+
+            await websocket.send_json(
+                server_frame(
+                    session=session, message_type="PRELOAD", payload=preload_payload(session)
+                )
+            )
 
     try:
         message_times: deque[int] = deque()
@@ -730,13 +746,43 @@ async def websocket_endpoint(
                     )
                 elif data.get("type") == "READY":
                     frame = ReadyFrame.model_validate(data)
-                    if frame.payload.generation != session.generation:
+                    pending_generation = (
+                        session.pending.generation if session.pending is not None else None
+                    )
+                    if frame.payload.generation not in {session.generation, pending_generation}:
                         await send_error(
                             websocket,
                             session,
                             "STALE_GENERATION",
                             "READY generation is not active",
                         )
+                        continue
+                    if pending_generation == frame.payload.generation:
+                        target_ms = await manager.mark_pending_ready(session, participant_id)
+                        await manager.broadcast(
+                            session,
+                            server_frame(
+                                session=session,
+                                message_type="PARTICIPANT_STATE",
+                                payload={
+                                    "participant_id": str(participant_id),
+                                    "generation": frame.payload.generation,
+                                    "connected": True,
+                                    "ready": True,
+                                },
+                            ),
+                        )
+                        if target_ms is not None:
+                            from sync_service.grpc_service import transition_payload
+
+                            await manager.broadcast(
+                                session,
+                                server_frame(
+                                    session=session,
+                                    message_type="TRANSITION_AT",
+                                    payload=transition_payload(session),
+                                ),
+                            )
                         continue
                     audience, target_ms, start_position_ms = await manager.mark_ready(
                         session,
@@ -786,6 +832,20 @@ async def websocket_endpoint(
                                 ),
                             ),
                         )
+                        if (
+                            session.pending is not None
+                            and session.pending.transition_server_time_ms is not None
+                        ):
+                            from sync_service.grpc_service import transition_payload
+
+                            await manager.broadcast(
+                                session,
+                                server_frame(
+                                    session=session,
+                                    message_type="TRANSITION_AT",
+                                    payload=transition_payload(session),
+                                ),
+                            )
                     elif audience == "participant":
                         await websocket.send_json(
                             server_frame(
@@ -811,8 +871,40 @@ async def websocket_endpoint(
                                 },
                             )
                         )
+                elif data.get("type") == "NOT_READY":
+                    frame = NotReadyFrame.model_validate(data)
+                    if frame.payload.generation not in {
+                        session.generation,
+                        session.pending.generation if session.pending is not None else None,
+                    }:
+                        await send_error(
+                            websocket,
+                            session,
+                            "STALE_GENERATION",
+                            "NOT_READY generation is not active",
+                        )
+                        continue
+                    await manager.mark_not_ready(session, participant_id)
+                    await manager.broadcast(
+                        session,
+                        server_frame(
+                            session=session,
+                            message_type="PARTICIPANT_STATE",
+                            payload={
+                                "participant_id": str(participant_id),
+                                "generation": frame.payload.generation,
+                                "connected": True,
+                                "ready": False,
+                                "reason": frame.payload.reason,
+                            },
+                        ),
+                    )
                 elif data.get("type") == "PLAYBACK_STATUS":
                     frame = PlaybackStatusFrame.model_validate(data)
+                    await manager.mark_playing_if_due(
+                        session,
+                        frame.payload.measured_server_time_ms,
+                    )
                     if frame.payload.generation != session.generation:
                         await send_error(
                             websocket,
@@ -829,10 +921,6 @@ async def websocket_endpoint(
                             "playback has not been scheduled",
                         )
                         continue
-                    await manager.mark_playing_if_due(
-                        session,
-                        frame.payload.measured_server_time_ms,
-                    )
                     if frame.payload.clock_offset_ms is not None:
                         metrics.clock_offset_ms.observe(frame.payload.clock_offset_ms)
                     if frame.payload.round_trip_delay_ms is not None:
@@ -923,6 +1011,19 @@ async def websocket_endpoint(
         pass
     finally:
         await manager.disconnect(jam_id, participant_id, websocket)
+        await manager.broadcast(
+            session,
+            server_frame(
+                session=session,
+                message_type="PARTICIPANT_STATE",
+                payload={
+                    "participant_id": str(participant_id),
+                    "generation": session.generation,
+                    "connected": False,
+                    "ready": False,
+                },
+            ),
+        )
         metrics.websocket_connections.dec()
         log_event(
             "participant_disconnected",

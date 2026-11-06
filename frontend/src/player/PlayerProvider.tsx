@@ -4,6 +4,8 @@ import { getStreamManifest } from '../api/media';
 import type { StreamManifest } from '../api/types';
 import { bufferSlots, DownloadPool } from './chunkBuffer';
 import { PlayerContext, type BufferState, type Player, type PlayerState } from './context';
+import { recordPlay } from '../api/catalogue';
+import { uuid } from '../uuid';
 
 type ChunkLoad = { controller: AbortController; promise: Promise<string> };
 
@@ -132,7 +134,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     getAudio().pause();
     setState((current) => ({ ...current, queue, index, error: null, durationMs: 0 }));
     stateRef.current = { ...stateRef.current, queue, index };
-    void playChunk(queue, index, 0, autoplay).then(() => maintainWindow(queue, index)).catch((error: unknown) => {
+    const playbackId = uuid();
+    void playChunk(queue, index, 0, autoplay).then(() => {
+      if (autoplay) void recordPlay(songId, playbackId, 'SOLO').catch(() => undefined);
+      return maintainWindow(queue, index);
+    }).catch((error: unknown) => {
       const message = error instanceof ApiError && error.status === 409
         ? 'This song is still processing.' : 'Could not load the audio.';
       setState((current) => ({ ...current, error: message, playing: false }));

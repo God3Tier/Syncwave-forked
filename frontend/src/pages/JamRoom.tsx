@@ -9,6 +9,7 @@ import { ApiError } from '../api/http';
 import { useAuth } from '../auth/AuthProvider';
 import {
   decideReadiness,
+  decideAutoplay,
   endJam,
   getJam,
   getReadiness,
@@ -35,7 +36,7 @@ import { useAsync, useInterval } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { useSongs } from '../hooks/useSongs';
 import { usePlayer, usePosition } from '../player/context';
-import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
+import { SyncSession, type LocalAudioState, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
 import { productColors } from '../theme';
 
@@ -145,20 +146,27 @@ export function JamRoom() {
   useEffect(() => {
     if (!audio) return;
     const resume = () => {
-      if (document.visibilityState === 'visible' && audio.state === 'suspended') void audio.resume();
+      if (document.visibilityState === 'visible' && audio.state === 'suspended') {
+        void sessionRef.current?.resumeAudio();
+      }
     };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('online', resume);
+    window.addEventListener('pageshow', resume);
     return () => {
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('online', resume);
+      window.removeEventListener('pageshow', resume);
     };
   }, [audio]);
 
   const enableAudio = async () => {
     // Browsers only allow audio after a user gesture, so the AudioContext is created here.
     if (audio) {
-      await audio.resume();
+      const resumed = sessionRef.current
+        ? await sessionRef.current.resumeAudio()
+        : await audio.resume().then(() => audio.state === 'running');
+      if (!resumed) setActionError(new Error('This browser blocked audio. Tap again to resume.'));
       return;
     }
     const context = new AudioContext();
@@ -204,9 +212,9 @@ export function JamRoom() {
         .catch(() => setReadiness(null));
     },
     2000,
-    owner && jam?.state === 'PREPARING',
+    owner && Boolean(jam) && jam?.state !== 'IDLE' && jam?.state !== 'ENDED',
   );
-  const showReadiness = owner && jam?.state === 'PREPARING' && readiness?.decision_required;
+  const showReadiness = owner && readiness?.decision_required;
 
   if (loadError !== undefined && !jam) {
     return (
@@ -221,6 +229,7 @@ export function JamRoom() {
 
   const currentItem = jam.queue.find((item) => item.queue_item_id === jam.current_queue_item_id) ?? null;
   const currentSongId = sync?.songId ?? currentItem?.song_id ?? null;
+  const localAudioState: LocalAudioState = sync?.localAudioState ?? (audio ? 'RUNNING' : 'LOCKED');
 
   const copyInvite = async () => {
     const link = `${window.location.origin}/jam/${jamId}`;
@@ -310,11 +319,19 @@ export function JamRoom() {
             tone="info"
             action={
               <Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">
-                Join Jam (Enable Audio)
+                Join playback
               </Button>
             }
           >
             Join to listen: this device then plays in sync with everyone else. Every listener, the owner included, joins before playback.
+          </Notice>
+        )}
+        {audio && localAudioState !== 'RUNNING' && (
+          <Notice
+            tone="warn"
+            action={<Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">Tap to resume audio</Button>}
+          >
+            Audio was paused by this browser. You remain connected and will catch up after it resumes.
           </Notice>
         )}
       </div>
@@ -338,7 +355,7 @@ export function JamRoom() {
           />
         </div>
         <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
-          <Queue jam={jam} memberId={participantId} owner={owner} playingSongId={currentSongId} run={run} />
+          <Queue jam={jam} memberId={participantId} owner={owner} playingSongId={currentSongId} sync={sync} run={run} />
           {jam.lifecycle_state === 'ACTIVE' && (
             <AddSongsPanel
               title="Add to the shared queue"
@@ -359,6 +376,9 @@ export function JamRoom() {
           participantId={participantId}
           onDecide={(decision) => void run(() => decideReadiness(jamId, decision)).then(() => setReadiness(null))}
         />
+      )}
+      {owner && jam.autoplay_decision_required && (
+        <AutoplayModal onDecide={(mode) => void run(() => decideAutoplay(jamId, mode))} />
       )}
     </div>
   );
@@ -385,7 +405,8 @@ function Deck({
   const song = songId ? songs.get(songId) : null;
   const waveform = useAsync((signal) => (songId ? getWaveform(songId, 120, signal).catch(() => null) : Promise.resolve(null)), [songId]);
   const getPosition = useCallback(() => session?.positionMs() ?? 0, [session]);
-  const position = usePosition(getPosition, sync?.phase === 'PLAYING');
+  const locallyAudible = sync?.phase === 'PLAYING' && sync.localAudioState === 'RUNNING';
+  const position = usePosition(getPosition, locallyAudible);
   const durationMs = sync?.mediaMs || song?.duration_ms || 0;
   const [seekText, setSeekText] = useState('');
 
@@ -398,12 +419,21 @@ function Deck({
   const playing = jam.state === 'PLAYING' || jam.state === 'SCHEDULED';
   const started = jam.state !== 'IDLE' && jam.state !== 'ENDED';
   const hasNext = jam.queue.findIndex((item) => item.queue_item_id === jam.current_queue_item_id) < jam.queue.length - 1;
+  const playbackLabel = jam.state === 'PAUSED'
+    ? 'Paused'
+    : jam.state === 'PREPARING'
+      ? 'Getting everyone ready'
+      : (jam.state === 'PLAYING' || jam.state === 'SCHEDULED') && sync?.localAudioState !== 'RUNNING'
+        ? 'Tap to resume audio'
+        : locallyAudible
+          ? 'Playing together'
+          : 'Waiting to start';
 
   return (
     <Card className="relative h-full overflow-hidden p-4 md:p-5">
       <div className="mb-4 flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${sync?.phase === 'PLAYING' ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
-        <span className="text-xs font-bold text-secondary">Now playing together</span>
+        <span className={`h-2 w-2 rounded-full ${locallyAudible ? 'animate-pulse-glow bg-secondary' : 'bg-outline'}`} />
+        <span className="text-xs font-bold text-secondary">{playbackLabel}</span>
       </div>
       {songId ? (
         <Link to={`/songs/${songId}`} aria-label={`Open ${song?.title ?? 'current song'}`} className="mx-auto block max-w-72 rounded-2xl">
@@ -472,7 +502,7 @@ function Deck({
   );
 }
 
-function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberId: string | null; owner: boolean; playingSongId: string | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
+function Queue({ jam, memberId, owner, playingSongId, sync, run }: { jam: Jam; memberId: string | null; owner: boolean; playingSongId: string | null; sync: SyncSnapshot | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
   const songs = useSongs(jam.queue.map((item) => item.song_id));
   const ids = jam.queue.map((item) => item.queue_item_id);
   const drag = useDragReorder((from, to) => void run(() => reorderQueue(jam.jam_id, moveItem(ids, from, to))), owner);
@@ -500,7 +530,7 @@ function Queue({ jam, memberId, owner, playingSongId, run }: { jam: Jam; memberI
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-headline text-sm font-semibold">{song?.title ?? '…'}</p>
-                    {current && playingSongId === item.song_id && <EqualizerIcon />}
+                    {current && playingSongId === item.song_id && sync?.phase === 'PLAYING' && sync.localAudioState === 'RUNNING' && <EqualizerIcon />}
                   </div>
                   <p className="truncate text-xs text-on-surface-variant">{song?.artist ?? ''}</p>
                   <p className="mt-0.5 font-mono text-[10px] text-outline">
@@ -551,11 +581,13 @@ function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam
                 {id === jam.owner_id && <span className="rounded bg-primary/20 px-1 font-mono text-[9px] uppercase text-primary">owner</span>}
               </div>
               <div className="flex items-center gap-2 font-mono text-[10px]">
-                <span className="flex items-center gap-1" title="Connected to Sync">
-                  <span className={`h-2 w-2 rounded-full ${connected ? 'bg-ok' : 'bg-outline-variant'}`} />
+                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${connected ? 'bg-primary/15 text-primary' : 'text-outline'}`} title="Connected to live playback" aria-label={connected ? 'Connected to live playback' : 'Not connected to live playback'}>
+                  <span className={`h-2 w-2 rounded-full ${connected ? 'bg-primary' : 'bg-outline-variant'}`} />
+                  <span>C</span>
                 </span>
-                <span className="flex items-center gap-1" title="Buffered and ready">
+                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${ready ? 'bg-secondary/15 text-secondary shadow-[0_0_8px_rgb(121_227_195/0.2)]' : 'text-outline'}`} title="Audio running, buffered and ready" aria-label={ready ? 'Audio running, buffered and ready' : 'Audio is not ready'}>
                   <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_rgb(121_227_195/0.65)]' : 'bg-outline-variant'}`} />
+                  <span>R</span>
                 </span>
                 {owner && id !== memberId && jam.lifecycle_state === 'ACTIVE' && (
                   <>
@@ -571,7 +603,7 @@ function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam
         })}
       </ul>
       <p className="mt-3 flex gap-3 font-mono text-[10px] text-outline">
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-ok" /> connected</span>
+        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> connected</span>
         <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-secondary" /> ready</span>
       </p>
     </Card>
@@ -622,6 +654,49 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
       </dl>
       <p className="mt-2 text-[10px] text-outline">Drift is reported by Sync when it corrects this device.</p>
     </Card>
+  );
+}
+
+function AutoplayModal({ onDecide }: { onDecide: (mode: 'TOP_HITS' | 'LOOP') => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const onDecideRef = useRef(onDecide);
+  const [seconds, setSeconds] = useState(10);
+  const decided = useRef(false);
+  const decide = (mode: 'TOP_HITS' | 'LOOP') => {
+    if (decided.current) return;
+    decided.current = true;
+    onDecide(mode);
+  };
+  useEffect(() => {
+    onDecideRef.current = onDecide;
+  }, [onDecide]);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    const tick = window.setInterval(() => setSeconds((value) => Math.max(0, value - 1)), 1000);
+    const fallback = window.setTimeout(() => {
+      if (decided.current) return;
+      decided.current = true;
+      onDecideRef.current('TOP_HITS');
+    }, 10_000);
+    return () => {
+      window.clearInterval(tick);
+      window.clearTimeout(fallback);
+      element?.close();
+    };
+  }, []);
+  return (
+    <dialog ref={dialog} aria-labelledby="autoplay-title" onCancel={(event) => event.preventDefault()} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-surface-container p-0 text-on-surface shadow-[0_24px_80px_rgb(0_0_0/0.55)] backdrop:bg-black/75">
+      <div className="p-6 ring-1 ring-inset ring-outline-variant/55">
+        <Icon name="queue_music" className="mb-3 text-3xl text-primary" />
+        <h3 id="autoplay-title" className="font-headline text-lg font-bold">Keep this Jam going?</h3>
+        <p className="mt-2 text-sm text-on-surface-variant">The queue is nearly finished. Top Hits will be added automatically in {seconds}s.</p>
+        <div className="mt-5 space-y-2">
+          <Button variant="primary" onClick={() => decide('TOP_HITS')} className="w-full">Add next 5 Top Hits</Button>
+          <Button onClick={() => decide('LOOP')} className="w-full">Loop current queue</Button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 

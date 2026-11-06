@@ -15,6 +15,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -62,6 +63,7 @@ class Song(BaseModel):
     processing_status: ProcessingStatus
     created_at: datetime
     updated_at: datetime
+    play_count: int = 0
 
     @classmethod
     def from_record(cls, record: SongRecord) -> "Song":
@@ -81,6 +83,7 @@ class Song(BaseModel):
             processing_status=ProcessingStatus(record.processing_status),
             created_at=as_utc(record.created_at),
             updated_at=as_utc(record.updated_at),
+            play_count=record.play_count,
         )
 
 
@@ -89,15 +92,45 @@ class SongList(BaseModel):
     next_cursor: str | None = None
 
 
-def _encode_cursor(created_at: datetime, song_id: uuid.UUID) -> str:
-    payload = json.dumps({"created_at": created_at.isoformat(), "song_id": str(song_id)}).encode()
-    return base64.urlsafe_b64encode(payload).decode()
+class SongSort(StrEnum):
+    NEWEST = "newest"
+    TOP = "top"
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+class PlaySource(StrEnum):
+    SOLO = "SOLO"
+    JAM = "JAM"
+
+
+class RecordPlayRequest(BaseModel):
+    playback_id: uuid.UUID
+    source: PlaySource
+
+
+class RecordPlayResponse(BaseModel):
+    song_id: uuid.UUID
+    play_count: int
+    counted: bool
+
+
+def _encode_cursor(record: SongRecord, sort: SongSort) -> str:
+    payload = {
+        "sort": sort.value,
+        "created_at": record.created_at.isoformat(),
+        "song_id": str(record.song_id),
+    }
+    if sort is SongSort.TOP:
+        payload["play_count"] = record.play_count
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def _decode_cursor(cursor: str, sort: SongSort) -> tuple[int | None, datetime, uuid.UUID]:
     try:
         payload = json.loads(base64.urlsafe_b64decode(cursor.encode()))
-        return datetime.fromisoformat(payload["created_at"]), uuid.UUID(payload["song_id"])
+        if payload.get("sort", SongSort.NEWEST.value) != sort.value:
+            raise ValueError("cursor sort differs from request")
+        count = int(payload["play_count"]) if sort is SongSort.TOP else None
+        return count, datetime.fromisoformat(payload["created_at"]), uuid.UUID(payload["song_id"])
     except (ValueError, KeyError, TypeError) as exc:
         raise ApiError(400, "INVALID_CURSOR", "cursor is not a valid paging token") from exc
 
@@ -172,6 +205,17 @@ async def get_song(song_id: uuid.UUID, request: Request) -> Song:
     return Song.from_record(record)
 
 
+@app.post("/songs/{song_id}/plays", response_model=RecordPlayResponse)
+async def record_play(
+    song_id: uuid.UUID, body: RecordPlayRequest, request: Request
+) -> RecordPlayResponse:
+    repository: CatalogueRepository = request.app.state.repository
+    record, counted = await repository.record_play(song_id, body.playback_id, body.source.value)
+    if record is None:
+        raise ApiError(404, "SONG_NOT_FOUND", f"No song with ID {song_id}")
+    return RecordPlayResponse(song_id=song_id, play_count=record.play_count, counted=counted)
+
+
 @app.get(
     "/songs",
     response_model=SongList,
@@ -185,6 +229,7 @@ async def list_songs(
     cursor: str | None = None,
     processing_status: ProcessingStatus | None = None,
     uploader_id: uuid.UUID | None = None,
+    sort: SongSort = SongSort.NEWEST,
 ) -> SongList:
     if limit < 1 or limit > 100:
         raise ApiError(400, "INVALID_REQUEST", "limit must be between 1 and 100")
@@ -199,19 +244,36 @@ async def list_songs(
         if uploader_id is not None:
             stmt = stmt.where(SongRecord.uploader_id == uploader_id)
         if cursor is not None:
-            created_at, song_id = _decode_cursor(cursor)
-            stmt = stmt.where(
-                or_(
-                    SongRecord.created_at < created_at,
-                    and_(
-                        SongRecord.created_at == created_at,
-                        SongRecord.song_id < song_id,
-                    ),
+            play_count, created_at, song_id = _decode_cursor(cursor, sort)
+            if sort is SongSort.TOP:
+                stmt = stmt.where(
+                    or_(
+                        SongRecord.play_count < play_count,
+                        and_(
+                            SongRecord.play_count == play_count,
+                            or_(
+                                SongRecord.created_at < created_at,
+                                and_(
+                                    SongRecord.created_at == created_at,
+                                    SongRecord.song_id < song_id,
+                                ),
+                            ),
+                        ),
+                    )
                 )
-            )
-        stmt = stmt.order_by(SongRecord.created_at.desc(), SongRecord.song_id.desc()).limit(
-            limit + 1
+            else:
+                stmt = stmt.where(
+                    or_(
+                        SongRecord.created_at < created_at,
+                        and_(SongRecord.created_at == created_at, SongRecord.song_id < song_id),
+                    )
+                )
+        ordering = (
+            (SongRecord.play_count.desc(), SongRecord.created_at.desc(), SongRecord.song_id.desc())
+            if sort is SongSort.TOP
+            else (SongRecord.created_at.desc(), SongRecord.song_id.desc())
         )
+        stmt = stmt.order_by(*ordering).limit(limit + 1)
         rows = (await session.scalars(stmt)).all()
 
     has_more = len(rows) > limit
@@ -219,5 +281,5 @@ async def list_songs(
     items = [Song.from_record(row) for row in rows]
     next_cursor: str | None = None
     if has_more and rows:
-        next_cursor = _encode_cursor(rows[-1].created_at, rows[-1].song_id)
+        next_cursor = _encode_cursor(rows[-1], sort)
     return SongList(items=items, next_cursor=next_cursor)

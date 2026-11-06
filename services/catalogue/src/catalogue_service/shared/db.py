@@ -8,7 +8,16 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String, Uuid
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -64,6 +73,18 @@ class SongRecord(Base):
     source_event_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    play_count: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+
+
+class SongPlayRecord(Base):
+    __tablename__ = "song_plays"
+
+    playback_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    song_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("songs.song_id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 def derive_processing_status(lyrics_status: str, waveform_status: str) -> str:
@@ -97,6 +118,27 @@ class CatalogueRepository:
     async def get(self, song_id: uuid.UUID) -> SongRecord | None:
         async with self._sessions() as session:
             return await session.get(SongRecord, song_id)
+
+    async def record_play(
+        self, song_id: uuid.UUID, playback_id: uuid.UUID, source: str
+    ) -> tuple[SongRecord | None, bool]:
+        """Count a playback once. The playback id is the idempotency key."""
+        async with self._sessions.begin() as session:
+            record = await session.get(SongRecord, song_id)
+            if record is None:
+                return None, False
+            if await session.get(SongPlayRecord, playback_id) is not None:
+                return record, False
+            session.add(
+                SongPlayRecord(
+                    playback_id=playback_id,
+                    song_id=song_id,
+                    source=source,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            record.play_count += 1
+            return record, True
 
     async def create_song(
         self,

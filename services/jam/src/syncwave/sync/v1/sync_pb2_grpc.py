@@ -65,6 +65,11 @@ class SyncControlServiceStub(object):
                 request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.SerializeToString,
                 response_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.FromString,
                 _registered_method=True)
+        self.UpdateQueue = channel.unary_unary(
+                '/syncwave.sync.v1.SyncControlService/UpdateQueue',
+                request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueRequest.SerializeToString,
+                response_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueResponse.FromString,
+                _registered_method=True)
         self.SubmitReadinessDecision = channel.unary_unary(
                 '/syncwave.sync.v1.SyncControlService/SubmitReadinessDecision',
                 request_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.SubmitReadinessDecisionRequest.SerializeToString,
@@ -122,6 +127,12 @@ class SyncControlServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateQueue(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SubmitReadinessDecision(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -172,6 +183,11 @@ def add_SyncControlServiceServicer_to_server(servicer, server):
                     servicer.UpdateParticipants,
                     request_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.FromString,
                     response_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.SerializeToString,
+            ),
+            'UpdateQueue': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateQueue,
+                    request_deserializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueRequest.FromString,
+                    response_serializer=syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueResponse.SerializeToString,
             ),
             'SubmitReadinessDecision': grpc.unary_unary_rpc_method_handler(
                     servicer.SubmitReadinessDecision,
@@ -352,6 +368,33 @@ class SyncControlService(object):
             '/syncwave.sync.v1.SyncControlService/UpdateParticipants',
             syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsRequest.SerializeToString,
             syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateParticipantsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateQueue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/syncwave.sync.v1.SyncControlService/UpdateQueue',
+            syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueRequest.SerializeToString,
+            syncwave_dot_sync_dot_v1_dot_sync__pb2.UpdateQueueResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/transition_at.schema.json",
+  "title": "TRANSITION_AT",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "TRANSITION_AT" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "queue_item_id", "song_id", "target_server_time_ms", "start_position_ms", "playback_rate"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "queue_item_id": { "type": "string", "format": "uuid" },
+        "song_id": { "type": "string", "format": "uuid" },
+        "target_server_time_ms": { "type": "integer", "minimum": 0 },
+        "start_position_ms": { "const": 0 },
+        "playback_rate": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

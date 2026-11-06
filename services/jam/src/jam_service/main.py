@@ -21,6 +21,7 @@ from jam_service.auth import (
     optional_account,
     owner_for_request,
 )
+from jam_service.catalogue_client import create_catalogue_client
 from jam_service.config import get_settings
 from jam_service.manager import (
     JamConflictError,
@@ -30,6 +31,7 @@ from jam_service.manager import (
 )
 from jam_service.models import (
     AddQueueItemRequest,
+    AutoplayDecisionRequest,
     CreateJamRequest,
     JamResponse,
     JoinJamRequest,
@@ -53,7 +55,8 @@ settings = get_settings()
 repository = JamRepository(settings.database_url)
 sync_client = create_sync_client(settings)
 playlist_client = create_playlist_client(settings)
-manager = JamManager(repository, sync_client, playlist_client)
+catalogue_client = create_catalogue_client(settings.catalogue_http_url)
+manager = JamManager(repository, sync_client, playlist_client, catalogue_client)
 auth_verifier = AuthVerifier(settings.auth_jwks_url)
 
 
@@ -270,6 +273,15 @@ async def readiness_decision(
     check_request_origin(request)
     owner_id = owner_for_request(request, jam_id, manager)
     return await manager.decide(jam_id, owner_id, body.request_id, body.decision)
+
+
+@app.post("/jams/{jam_id}/playback/autoplay", response_model=JamResponse)
+async def autoplay_decision(
+    jam_id: UUID, body: AutoplayDecisionRequest, request: Request
+) -> JamResponse:
+    check_request_origin(request)
+    owner_id = owner_for_request(request, jam_id, manager)
+    return await manager.set_autoplay(jam_id, owner_id, body.mode)
 
 
 @app.websocket("/jams/{jam_id}/ws")

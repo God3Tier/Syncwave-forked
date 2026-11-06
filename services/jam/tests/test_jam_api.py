@@ -1,9 +1,11 @@
+import time
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
+from jam_service.catalogue_client import FakeCatalogueClient
 from jam_service.guest_names import is_guest_name, pick_guest_name
-from jam_service.main import playlist_client, sync_client
+from jam_service.main import catalogue_client, playlist_client, sync_client
 from jam_service.models import JamState
 from jam_service.sync_client import SyncSnapshot
 
@@ -44,6 +46,56 @@ def test_health_and_hosting_requires_an_account(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok", "service": "jam"}
     assert client.get("/ready").status_code == 200
     assert client.post("/jams", json={}).status_code == 401
+
+
+def test_owner_gets_top_hits_prompt_near_queue_end_and_batches_continue(
+    client: TestClient,
+) -> None:
+    owner_id = str(uuid4())
+    initial_song = uuid4()
+    top_hits = [uuid4() for _ in range(6)]
+    assert isinstance(catalogue_client, FakeCatalogueClient)
+    catalogue_client.songs.extend(top_hits)
+    jam = create_jam(client, owner_id)
+    jam_id = jam["jam_id"]
+    queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(initial_song)}).json()
+    current_item = queued["queue"][0]
+    started = client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"request_id": str(uuid4()), "queue_item_id": current_item["queue_item_id"]},
+    )
+    assert started.status_code == 200
+    jam_uuid = UUID(jam_id)
+    now_ms = time.time_ns() // 1_000_000
+    sync_client._snapshots[jam_uuid] = SyncSnapshot(
+        generation=1,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(current_item["queue_item_id"]),
+        duration_ms=20_000,
+        anchor_server_time_ms=now_ms,
+    )
+
+    refreshed = client.get(f"/jams/{jam_id}")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["autoplay_decision_required"] is True
+
+    decision = client.post(f"/jams/{jam_id}/playback/autoplay", json={"mode": "TOP_HITS"})
+    assert decision.status_code == 200
+    body = decision.json()
+    assert body["autoplay_mode"] == "TOP_HITS"
+    assert [UUID(item["song_id"]) for item in body["queue"][1:]] == top_hits[:5]
+    assert len(catalogue_client.plays) == 1
+
+    last = body["queue"][-1]
+    sync_client._snapshots[jam_uuid] = SyncSnapshot(
+        generation=6,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(last["queue_item_id"]),
+        duration_ms=20_000,
+        anchor_server_time_ms=now_ms,
+    )
+    next_batch = client.get(f"/jams/{jam_id}").json()
+    assert UUID(next_batch["queue"][-1]["song_id"]) == top_hits[5]
 
 
 def test_jam_has_unique_eight_digit_code_and_guests_can_join_with_it(

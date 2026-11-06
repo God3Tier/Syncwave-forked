@@ -30,6 +30,14 @@ GrpcStack = tuple[
 ]
 
 
+class CapturingConnection:
+    def __init__(self) -> None:
+        self.frames: list[dict[str, object]] = []
+
+    async def send_json(self, frame: dict[str, object]) -> None:
+        self.frames.append(frame)
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -99,7 +107,9 @@ async def test_generated_grpc_service_runs_full_control_flow(
         metadata=AUTH_METADATA,
         timeout=2,
     )
-    assert readiness.unready_participant_ids == request.participant_ids
+    # Persisted membership is not the same as an open Sync connection. Only
+    # connected listeners participate in the readiness barrier.
+    assert readiness.unready_participant_ids == []
 
     late_participant_id = str(uuid4())
     updated = await stub.UpdateParticipants(
@@ -118,10 +128,7 @@ async def test_generated_grpc_service_runs_full_control_flow(
         metadata=AUTH_METADATA,
         timeout=2,
     )
-    assert set(readiness.unready_participant_ids) == {
-        request.owner_id,
-        late_participant_id,
-    }
+    assert readiness.unready_participant_ids == []
 
     session = manager.get(UUID(request.jam_id))
     assert session is not None
@@ -189,6 +196,67 @@ async def test_generated_grpc_service_runs_full_control_flow(
             timeout=2,
         )
     assert stale.value.code() is grpc.StatusCode.ABORTED
+
+
+@pytest.mark.anyio
+async def test_preloaded_transition_is_retimed_after_pause_and_resume(
+    grpc_stack: GrpcStack,
+) -> None:
+    manager, stub, _, _, _ = grpc_stack
+    request = start_request()
+    await stub.StartPlayback(request, metadata=AUTH_METADATA, timeout=2)
+    session = manager.get(UUID(request.jam_id))
+    assert session is not None
+    connection = CapturingConnection()
+    participant_id = UUID(request.owner_id)
+    session.participants[participant_id].connection = connection  # type: ignore[assignment]
+    session.participants[participant_id].ready = True
+    session.state = PlaybackState.PLAYING
+    session.anchor_server_time_ms = time.time_ns() // 1_000_000 - 1_000
+
+    next_queue_item_id = uuid4()
+    next_song_id = uuid4()
+    updated = await stub.UpdateQueue(
+        sync_pb2.UpdateQueueRequest(
+            request_id=str(uuid4()),
+            jam_id=request.jam_id,
+            generation=1,
+            selections=[
+                request.selection,
+                sync_pb2.PlaybackSelection(
+                    queue_item_id=str(next_queue_item_id),
+                    song_id=str(next_song_id),
+                ),
+            ],
+        ),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert updated.playback.pending_queue_item_id == str(next_queue_item_id)
+    assert connection.frames[-1]["type"] == "PRELOAD"
+
+    target = await manager.mark_pending_ready(session, participant_id)
+    assert target is not None
+    original_target = target
+
+    await stub.PausePlayback(
+        sync_pb2.PausePlaybackRequest(request_id=str(uuid4()), jam_id=request.jam_id, generation=1),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert session.pending is not None
+    assert session.pending.transition_server_time_ms is None
+
+    await stub.ResumePlayback(
+        sync_pb2.ResumePlaybackRequest(
+            request_id=str(uuid4()), jam_id=request.jam_id, generation=1
+        ),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert session.pending.transition_server_time_ms is not None
+    assert session.pending.transition_server_time_ms > original_target
+    assert connection.frames[-1]["type"] == "TRANSITION_AT"
 
 
 @pytest.mark.anyio
