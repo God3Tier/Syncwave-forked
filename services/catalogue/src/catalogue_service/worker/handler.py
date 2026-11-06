@@ -136,6 +136,7 @@ class CatalogueHandler:
             event.duration_ms,
             event.event_id,
             mood=mood,
+            uploader_id=event.uploader_id,
         )
         if mood is not None:
             await self._announce_mood_processed(event.song_id, mood, event.event_id)

@@ -129,6 +129,7 @@ def song_uploaded() -> Callable[..., dict[str, Any]]:
         artist: str = "SyncWave Artist",
         audio_reference: str | None = None,
         duration_ms: int | None = None,
+        uploader_id: str | None = None,
     ) -> dict[str, Any]:
         song_id = song_id or str(uuid.uuid4())
         event_id = str(uuid.uuid4())
@@ -141,6 +142,8 @@ def song_uploaded() -> Callable[..., dict[str, Any]]:
             payload["lyrics_reference"] = lyrics_reference or f"lyrics/{song_id}.lrc"
         if duration_ms is not None:
             payload["duration_ms"] = duration_ms
+        if uploader_id is not None:
+            payload["uploader_id"] = uploader_id
         return {
             "event_id": event_id,
             "event_type": "SongUploaded",

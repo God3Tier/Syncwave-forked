@@ -54,6 +54,7 @@ class Song(BaseModel):
     title: str
     artist: str
     mood: str | None = Field(default=None, description="optional mood label")
+    uploader_id: uuid.UUID | None = None
     duration_ms: int | None = Field(default=None, description="null until Waveform has measured it")
     audio_reference: str
     lyrics_status: StageStatus
@@ -72,6 +73,7 @@ class Song(BaseModel):
             title=record.title,
             artist=record.artist,
             mood=record.mood,
+            uploader_id=record.uploader_id,
             duration_ms=record.duration_ms,
             audio_reference=record.audio_reference,
             lyrics_status=StageStatus(record.lyrics_status),
@@ -182,6 +184,7 @@ async def list_songs(
     limit: int = 20,
     cursor: str | None = None,
     processing_status: ProcessingStatus | None = None,
+    uploader_id: uuid.UUID | None = None,
 ) -> SongList:
     if limit < 1 or limit > 100:
         raise ApiError(400, "INVALID_REQUEST", "limit must be between 1 and 100")
@@ -193,6 +196,8 @@ async def list_songs(
         stmt = select(SongRecord)
         if processing_status is not None:
             stmt = stmt.where(SongRecord.processing_status == processing_status.value)
+        if uploader_id is not None:
+            stmt = stmt.where(SongRecord.uploader_id == uploader_id)
         if cursor is not None:
             created_at, song_id = _decode_cursor(cursor)
             stmt = stmt.where(

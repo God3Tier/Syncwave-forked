@@ -73,6 +73,7 @@ class SongUploaded:
     mood: str | None
     lyrics_reference: str | None
     duration_ms: int | None
+    uploader_id: uuid.UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +181,10 @@ def parse_song_uploaded(body: bytes) -> SongUploaded:
         not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0
     ):
         raise InvalidEvent("payload.duration_ms must be a non-negative integer", **ids)
+    uploader_value = payload.get("uploader_id")
+    uploader_id = None if uploader_value is None else _uuid(uploader_value)
+    if uploader_value is not None and uploader_id is None:
+        raise InvalidEvent("payload.uploader_id must be a UUID or null", **ids)
 
     return SongUploaded(
         event_id=event_id,
@@ -190,6 +195,7 @@ def parse_song_uploaded(body: bytes) -> SongUploaded:
         mood=mood,
         lyrics_reference=lyrics_reference,
         duration_ms=duration_ms,
+        uploader_id=uploader_id,
     )
 
 

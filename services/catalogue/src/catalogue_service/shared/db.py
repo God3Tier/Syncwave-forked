@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, String, Uuid
+from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String, Uuid
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -38,6 +38,7 @@ class SongRecord(Base):
             "lyrics_status IN ('PENDING', 'PROCESSING', 'READY', 'FAILED')",
             name="songs_lyrics_status_valid",
         ),
+        Index("ix_songs_uploader_id", "uploader_id"),
         CheckConstraint(
             "waveform_status IN ('PENDING', 'PROCESSING', 'READY', 'FAILED')",
             name="songs_waveform_status_valid",
@@ -54,6 +55,7 @@ class SongRecord(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_reference: Mapped[str] = mapped_column(String(1024))
     mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    uploader_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     lyrics_reference: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     lyrics_status: Mapped[str] = mapped_column(String(16))
     waveform_status: Mapped[str] = mapped_column(String(16))
@@ -106,6 +108,7 @@ class CatalogueRepository:
         duration_ms: int | None,
         event_id: str,
         mood: str | None = None,
+        uploader_id: uuid.UUID | None = None,
     ) -> tuple[SongRecord, bool]:
         """Inserts a new song. Returns (record, created). If a song with this
         song_id already exists (duplicate upload event), returns it unchanged
@@ -124,6 +127,7 @@ class CatalogueRepository:
                 duration_ms=duration_ms,
                 audio_reference=audio_reference,
                 mood=mood,
+                uploader_id=uploader_id,
                 lyrics_reference=lyrics_reference,
                 lyrics_status=lyrics_status,
                 waveform_status=waveform_status,
