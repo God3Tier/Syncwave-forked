@@ -18,6 +18,19 @@ data "terraform_remote_state" "platform" {
   }
 }
 
+# Optional: empty when the Auth stack is not applied (RUNBOOK.md §2.3 order)
+data "terraform_remote_state" "auth" {
+  backend = "s3"
+  config = {
+    bucket = "syncwave-tfstate-${data.aws_caller_identity.current.account_id}"
+    key    = "services/auth/terraform.tfstate"
+    region = var.region
+  }
+  defaults = {
+    jwks_url = ""
+  }
+}
+
 locals {
   platform = data.terraform_remote_state.platform.outputs
   image    = "${aws_ecr_repository.this.repository_url}:${var.image_tag}"
@@ -48,6 +61,15 @@ locals {
     DB_PASSWORD   = module.db.password_secret_arn
     AMQP_PASSWORD = local.platform.rabbitmq_password_secret_arn
   }
+
+  # Session tokens are checked against the Auth Service's JWKS, fetched by name.
+  # Without the Auth stack AUTH_JWKS_URL stays unset and protected uploads fail,
+  # as they need a signed-in account.
+  auth_environment = merge(
+    data.terraform_remote_state.auth.outputs.jwks_url == "" ? {} : {
+      AUTH_JWKS_URL = data.terraform_remote_state.auth.outputs.jwks_url
+    },
+  )
 
   task_network = {
     cluster_arn        = local.platform.cluster_arn
@@ -135,7 +157,7 @@ module "api" {
   cpu                   = var.api_cpu
   memory                = var.api_memory
   desired_count         = var.api_desired_count
-  environment           = local.environment
+  environment           = merge(local.environment, local.auth_environment)
   secrets               = local.secrets
   task_role_policy_json = data.aws_iam_policy_document.api.json
   wait_for_steady_state = true
