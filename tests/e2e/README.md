@@ -18,5 +18,6 @@ python tests/e2e/test_app.py
 ```
 
 Screenshots are written to `tests/e2e/artifacts/`. On staging, `run.sh` launches
-a pinned Playwright container on the Compose network and runs the same journey
-against the gateway without installing a browser into the Docker CLI runner.
+a pinned Playwright container on the Compose network, installs the matching
+Python binding inside it, and runs the same journey against the gateway without
+installing a browser into the Docker CLI runner.
