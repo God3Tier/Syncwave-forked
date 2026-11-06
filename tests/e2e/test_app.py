@@ -3,6 +3,7 @@
 import argparse
 import re
 import time
+import uuid
 from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
@@ -34,6 +35,7 @@ def watch_errors(page: Page, errors: list[str]) -> None:
 def run(base_url: str) -> None:
     ARTIFACTS.mkdir(exist_ok=True)
     title = f"browser-e2e-{int(time.time())}"
+    seeded_title = "Daisy Bell (Bicycle Built for Two)"
     errors: list[str] = []
 
     with sync_playwright() as playwright:
@@ -50,12 +52,12 @@ def run(base_url: str) -> None:
         print("PASS discover desktop")
 
         owner.get_by_role("link", name="Search", exact=True).click()
-        owner.get_by_role("searchbox", name="Search songs or artists").fill("Integration check")
-        expect(owner.get_by_text(re.compile(r"result.*Integration check", re.I))).to_be_visible(
+        owner.get_by_role("searchbox", name="Search songs or artists").fill(seeded_title)
+        expect(owner.get_by_text(re.compile(rf"result.*{re.escape(seeded_title)}", re.I))).to_be_visible(
             timeout=20_000
         )
-        owner.locator('a[href^="/songs/"]').filter(has_text="Integration check").first.click()
-        expect(owner.get_by_role("heading", name="Integration check")).to_be_visible()
+        owner.locator('a[href^="/songs/"]').filter(has_text=seeded_title).first.click()
+        expect(owner.get_by_role("heading", name=seeded_title)).to_be_visible()
         expect(owner.get_by_text("Lyrics READY", exact=True)).to_be_visible()
         expect(owner.get_by_text("Waveform READY", exact=True)).to_be_visible()
         owner.get_by_role("button", name="Play", exact=True).click()
@@ -70,13 +72,13 @@ def run(base_url: str) -> None:
         expect(owner).to_have_url(re.compile(r"/login\?returnTo=%2Fupload"))
         owner.get_by_role("link", name="Create an account").click()
         owner.screenshot(path=ARTIFACTS / "signup-desktop.png", full_page=True)
-        username = f"browser_{int(time.time())}"
+        username = f"browser_{uuid.uuid4().hex[:12]}"
         password = "syncwave-browser-password"
         owner.get_by_label("Username").fill(username)
         owner.get_by_label("Password", exact=True).fill(password)
         owner.get_by_label("Confirm password").fill(password)
         owner.get_by_role("button", name="Create account").click()
-        expect(owner.get_by_text("Account created.")).to_be_visible()
+        expect(owner.get_by_role("status")).to_contain_text("Account created.")
         owner.get_by_label("Password", exact=True).fill(password)
         owner.get_by_role("button", name="Log in").click()
         expect(owner).to_have_url(f"{base_url}/upload")
