@@ -212,12 +212,12 @@ song_request_orchestrator:
 jam:
   extends: .service-trigger
   variables:
-    CONTRACT_PATHS: contracts/websocket contracts/grpc
+    CONTRACT_PATHS: contracts/websocket contracts/grpc contracts/api/catalogue.openapi.yaml
   trigger:
     include: services/jam/.gitlab-ci.yml
   rules:
     - exists: [services/jam/.gitlab-ci.yml]
-      changes: [services/jam/**/*, contracts/websocket/**/*, contracts/grpc/**/*, ci/**/*]
+      changes: [services/jam/**/*, contracts/websocket/**/*, contracts/grpc/**/*, contracts/api/catalogue.openapi.yaml, tests/integration/backend-flow.py, ci/**/*]
 
 sync:
   extends: .service-trigger
@@ -237,7 +237,7 @@ frontend:
     include: frontend/.gitlab-ci.yml
   rules:
     - exists: [frontend/.gitlab-ci.yml]
-      changes: [frontend/**/*, contracts/websocket/**/*, ci/**/*]
+      changes: [frontend/**/*, contracts/websocket/**/*, tests/e2e/**/*, ci/**/*]
 
 # ── integration: staging = full stack in CI ─────────────────────────────────
 # Starts docker-compose.yml with the images tagged :staging (no rebuild),
