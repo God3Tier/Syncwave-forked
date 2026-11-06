@@ -109,7 +109,12 @@ class Api:
         )
 
 
-def audio_fixture(frequency_hz: float = 440, duration_ms: int = DURATION_MS) -> bytes:
+def audio_fixture(
+    frequency_hz: float = 440,
+    duration_ms: int = DURATION_MS,
+    *,
+    nonce: str | None = None,
+) -> bytes:
     rate = 22050
     pcm = b"".join(
         struct.pack("<h", round(8000 * math.sin(2 * math.pi * frequency_hz * sample / rate)))
@@ -121,7 +126,14 @@ def audio_fixture(frequency_hz: float = 440, duration_ms: int = DURATION_MS) -> 
         audio.setsampwidth(2)
         audio.setframerate(rate)
         audio.writeframes(pcm)
-    return buffer.getvalue()
+    result = bytearray(buffer.getvalue())
+    if nonce is not None:
+        # Keep the WAV valid and audibly equivalent while making exact bytes
+        # unique for integration scenarios that intentionally retain songs.
+        data_offset = result.index(b"data") + 8
+        marker = hashlib.sha256(nonce.encode()).digest()
+        result[data_offset : data_offset + len(marker)] = marker
+    return bytes(result)
 
 
 def multipart(
