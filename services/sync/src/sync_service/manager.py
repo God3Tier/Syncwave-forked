@@ -137,6 +137,19 @@ class SessionManager:
     def has_request(self, request_id: UUID) -> bool:
         return request_id in self._request_results
 
+    def request_result(self, request_id: UUID) -> SyncSession | None:
+        return self._request_results.get(request_id)
+
+    async def remember_request(self, session: SyncSession, request_id: UUID) -> None:
+        """Persist an idempotency key for queue-window updates."""
+        async with self._lock:
+            previous = self._request_results.get(request_id)
+            if previous is not None:
+                self._validate_request_jam(previous, session)
+                return
+            self._request_results[request_id] = session
+            await self._repository.save_start(request_id, self._to_persisted(session))
+
     async def update_participants(
         self,
         session: SyncSession,
@@ -349,7 +362,12 @@ class SessionManager:
                 participant.pending_ready = False
             await self._repository.save_session(self._to_persisted(session))
 
-    async def mark_pending_ready(self, session: SyncSession, participant_id: UUID) -> int | None:
+    async def mark_pending_ready(
+        self,
+        session: SyncSession,
+        participant_id: UUID,
+        target_server_time_ms: int | None = None,
+    ) -> int | None:
         """Mark the next generation ready and return its transition target when committed."""
         async with self._lock:
             pending = session.pending
@@ -357,7 +375,26 @@ class SessionManager:
                 return None
             participant = session.participants[participant_id]
             participant.pending_ready = True
+            # CONTINUE suppression lasts only until this listener recovers.
+            session.ignored_participant_ids.discard(participant_id)
             target = self._refresh_pending_transition(session)
+            if (
+                target is None
+                and target_server_time_ms is not None
+                and session.state is PlaybackState.PAUSED
+                and session.anchor_position_ms >= session.duration_ms
+            ):
+                connected = [
+                    value
+                    for connected_id, value in session.participants.items()
+                    if value.connection is not None
+                    and connected_id not in session.ignored_participant_ids
+                ]
+                if connected and all(value.pending_ready for value in connected):
+                    # The previous source has ended while the owner waited.
+                    # Start the prepared track from zero on a new future edge.
+                    pending.transition_server_time_ms = target_server_time_ms
+                    target = target_server_time_ms
             await self._repository.save_session(self._to_persisted(session))
             return target
 
@@ -444,7 +481,11 @@ class SessionManager:
                 )
                 >= session.duration_ms
             ):
-                session.state = PlaybackState.ENDED
+                # An uncommitted next track means Wait/no decision holds at
+                # the boundary. A later READY schedules that track from zero.
+                session.state = (
+                    PlaybackState.PAUSED if session.pending is not None else PlaybackState.ENDED
+                )
                 session.anchor_position_ms = session.duration_ms
                 session.anchor_server_time_ms = measured_server_time_ms
                 await self._repository.save_session(self._to_persisted(session))

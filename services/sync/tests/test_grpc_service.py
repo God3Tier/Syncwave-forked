@@ -216,9 +216,10 @@ async def test_preloaded_transition_is_retimed_after_pause_and_resume(
 
     next_queue_item_id = uuid4()
     next_song_id = uuid4()
+    queue_request_id = str(uuid4())
     updated = await stub.UpdateQueue(
         sync_pb2.UpdateQueueRequest(
-            request_id=str(uuid4()),
+            request_id=queue_request_id,
             jam_id=request.jam_id,
             generation=1,
             selections=[
@@ -234,6 +235,25 @@ async def test_preloaded_transition_is_retimed_after_pause_and_resume(
     )
     assert updated.playback.pending_queue_item_id == str(next_queue_item_id)
     assert connection.frames[-1]["type"] == "PRELOAD"
+    frame_count = len(connection.frames)
+    repeated = await stub.UpdateQueue(
+        sync_pb2.UpdateQueueRequest(
+            request_id=queue_request_id,
+            jam_id=request.jam_id,
+            generation=1,
+            selections=[
+                request.selection,
+                sync_pb2.PlaybackSelection(
+                    queue_item_id=str(next_queue_item_id),
+                    song_id=str(next_song_id),
+                ),
+            ],
+        ),
+        metadata=AUTH_METADATA,
+        timeout=2,
+    )
+    assert repeated.playback.pending_queue_item_id == str(next_queue_item_id)
+    assert len(connection.frames) == frame_count
 
     target = await manager.mark_pending_ready(session, participant_id)
     assert target is not None

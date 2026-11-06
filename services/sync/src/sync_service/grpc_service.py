@@ -428,6 +428,15 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
     ) -> sync_pb2.UpdateQueueResponse:
         await self._authorize(context)
         session = await self._session(request.jam_id, context)
+        request_id = await self._uuid(request.request_id, "request_id", context)
+        previous = self._manager.request_result(request_id)
+        if previous is not None:
+            if previous is not session:
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "request_id belongs to another Jam",
+                )
+            return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
         if request.generation != session.generation:
             await context.abort(grpc.StatusCode.ABORTED, "stale generation")
         selections: list[tuple[UUID, UUID]] = []
@@ -444,9 +453,11 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
         )
         if current_index < 0 or current_index + 1 >= len(selections):
             await self._manager.clear_pending(session)
+            await self._manager.remember_request(session, request_id)
             return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
         queue_item_id, song_id = selections[current_index + 1]
         if session.pending is not None and session.pending.queue_item_id == queue_item_id:
+            await self._manager.remember_request(session, request_id)
             return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
         stream = await self._resolve_dependencies(song_id, context)
         prepared = await self._manager.prepare_next(
@@ -462,6 +473,7 @@ class SyncControlService(sync_pb2_grpc.SyncControlServiceServicer):
                 session,
                 server_frame(session, "PRELOAD", preload_payload(session)),
             )
+        await self._manager.remember_request(session, request_id)
         return sync_pb2.UpdateQueueResponse(playback=playback_snapshot(session))
 
     async def SubmitReadinessDecision(

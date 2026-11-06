@@ -758,7 +758,11 @@ async def websocket_endpoint(
                         )
                         continue
                     if pending_generation == frame.payload.generation:
-                        target_ms = await manager.mark_pending_ready(session, participant_id)
+                        target_ms = await manager.mark_pending_ready(
+                            session,
+                            participant_id,
+                            epoch_ms() + settings.start_lead_time_ms,
+                        )
                         await manager.broadcast(
                             session,
                             server_frame(
