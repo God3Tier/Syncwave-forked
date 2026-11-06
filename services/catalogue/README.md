@@ -23,6 +23,7 @@ Defined in [`contracts/README.md`](../../contracts/README.md):
 
 ```text
 song_id            UUID
+uploader_id        UUID (optional for legacy songs)
 title              string
 artist             string
 mood               string (optional)
@@ -74,6 +75,7 @@ Table `songs` in this service's own `catalogue` database (migrations in
 | Column            | Meaning                                                    |
 |-------------------|------------------------------------------------------------|
 | `song_id`         | primary key, UUID v4                                       |
+| `uploader_id`     | canonical uploader account; null for legacy songs          |
 | `title`           | song title                                                 |
 | `artist`          | artist name                                                |
 | `mood`            | optional mood label, derived from metadata or supplied at upload |
@@ -87,6 +89,10 @@ Table `songs` in this service's own `catalogue` database (migrations in
 
 The audio bytes and `.lrc` lyrics file stay in S3 (Upload Service put them
 there); this service only stores the S3 key and the processing statuses.
+
+`GET /songs` remains the global catalogue. Supplying `uploader_id=<account-uuid>`
+filters it for the signed-in browser's **My uploads** view without changing
+the unfiltered Discover experience.
 
 ## Configuration
 

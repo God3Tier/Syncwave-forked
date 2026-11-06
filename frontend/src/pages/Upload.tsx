@@ -1,42 +1,15 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { getSong } from '../api/catalogue';
+import { getSong, listSongs } from '../api/catalogue';
 import { ApiError } from '../api/http';
 import { getUpload, MOODS, type Mood, uploadSong } from '../api/upload';
 import type { Song, StageStatus, UploadReceipt } from '../api/types';
+import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/Layout';
 import { Button, Card, Icon, Notice, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
-import { relativeTime } from '../format';
 import { useInterval } from '../hooks/useAsync';
 import { rememberSong } from '../hooks/useSongs';
-
-const RECENT_KEY = 'syncwave.recent_uploads';
-
-interface RecentUpload {
-  song_id: string;
-  title: string;
-  artist: string;
-  at: string;
-}
-
-function loadRecent(): RecentUpload[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as RecentUpload[];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecent(item: RecentUpload): RecentUpload[] {
-  const next = [item, ...loadRecent().filter((r) => r.song_id !== item.song_id)].slice(0, 6);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-  } catch {
-    // ignore
-  }
-  return next;
-}
 
 function FileDrop({ label, hint, accept, file, onFile, required }: { label: string; hint: string; accept: string; file: File | null; onFile: (file: File | null) => void; required?: boolean }) {
   const [over, setOver] = useState(false);
@@ -68,6 +41,7 @@ const inputClass = 'min-h-11 w-full rounded-xl bg-surface-container px-3 py-2.5 
 
 /** Upload & Process (Scenario 2): the form plus a live view of the choreography. */
 export function Upload() {
+  const { account } = useAuth();
   const [title, setTitle] = useState('');
   const [titleEdited, setTitleEdited] = useState(false);
   const [artist, setArtist] = useState('');
@@ -78,8 +52,38 @@ export function Upload() {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<unknown>();
   const [receipt, setReceipt] = useState<UploadReceipt | null>(null);
-  const [recent, setRecent] = useState(loadRecent);
-  const [trackedId, setTrackedId] = useState<string | null>(() => loadRecent()[0]?.song_id ?? null);
+  const [uploads, setUploads] = useState<Song[]>([]);
+  const [trackedId, setTrackedId] = useState<string | null>(null);
+  const [catalogueSongId, setCatalogueSongId] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.removeItem('syncwave.recent_uploads');
+  }, []);
+
+  const refreshUploads = useCallback((signal?: AbortSignal): Promise<void> => {
+    if (!account) return Promise.resolve();
+    return listSongs({ limit: 100, uploader_id: account.id }, signal).then((page) => {
+      setUploads(page.items);
+      setTrackedId((current) => (
+        current && page.items.some((item) => item.song_id === current)
+          ? current
+          : page.items[0]?.song_id ?? null
+      ));
+    });
+  }, [account]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshUploads(controller.signal).catch((cause: unknown) => {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) setError(cause);
+    });
+    return () => controller.abort();
+  }, [refreshUploads]);
+
+  const handleCatalogueSong = useCallback((songId: string) => {
+    setCatalogueSongId(songId);
+    void refreshUploads().catch(setError);
+  }, [refreshUploads]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -93,7 +97,7 @@ export function Upload() {
       );
       setReceipt(result);
       setTrackedId(result.song_id);
-      setRecent(saveRecent({ song_id: result.song_id, title: result.title, artist: result.artist, at: result.created_at }));
+      setCatalogueSongId(null);
       setTitle('');
       setTitleEdited(false);
       setArtist('');
@@ -166,22 +170,28 @@ export function Upload() {
                 {uploadUnavailable ? 'The Upload service is not reachable right now, so songs cannot be uploaded. Try again shortly.' : errorMessage(error)}
               </Notice>
             )}
-            {receipt && <Notice>Uploaded “{receipt.title}”. Processing has started.</Notice>}
+            {receipt?.duplicate ? (
+              <Notice>
+                {catalogueSongId === receipt.song_id ? (
+                  <>Already in the catalogue. <Link to={`/songs/${receipt.song_id}`} className="font-semibold text-primary">Open song</Link></>
+                ) : 'That exact audio is already uploaded. Showing its existing progress.'}
+              </Notice>
+            ) : receipt ? <Notice>Uploaded “{receipt.title}”. Processing has started.</Notice> : null}
           </form>
         </Card>
 
         <div className="space-y-6">
-          {trackedId ? <ProcessingCard key={trackedId} songId={trackedId} /> : (
+          {trackedId ? <ProcessingCard key={trackedId} songId={trackedId} onCatalogueSong={handleCatalogueSong} /> : (
             <Card>
               <h2 className="text-lg font-extrabold">Processing</h2>
               <p className="mt-2 text-sm text-on-surface-variant">After an upload, its lyrics and waveform are processed here in parallel.</p>
             </Card>
           )}
-          {recent.length > 0 && (
-            <Card>
-              <h2 className="mb-3 text-base font-extrabold">Recent uploads</h2>
+          <Card>
+            <h2 className="mb-3 text-base font-extrabold">My uploads</h2>
+            {uploads.length > 0 ? (
               <ul className="space-y-1">
-                {recent.map((item) => (
+                {uploads.map((item) => (
                   <li key={item.song_id}>
                     <button
                       type="button"
@@ -191,13 +201,13 @@ export function Upload() {
                       <span className="truncate">
                         {item.title} <span className="text-on-surface-variant">· {item.artist}</span>
                       </span>
-                      <span className="font-mono text-[11px] text-outline">{relativeTime(item.at)}</span>
+                      <StatusChip status={item.processing_status} />
                     </button>
                   </li>
                 ))}
               </ul>
-            </Card>
-          )}
+            ) : <p className="text-sm text-on-surface-variant">Songs uploaded by this account will appear here.</p>}
+          </Card>
         </div>
       </div>
     </Page>
@@ -232,9 +242,11 @@ function TimelineStep({ state, title, detail, children }: { state: Step; title: 
  * Polls Upload and Catalogue to show SongUploaded → Lyrics ∥ Waveform → Catalogue.
  * Rendered with key={songId}, so switching songs starts from a fresh state.
  */
-function ProcessingCard({ songId }: { songId: string }) {
+function ProcessingCard({ songId, onCatalogueSong }: { songId: string; onCatalogueSong: (songId: string) => void }) {
   const [upload, setUpload] = useState<UploadReceipt | null>(null);
   const [song, setSong] = useState<Song | null>(null);
+  const catalogueReported = useRef(false);
+  const settledReported = useRef(false);
   const settled = song && song.processing_status !== 'PROCESSING';
 
   const poll = useCallback(() => {
@@ -244,9 +256,16 @@ function ProcessingCard({ songId }: { songId: string }) {
       .then((value) => {
         rememberSong(value);
         setSong(value);
+        const firstCatalogueResult = !catalogueReported.current;
+        const firstSettledResult = value.processing_status !== 'PROCESSING' && !settledReported.current;
+        if (firstCatalogueResult || firstSettledResult) {
+          catalogueReported.current = true;
+          if (firstSettledResult) settledReported.current = true;
+          onCatalogueSong(value.song_id);
+        }
       })
       .catch(() => undefined);
-  }, [songId]);
+  }, [onCatalogueSong, songId]);
   useEffect(poll, [poll]);
   useInterval(poll, 2000, !settled);
 

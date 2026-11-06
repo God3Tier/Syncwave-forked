@@ -114,7 +114,7 @@ components:
   schemas:
     Song:
       type: object
-      required: [song_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, created_at, updated_at]
+      required: [song_id, uploader_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, created_at, updated_at]
       properties:
         song_id:
           type: string

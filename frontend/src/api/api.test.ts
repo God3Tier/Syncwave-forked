@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { listSongs } from './catalogue';
 import { ApiError, buildUrl, parseError } from './http';
 import { activeLineIndex, bandFrameAt, decodeBands } from './media';
 import { matchesQuery, searchSongs } from './search';
@@ -38,6 +39,19 @@ describe('buildUrl', () => {
   it('drops empty query values', () => {
     expect(buildUrl('/api/x', { a: 1, b: undefined, c: null, d: '', e: 'y z' })).toBe('/api/x?a=1&e=y+z');
     expect(buildUrl('/api/x')).toBe('/api/x');
+  });
+});
+
+describe('listSongs', () => {
+  it('keeps Discover global unless an uploader filter is requested', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(200, { items: [], next_cursor: null })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listSongs({ limit: 100 });
+    await listSongs({ limit: 100, uploader_id: 'account-1' });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/catalogue/songs?limit=100');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('/api/catalogue/songs?limit=100&uploader_id=account-1');
   });
 });
 
