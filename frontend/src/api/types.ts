@@ -177,6 +177,8 @@ export interface Jam {
   member_id: string | null;
   autoplay_mode: 'TOP_HITS' | 'LOOP' | null;
   autoplay_decision_required: boolean;
+  autoplay_prompt_deadline_ms: number | null;
+  autoplay_batch_number: number;
 }
 
 export interface Readiness {

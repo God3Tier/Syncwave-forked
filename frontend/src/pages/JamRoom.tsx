@@ -35,6 +35,13 @@ import { formatDuration, formatMs, initials, parseTimestamp, shortId } from '../
 import { useAsync, useInterval } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { useSongs } from '../hooks/useSongs';
+import { autoplaySecondsRemaining } from '../jam/autoplay';
+import {
+  connectionDotClasses,
+  connectionStatusClasses,
+  readinessDotClasses,
+  readinessStatusClasses,
+} from '../jam/participantStatus';
 import { usePlayer, usePosition } from '../player/context';
 import { SyncSession, type LocalAudioState, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
@@ -378,7 +385,10 @@ export function JamRoom() {
         />
       )}
       {owner && jam.autoplay_decision_required && (
-        <AutoplayModal onDecide={(mode) => void run(() => decideAutoplay(jamId, mode))} />
+        <AutoplayModal
+          deadlineMs={jam.autoplay_prompt_deadline_ms}
+          onDecide={(mode) => void run(() => decideAutoplay(jamId, mode))}
+        />
       )}
     </div>
   );
@@ -581,12 +591,12 @@ function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam
                 {id === jam.owner_id && <span className="rounded bg-primary/20 px-1 font-mono text-[9px] uppercase text-primary">owner</span>}
               </div>
               <div className="flex items-center gap-2 font-mono text-[10px]">
-                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${connected ? 'bg-primary/15 text-primary' : 'text-outline'}`} title="Connected to live playback" aria-label={connected ? 'Connected to live playback' : 'Not connected to live playback'}>
-                  <span className={`h-2 w-2 rounded-full ${connected ? 'bg-primary' : 'bg-outline-variant'}`} />
+                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${connectionStatusClasses(connected)}`} title="Connected to live playback" aria-label={connected ? 'Connected to live playback' : 'Not connected to live playback'}>
+                  <span className={`h-2 w-2 rounded-full ${connectionDotClasses(connected)}`} />
                   <span>C</span>
                 </span>
-                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${ready ? 'bg-secondary/15 text-secondary shadow-[0_0_8px_rgb(121_227_195/0.2)]' : 'text-outline'}`} title="Audio running, buffered and ready" aria-label={ready ? 'Audio running, buffered and ready' : 'Audio is not ready'}>
-                  <span className={`h-2 w-2 rounded-full ${ready ? 'bg-secondary shadow-[0_0_6px_rgb(121_227_195/0.65)]' : 'bg-outline-variant'}`} />
+                <span className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${readinessStatusClasses(ready)}`} title="Audio running, buffered and ready" aria-label={ready ? 'Audio running, buffered and ready' : 'Audio is not ready'}>
+                  <span className={`h-2 w-2 rounded-full ${readinessDotClasses(ready)}`} />
                   <span>R</span>
                 </span>
                 {owner && id !== memberId && jam.lifecycle_state === 'ACTIVE' && (
@@ -657,10 +667,12 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
   );
 }
 
-function AutoplayModal({ onDecide }: { onDecide: (mode: 'TOP_HITS' | 'LOOP') => void }) {
+function AutoplayModal({ deadlineMs, onDecide }: { deadlineMs: number | null; onDecide: (mode: 'TOP_HITS' | 'LOOP') => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const onDecideRef = useRef(onDecide);
-  const [seconds, setSeconds] = useState(10);
+  const [seconds, setSeconds] = useState(() =>
+    deadlineMs === null ? 10 : autoplaySecondsRemaining(deadlineMs),
+  );
   const decided = useRef(false);
   const decide = (mode: 'TOP_HITS' | 'LOOP') => {
     if (decided.current) return;
@@ -673,18 +685,23 @@ function AutoplayModal({ onDecide }: { onDecide: (mode: 'TOP_HITS' | 'LOOP') => 
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
-    const tick = window.setInterval(() => setSeconds((value) => Math.max(0, value - 1)), 1000);
+    const effectiveDeadline = deadlineMs ?? Date.now() + 10_000;
+    const tick = window.setInterval(
+      () => setSeconds(autoplaySecondsRemaining(effectiveDeadline)),
+      250,
+    );
+    const delayMs = Math.max(0, effectiveDeadline - Date.now());
     const fallback = window.setTimeout(() => {
       if (decided.current) return;
       decided.current = true;
       onDecideRef.current('TOP_HITS');
-    }, 10_000);
+    }, delayMs);
     return () => {
       window.clearInterval(tick);
       window.clearTimeout(fallback);
       element?.close();
     };
-  }, []);
+  }, [deadlineMs]);
   return (
     <dialog ref={dialog} aria-labelledby="autoplay-title" onCancel={(event) => event.preventDefault()} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-surface-container p-0 text-on-surface shadow-[0_24px_80px_rgb(0_0_0/0.55)] backdrop:bg-black/75">
       <div className="p-6 ring-1 ring-inset ring-outline-variant/55">
