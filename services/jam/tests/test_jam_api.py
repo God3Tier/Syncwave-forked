@@ -259,6 +259,47 @@ def test_account_membership_is_scoped_to_one_room(client: TestClient) -> None:
     assert response.status_code == 403
 
 
+def test_late_join_uses_the_current_sync_generation(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).json()
+    started = client.post(f"/jams/{jam_id}/playback/start", json={"request_id": str(uuid4())})
+    assert started.status_code == 200
+
+    current_item_id = queued["queue"][0]["queue_item_id"]
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(
+        generation=2,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(current_item_id),
+    )
+
+    late, _ = join_guest(client, jam_id)
+
+    assert late["sync_generation"] == 2
+    assert late["state"] == "PLAYING"
+    assert late["current_queue_item_id"] == current_item_id
+
+
+def test_member_can_leave_after_sync_generation_advances(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).json()
+    started = client.post(f"/jams/{jam_id}/playback/start", json={"request_id": str(uuid4())})
+    assert started.status_code == 200
+    joined, guest_headers = join_guest(client, jam_id)
+
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(
+        generation=2,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(queued["queue"][0]["queue_item_id"]),
+    )
+    response = client.delete(f"/jams/{jam_id}/members/{joined['member_id']}", headers=guest_headers)
+
+    assert response.status_code == 204
+    as_account(client, owner_id)
+    assert client.get(f"/jams/{jam_id}").json()["participant_ids"] == [owner_id]
+
+
 def test_owner_queue_controls_and_websocket(client: TestClient) -> None:
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]

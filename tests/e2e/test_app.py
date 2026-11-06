@@ -4,7 +4,6 @@ import argparse
 import math
 import re
 import struct
-import time
 import uuid
 import wave
 from pathlib import Path
@@ -16,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = Path(__file__).with_name("artifacts")
 
 
-def short_audio_fixture() -> Path:
+def short_audio_fixture(nonce: int) -> Path:
     """Create a deterministic track short enough to exercise instant autoplay."""
     path = ARTIFACTS / "seamless-autoplay.wav"
     sample_rate = 44_100
@@ -24,15 +23,14 @@ def short_audio_fixture() -> Path:
         audio.setnchannels(1)
         audio.setsampwidth(2)
         audio.setframerate(sample_rate)
-        audio.writeframes(
-            b"".join(
-                struct.pack(
-                    "<h",
-                    round(8_000 * math.sin(2 * math.pi * 440 * index / sample_rate)),
-                )
-                for index in range(sample_rate * 3)
+        frames = b"".join(
+            struct.pack(
+                "<h",
+                round(8_000 * math.sin(2 * math.pi * 440 * index / sample_rate)),
             )
+            for index in range(sample_rate * 3)
         )
+        audio.writeframes(frames + struct.pack("<h", nonce))
     return path
 
 
@@ -63,9 +61,9 @@ def watch_errors(page: Page, errors: list[str]) -> None:
 
 def run(base_url: str) -> None:
     ARTIFACTS.mkdir(exist_ok=True)
-    audio_fixture = short_audio_fixture()
-    title = f"browser-e2e-{int(time.time())}"
-    seeded_title = "Daisy Bell (Bicycle Built for Two)"
+    run_token = uuid.uuid4().hex
+    audio_fixture = short_audio_fixture(int(run_token[:4], 16) - 32_768)
+    title = f"browser-e2e-{run_token[:12]}"
     errors: list[str] = []
 
     with sync_playwright() as playwright:
@@ -82,23 +80,6 @@ def run(base_url: str) -> None:
         ).to_be_visible()
         owner.screenshot(path=ARTIFACTS / "discover-desktop.png", full_page=True)
         print("PASS discover desktop")
-
-        owner.get_by_role("link", name="Search", exact=True).click()
-        owner.get_by_role("searchbox", name="Search songs or artists").fill(
-            seeded_title
-        )
-        expect(
-            owner.get_by_text(re.compile(rf"result.*{re.escape(seeded_title)}", re.I))
-        ).to_be_visible(timeout=20_000)
-        owner.locator('a[href^="/songs/"]').filter(has_text=seeded_title).first.click()
-        expect(owner.get_by_role("heading", name=seeded_title)).to_be_visible()
-        expect(owner.get_by_text("Lyrics READY", exact=True)).to_be_visible()
-        expect(owner.get_by_text("Waveform READY", exact=True)).to_be_visible()
-        owner.get_by_role("button", name="Play", exact=True).click()
-        expect(
-            owner.get_by_role("button", name="Pause", exact=True).first
-        ).to_be_visible()
-        print("PASS discover, search and listen")
 
         owner.goto(f"{base_url}/jam", wait_until="networkidle")
         expect(owner.get_by_role("heading", name="Join a Jam")).to_be_visible()
@@ -137,6 +118,20 @@ def run(base_url: str) -> None:
         expect(owner.get_by_text("Song READY", exact=True)).to_be_visible()
         print("PASS upload and process")
 
+        owner.get_by_role("link", name="Search", exact=True).click()
+        owner.get_by_role("searchbox", name="Search songs or artists").fill(title)
+        song_link = owner.locator('a[href^="/songs/"]').filter(has_text=title).first
+        expect(song_link).to_be_visible(timeout=20_000)
+        song_link.click()
+        expect(owner.get_by_role("heading", name=title)).to_be_visible()
+        expect(owner.get_by_text("Lyrics READY", exact=True)).to_be_visible()
+        expect(owner.get_by_text("Waveform READY", exact=True)).to_be_visible()
+        owner.get_by_role("button", name="Play", exact=True).click()
+        expect(
+            owner.get_by_role("button", name="Pause", exact=True).first
+        ).to_be_visible()
+        print("PASS discover, search and listen")
+
         owner.goto(f"{base_url}/jam", wait_until="networkidle")
         owner.get_by_role("button", name="Create Jam").click()
         owner.wait_for_url(re.compile(r"/jam/[0-9a-f-]{36}$"))
@@ -171,8 +166,8 @@ def run(base_url: str) -> None:
         expect(owner.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(
             timeout=20_000
         )
-        owner.get_by_role("button", name="Join Jam (Enable Audio)").click()
-        member.get_by_role("button", name="Join Jam (Enable Audio)").click()
+        owner.get_by_role("button", name="Join playback").click()
+        member.get_by_role("button", name="Join playback").click()
         owner.get_by_role("button", name="Start", exact=True).click()
         expect(owner.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
         expect(member.get_by_text("PLAYING", exact=True)).to_be_visible(timeout=30_000)
@@ -181,7 +176,9 @@ def run(base_url: str) -> None:
         expect(owner.get_by_text(re.compile(r"Shared queue\s*\(6\)"))).to_be_visible(
             timeout=20_000
         )
-        expect(owner.locator("h2")).not_to_have_text(title, timeout=30_000)
+        expect(owner.get_by_role("heading", name=title, exact=True)).to_have_count(
+            0, timeout=30_000
+        )
         assert member.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth"
         )
@@ -197,7 +194,7 @@ def run(base_url: str) -> None:
         member.get_by_role("button", name="Join", exact=True).click()
         expect(member).to_have_url(jam_url)
         expect(member.get_by_text("MEMBER", exact=True)).to_be_visible()
-        member.get_by_role("button", name="Join Jam (Enable Audio)").click()
+        member.get_by_role("button", name="Join playback").click()
         member.get_by_role("tab", name="People").click()
         expect(member.get_by_text(re.compile(r"Participants \(2\)"))).to_be_visible(
             timeout=20_000
