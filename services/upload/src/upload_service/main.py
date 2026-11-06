@@ -31,6 +31,9 @@ class Receipt(BaseModel):
     title: str
     artist: str
     mood: str | None
+    uploader_id: uuid.UUID | None
+    content_sha256: str | None
+    duplicate: bool = False
     duration_ms: int | None
     audio_reference: str
     lyrics_reference: str | None
@@ -41,8 +44,9 @@ class Receipt(BaseModel):
     published_at: datetime | None
 
     @classmethod
-    def from_record(cls, record: UploadRecord) -> Receipt:
-        values = {name: getattr(record, name) for name in cls.model_fields}
+    def from_record(cls, record: UploadRecord, *, duplicate: bool = False) -> Receipt:
+        values = {name: getattr(record, name) for name in cls.model_fields if name != "duplicate"}
+        values["duplicate"] = duplicate
         for field in ("created_at", "updated_at", "published_at"):
             if values[field] is not None and values[field].tzinfo is None:
                 values[field] = values[field].replace(tzinfo=UTC)
@@ -133,12 +137,22 @@ async def create_upload(
     mood: Annotated[str | None, Form(max_length=64)] = None,
 ) -> Receipt:
     """Store media and queue its event. A 202 response does not mean processing is complete."""
-    require_account(request)
+    account = require_account(request)
     service: UploadService = request.app.state.service
-    record = await service.create(title, artist, duration_ms, audio, lyrics, mood)
+    record, duplicate = await service.create(
+        title,
+        artist,
+        duration_ms,
+        audio,
+        lyrics,
+        uploader_id=account.user_id,
+        mood=mood,
+    )
+    if duplicate:
+        response.status_code = 200
     # Relative to the public gateway, without reflecting untrusted headers.
     response.headers["Location"] = f"/api/upload/uploads/{record.song_id}"
-    return Receipt.from_record(record)
+    return Receipt.from_record(record, duplicate=duplicate)
 
 
 @app.get("/uploads/{song_id}", response_model=Receipt)

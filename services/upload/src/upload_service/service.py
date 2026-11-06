@@ -1,13 +1,15 @@
 """Validate files, store media, then commit the event for asynchronous delivery."""
 
 import asyncio
+import hashlib
 import logging
 import uuid
 from pathlib import PurePath
 from typing import Any, BinaryIO, Protocol
 
 from fastapi import UploadFile
-from sqlalchemy import update
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from upload_service.config import Settings
@@ -67,6 +69,16 @@ def validate_file(file: UploadFile, limit: int, *, lyrics: bool = False) -> str:
     return extension
 
 
+def sha256_file(file: BinaryIO, chunk_size: int = 1024 * 1024) -> str:
+    """Hash a potentially spooled upload without loading it all into memory."""
+    digest = hashlib.sha256()
+    file.seek(0)
+    while chunk := file.read(chunk_size):
+        digest.update(chunk)
+    file.seek(0)
+    return digest.hexdigest()
+
+
 def build_event(record: UploadRecord) -> dict[str, Any]:
     event_id = str(record.event_id)
     payload: dict[str, Any] = {
@@ -74,6 +86,7 @@ def build_event(record: UploadRecord) -> dict[str, Any]:
         "artist": record.artist,
         "audio_reference": record.audio_reference,
         "lyrics_reference": record.lyrics_reference,
+        "uploader_id": str(record.uploader_id) if record.uploader_id is not None else None,
     }
     if record.duration_ms is not None:
         payload["duration_ms"] = record.duration_ms
@@ -105,8 +118,9 @@ class UploadService:
         duration_ms: int | None,
         audio: UploadFile,
         lyrics: UploadFile | None,
+        uploader_id: uuid.UUID,
         mood: str | None = None,
-    ) -> UploadRecord:
+    ) -> tuple[UploadRecord, bool]:
         title, artist = title.strip(), artist.strip()
         if (
             not title
@@ -125,6 +139,7 @@ class UploadService:
                 400, "INVALID_REQUEST", f"Mood needs at most {MAX_MOOD_LENGTH} characters"
             )
         extension = await asyncio.to_thread(validate_file, audio, self.settings.audio_max_bytes)
+        content_sha256 = await asyncio.to_thread(sha256_file, audio.file)
         if lyrics is not None:
             await asyncio.to_thread(
                 validate_file, lyrics, self.settings.lyrics_max_bytes, lyrics=True
@@ -136,13 +151,29 @@ class UploadService:
             title=title,
             artist=artist,
             mood=mood,
+            uploader_id=uploader_id,
+            content_sha256=content_sha256,
             duration_ms=duration_ms,
             audio_reference=f"audio/{song_id}{extension}",
             lyrics_reference=f"lyrics/{song_id}.lrc" if lyrics else None,
             status=Status.UPLOADING,
         )
-        async with self.sessions.begin() as session:
-            session.add(record)
+        try:
+            async with self.sessions.begin() as session:
+                session.add(record)
+        except IntegrityError:
+            async with self.sessions() as session:
+                canonical = await session.scalar(
+                    select(UploadRecord).where(UploadRecord.content_sha256 == content_sha256)
+                )
+            if canonical is None:
+                raise
+            logger.info(
+                "upload_duplicate canonical_song_id=%s uploader_id=%s",
+                canonical.song_id,
+                uploader_id,
+            )
+            return canonical, True
 
         attempted_keys = []
         try:
@@ -171,6 +202,7 @@ class UploadService:
                     .where(UploadRecord.song_id == song_id)
                     .values(
                         status=Status.FAILED,
+                        content_sha256=None,
                         last_error_code="STORAGE_UNAVAILABLE",
                         updated_at=now(),
                     )
@@ -190,4 +222,6 @@ class UploadService:
             )
         logger.info("upload_accepted song_id=%s event_id=%s", song_id, record.event_id)
         async with self.sessions() as session:
-            return await session.get(UploadRecord, song_id)
+            accepted = await session.get(UploadRecord, song_id)
+        assert accepted is not None
+        return accepted, False

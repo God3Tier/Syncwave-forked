@@ -26,7 +26,9 @@ def test_produced_events_follow_shared_schema(client: TestClient, wav: bytes) ->
     )
     publisher = FakePublisher()
     for with_lyrics in (False, True):
-        files = {"audio": ("song.wav", wav)}
+        # Each case is a distinct valid WAV byte stream; exact duplicates are
+        # intentionally collapsed by the Upload service.
+        files = {"audio": ("song.wav", wav + (b"\x00" if with_lyrics else b""))}
         data = {"title": "T", "artist": "A"}
         if with_lyrics:
             files["lyrics"] = ("song.lrc", b"[00:01.00]Hello")

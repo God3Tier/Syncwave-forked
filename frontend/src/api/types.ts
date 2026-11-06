@@ -6,6 +6,7 @@ export type ProcessingStatus = 'PROCESSING' | 'PARTIAL' | 'READY' | 'FAILED';
 
 export interface Song {
   song_id: string;
+  uploader_id: string | null;
   title: string;
   artist: string;
   duration_ms: number | null;
@@ -133,6 +134,9 @@ export interface StreamManifest {
 
 export interface UploadReceipt {
   song_id: string;
+  uploader_id: string | null;
+  content_sha256: string | null;
+  duplicate: boolean;
   event_id: string;
   status: string;
   title: string;
