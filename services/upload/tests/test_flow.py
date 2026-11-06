@@ -92,6 +92,7 @@ def test_exact_duplicate_returns_canonical_without_second_object_or_event(
 ) -> None:
     owner = "00000000-0000-4000-8000-000000000001"
     first = submit(client, wav).json()
+    client.cookies.set("syncwave_session", "second-account-token")
     duplicate = submit(
         client,
         wav,
