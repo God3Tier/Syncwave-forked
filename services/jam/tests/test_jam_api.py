@@ -1,11 +1,12 @@
 import time
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
 from jam_service.catalogue_client import FakeCatalogueClient
 from jam_service.guest_names import is_guest_name, pick_guest_name
-from jam_service.main import catalogue_client, playlist_client, sync_client
+from jam_service.main import catalogue_client, manager, playlist_client, sync_client
 from jam_service.models import JamState
 from jam_service.sync_client import SyncSnapshot
 
@@ -280,7 +281,10 @@ def test_owner_queue_controls_and_websocket(client: TestClient) -> None:
     skipped = client.post(f"/jams/{jam_id}/playback/skip", json={"request_id": str(uuid4())})
     assert skipped.json()["current_queue_item_id"] == reordered_ids[1]
     assert skipped.json()["sync_generation"] == started.json()["sync_generation"] + 1
+    joined = join_guest(client, jam_id)[0]
+    as_account(client, owner_id)
     assert client.delete(f"/jams/{jam_id}/members/{owner_id}").status_code == 409
+    assert joined["member_id"] in client.get(f"/jams/{jam_id}").json()["participant_ids"]
 
     path = f"/jams/{jam_id}/ws?participant_id={owner_id}"
     with client.websocket_connect(path) as websocket:
@@ -363,6 +367,43 @@ def test_owner_can_transfer_leave_and_end_a_jam(client: TestClient) -> None:
     ended = client.post(f"/jams/{jam_id}/end")
     assert ended.status_code == 200
     assert ended.json()["lifecycle_state"] == "ENDED"
+
+
+def test_sole_owner_leaving_closes_but_retains_the_jam(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+
+    left = client.delete(f"/jams/{jam_id}/members/{owner_id}")
+
+    assert left.status_code == 204
+    retained = client.get(f"/jams/{jam_id}")
+    assert retained.status_code == 200
+    assert retained.json()["lifecycle_state"] == "ENDED"
+    assert client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).status_code == 409
+
+
+def test_listener_heartbeat_postpones_durable_inactivity_expiry(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    created_at = datetime(2026, 11, 6, 0, 0, tzinfo=UTC)
+    manager._now = lambda: created_at
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    path = f"/jams/{jam_id}/ws?participant_id={owner_id}"
+    jam_uuid = UUID(jam_id)
+
+    manager._now = lambda: created_at + timedelta(hours=23, minutes=59)
+    assert jam_uuid not in client.portal.call(manager.expire_inactive, timedelta(hours=24))
+    with client.websocket_connect(path) as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "HEARTBEAT"})
+
+    manager._now = lambda: created_at + timedelta(hours=47, minutes=58)
+    assert jam_uuid not in client.portal.call(manager.expire_inactive, timedelta(hours=24))
+    manager._now = lambda: created_at + timedelta(hours=47, minutes=59)
+    assert jam_uuid in client.portal.call(manager.expire_inactive, timedelta(hours=24))
+
+    retained = client.get(f"/jams/{jam_id}")
+    assert retained.status_code == 200
+    assert retained.json()["lifecycle_state"] == "ENDED"
 
 
 def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> None:

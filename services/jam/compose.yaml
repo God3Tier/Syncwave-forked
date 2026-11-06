@@ -16,6 +16,8 @@ services:
       AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
       JAM_MEMBER_TOKEN_SECRET: local-room-token-secret-replace-before-deploy
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      JAM_INACTIVITY_TTL_SECONDS: ${JAM_INACTIVITY_TTL_SECONDS:-86400}
+      JAM_EXPIRY_SWEEP_SECONDS: ${JAM_EXPIRY_SWEEP_SECONDS:-60}
     depends_on:
       postgres:
         condition: service_healthy

@@ -16,6 +16,8 @@ os.environ["CATALOGUE_HTTP_URL"] = ""
 from jam_service.auth import AccountIdentity  # noqa: E402
 from jam_service.main import app, catalogue_client, manager, playlist_client  # noqa: E402
 
+DEFAULT_NOW = manager._now
+
 
 class FakeAuthVerifier:
     def account(self, token: str) -> AccountIdentity:
@@ -26,10 +28,13 @@ class FakeAuthVerifier:
 @pytest.fixture(autouse=True)
 def clear_jams() -> Iterator[None]:
     manager._jams.clear()
+    manager._connections.clear()
+    manager._now = DEFAULT_NOW
     playlist_client.playlists.clear()
     catalogue_client.songs.clear()
     catalogue_client.plays.clear()
     yield
+    manager._now = DEFAULT_NOW
 
 
 @pytest.fixture
@@ -37,6 +42,12 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as value:
         app.state.auth_verifier = FakeAuthVerifier()
         yield value
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """gRPC's async server is asyncio-only, so AnyIO tests use that backend."""
+    return "asyncio"
 
 
 def pytest_sessionfinish() -> None:

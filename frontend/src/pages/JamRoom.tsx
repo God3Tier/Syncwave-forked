@@ -6,44 +6,38 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/http';
-import { useAuth } from '../auth/AuthProvider';
 import {
   decideReadiness,
   decideAutoplay,
   endJam,
-  getJam,
-  getReadiness,
-  jamMemberId,
-  jamSocketUrl,
-  joinJam,
   leaveJam,
   playback,
   queueSong,
-  rememberJam,
   removeQueueItem,
   reorderQueue,
-  transferAndLeave,
   transferOwnership,
 } from '../api/jam';
-import { getWaveform } from '../api/media';
+import { getLyrics, getWaveform } from '../api/media';
 import type { Jam, Readiness } from '../api/types';
 import { copyText } from '../clipboard';
 import { Waveform } from '../components/Waveform';
+import { LyricsView } from '../components/LyricsView';
 import { Button, Card, EqualizerIcon, Icon, IconButton, Notice, SongArt, Spinner, StatusChip } from '../components/ui';
 import { errorMessage } from '../errors';
 import { formatDuration, formatMs, initials, parseTimestamp, shortId } from '../format';
-import { useAsync, useInterval } from '../hooks/useAsync';
+import { useAsync } from '../hooks/useAsync';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import { useSongs } from '../hooks/useSongs';
 import { autoplaySecondsRemaining } from '../jam/autoplay';
+import { useJamSession } from '../jam/JamProvider';
 import {
   connectionDotClasses,
   connectionStatusClasses,
   readinessDotClasses,
   readinessStatusClasses,
 } from '../jam/participantStatus';
-import { usePlayer, usePosition } from '../player/context';
-import { SyncSession, type LocalAudioState, type SyncSnapshot } from '../sync/syncSession';
+import { usePosition } from '../player/context';
+import { SyncSession, type SyncSnapshot } from '../sync/syncSession';
 import { AddSongsPanel } from './PlaylistDetail';
 import { productColors } from '../theme';
 
@@ -54,173 +48,23 @@ const JAM_CLOSE_REASONS: Record<number, string> = {
   4408: 'This Jam has ended.',
 };
 
-/** Keeps the Jam state live through the Jam room WebSocket, reconnecting after drops. */
-function useJamSocket(jamId: string, participantId: string | null, enabled: boolean, onJam: (jam: Jam) => void) {
-  const [closeCode, setCloseCode] = useState<number | null>(null);
-  const onJamRef = useRef(onJam);
-  useEffect(() => {
-    onJamRef.current = onJam;
-  }, [onJam]);
-
-  useEffect(() => {
-    if (!enabled || !participantId) return;
-    let socket: WebSocket | null = null;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let stopped = false;
-    const open = () => {
-      socket = new WebSocket(jamSocketUrl(jamId, participantId));
-      socket.onopen = () => setCloseCode(null);
-      socket.onmessage = (event) => onJamRef.current(JSON.parse(String(event.data)) as Jam);
-      socket.onclose = (event) => {
-        if (stopped) return;
-        setCloseCode(event.code);
-        if (!JAM_CLOSE_REASONS[event.code]) retry = setTimeout(open, 2000);
-      };
-    };
-    open();
-    return () => {
-      stopped = true;
-      clearTimeout(retry);
-      socket?.close(1000);
-    };
-  }, [jamId, participantId, enabled]);
-
-  return closeCode;
-}
-
 export function JamRoom() {
   const { jamId = '' } = useParams();
   const navigate = useNavigate();
-  const { account, loading: authLoading } = useAuth();
-  const personalPlayer = usePlayer();
-  const [jam, setJam] = useState<Jam | null>(null);
-  const [participantId, setParticipantId] = useState<string | null>(jamMemberId(jamId, account?.id));
-  const [loadError, setLoadError] = useState<unknown>();
-  const [actionError, setActionError] = useState<unknown>();
-  const [audio, setAudio] = useState<AudioContext | null>(null);
-  const [sync, setSync] = useState<SyncSnapshot | null>(null);
-  const [session, setSession] = useState<SyncSession | null>(null);
+  const live = useJamSession();
+  const { activateJam } = live;
   const [mobilePanel, setMobilePanel] = useState<'queue' | 'people'>('queue');
-  const sessionRef = useRef<SyncSession | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-
-  // Opening the room (e.g. from an invite link) joins it; joining is idempotent.
-  useEffect(() => {
-    if (authLoading) return;
-    const controller = new AbortController();
-    const knownMember = jamMemberId(jamId, account?.id);
-    (knownMember ? getJam(jamId) : joinJam(jamId))
-      .then((value) => {
-        if (controller.signal.aborted) return;
-        const joinedAs = value.member_id ?? account?.id ?? knownMember;
-        setParticipantId(joinedAs);
-        setJam(value);
-        rememberJam(jamId, value.owner_id === joinedAs);
-      })
-      .catch((error: unknown) => !controller.signal.aborted && setLoadError(error));
-    return () => controller.abort();
-  }, [account, authLoading, jamId]);
-
-  const member = Boolean(participantId && jam?.participant_ids.includes(participantId));
-  const jamCloseCode = useJamSocket(jamId, participantId, member, setJam);
-  const owner = Boolean(account && jam?.owner_id === account.id);
-  const active = Boolean(jam && jam.state !== 'IDLE' && jam.sync_generation !== null);
-
-  // One Sync connection per room; reconnect only if it closed (e.g. it was
-  // opened before Sync had a session and got rejected).
-  useEffect(() => {
-    if (!audio || !active || !member) return;
-    const current = sessionRef.current;
-    if (current && current.state.phase !== 'CLOSED') return;
-    current?.close();
-    if (!participantId) return;
-    const next = new SyncSession({ jamId, participantId, context: audio, onChange: setSync });
-    sessionRef.current = next;
-    queueMicrotask(() => setSession(next));
-    next.connect();
-  }, [audio, active, member, participantId, jamId, jam?.sync_generation, sync?.phase]);
-
-  useEffect(
-    () => () => {
-      sessionRef.current?.close();
-      sessionRef.current = null;
-    },
-    [],
-  );
-  useEffect(() => () => void audio?.close(), [audio]);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   useEffect(() => {
-    if (!audio) return;
-    const resume = () => {
-      if (document.visibilityState === 'visible' && audio.state === 'suspended') {
-        void sessionRef.current?.resumeAudio();
-      }
-    };
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('online', resume);
-    window.addEventListener('pageshow', resume);
-    return () => {
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('online', resume);
-      window.removeEventListener('pageshow', resume);
-    };
-  }, [audio]);
+    if (jamId) activateJam(jamId);
+  }, [activateJam, jamId]);
 
-  const enableAudio = async () => {
-    // Browsers only allow audio after a user gesture, so the AudioContext is created here.
-    if (audio) {
-      const resumed = sessionRef.current
-        ? await sessionRef.current.resumeAudio()
-        : await audio.resume().then(() => audio.state === 'running');
-      if (!resumed) setActionError(new Error('This browser blocked audio. Tap again to resume.'));
-      return;
-    }
-    const context = new AudioContext();
-    await context.resume();
-    // Starting a silent source inside the tap keeps iOS Web Audio unlocked even
-    // though the real track is fetched and scheduled asynchronously afterwards.
-    const unlock = context.createBufferSource();
-    unlock.buffer = context.createBuffer(1, 1, context.sampleRate);
-    unlock.connect(context.destination);
-    unlock.start();
-    personalPlayer.pause();
-    setAudio(context);
-  };
-
-  const run = async (action: () => Promise<Jam | void>) => {
-    setActionError(undefined);
-    try {
-      const result = await action();
-      if (result) setJam(result);
-    } catch (error) {
-      setActionError(error);
-    }
-  };
-
-  // Jam reconciles its state with Sync only when GET /jams/{id} is called
-  // (then broadcasts it on the room socket), so poll while playback is live.
-  useInterval(
-    () => {
-      void getJam(jamId)
-        .then(setJam)
-        .catch(() => undefined);
-    },
-    2000,
-    member && jam !== null && jam.state !== 'IDLE' && jam.state !== 'ENDED',
-  );
-
-  // The owner is asked to decide when some listeners are not ready in time.
-  const [readiness, setReadiness] = useState<Readiness | null>(null);
-  useInterval(
-    () => {
-      void getReadiness(jamId)
-        .then(setReadiness)
-        .catch(() => setReadiness(null));
-    },
-    2000,
-    owner && Boolean(jam) && jam?.state !== 'IDLE' && jam?.state !== 'ENDED',
-  );
+  const { jam, participantId, owner, sync, session, readiness, loadError, actionError } = live;
+  const jamCloseCode = live.closeCode;
+  const run = live.run;
   const showReadiness = owner && readiness?.decision_required;
 
   if (loadError !== undefined && !jam) {
@@ -236,7 +80,7 @@ export function JamRoom() {
 
   const currentItem = jam.queue.find((item) => item.queue_item_id === jam.current_queue_item_id) ?? null;
   const currentSongId = sync?.songId ?? currentItem?.song_id ?? null;
-  const localAudioState: LocalAudioState = sync?.localAudioState ?? (audio ? 'RUNNING' : 'LOCKED');
+  const localAudioState = live.localAudioState;
 
   const copyInvite = async () => {
     const link = `${window.location.origin}/jam/${jamId}`;
@@ -256,30 +100,21 @@ export function JamRoom() {
     }
   };
   const leave = async () => {
-    sessionRef.current?.close();
-    if (owner) {
-      const candidates = jam.participants.filter((participant) => participant.participant_id !== participantId);
-      if (candidates.length === 0) {
-        if (!window.confirm('You are the only listener. End this Jam?')) return;
-        await run(() => endJam(jamId));
-      } else {
-        const choice = window.prompt(
-          `Transfer ownership before leaving. Enter a username:\n${candidates.map((participant) => participant.username).join(', ')}\n\nOr type END to end the Jam.`,
-          candidates[0].username,
-        );
-        if (!choice) return;
-        if (choice.trim().toUpperCase() === 'END') await run(() => endJam(jamId));
-        else {
-          const target = candidates.find((participant) => participant.username.toLowerCase() === choice.trim().toLowerCase());
-          if (!target) {
-            setActionError(new Error('Choose a current participant by username.'));
-            return;
-          }
-          await run(() => transferAndLeave(jamId, target.participant_id));
+    try {
+      if (owner) {
+        const candidates = jam.participants.filter((participant) => participant.participant_id !== participantId);
+        if (candidates.length === 0) {
+          if (!window.confirm('You are the only listener. Leaving will close this Jam.')) return;
+          await live.leaveCurrent();
+        } else {
+          setTransferOpen(true);
+          return;
         }
-      }
-    } else if (participantId) await leaveJam(jamId, participantId).catch(() => undefined);
-    navigate('/jam');
+      } else await live.leaveCurrent();
+      navigate('/jam');
+    } catch {
+      // The provider exposes the actionable failure in the room notice.
+    }
   };
 
   return (
@@ -321,11 +156,11 @@ export function JamRoom() {
             Sync: {sync.error.code} {sync.error.message && `· ${sync.error.message}`}
           </Notice>
         )}
-        {!audio && (
+        {!live.audioEnabled && (
           <Notice
             tone="info"
             action={
-              <Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">
+              <Button variant="primary" icon="volume_up" onClick={() => void live.enableAudio()} className="py-1.5 text-xs">
                 Join playback
               </Button>
             }
@@ -333,10 +168,10 @@ export function JamRoom() {
             Join to listen: this device then plays in sync with everyone else. Every listener, the owner included, joins before playback.
           </Notice>
         )}
-        {audio && localAudioState !== 'RUNNING' && (
+        {live.audioEnabled && localAudioState !== 'RUNNING' && (
           <Notice
             tone="warn"
-            action={<Button variant="primary" icon="volume_up" onClick={() => void enableAudio()} className="py-1.5 text-xs">Tap to resume audio</Button>}
+            action={<Button variant="primary" icon="volume_up" onClick={() => void live.enableAudio()} className="py-1.5 text-xs">Tap to resume audio</Button>}
           >
             Audio was paused by this browser. You remain connected and will catch up after it resumes.
           </Notice>
@@ -358,7 +193,7 @@ export function JamRoom() {
             songId={currentSongId}
             sync={sync}
             session={session}
-            onControl={(action, extra) => void run(() => playback(jamId, action, extra))}
+            onControl={(action, extra) => void live.control(action, extra)}
           />
         </div>
         <div className={`${mobilePanel === 'queue' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-5`}>
@@ -370,10 +205,11 @@ export function JamRoom() {
               onAdd={(songId) => void run(() => queueSong(jamId, songId))}
             />
           )}
+          <JamLyrics songId={currentSongId} session={session} sync={sync} />
         </div>
         <div className={`${mobilePanel === 'people' ? 'space-y-5' : 'hidden'} md:block md:space-y-5 lg:col-span-3`}>
           <Participants jam={jam} memberId={participantId} owner={owner} sync={sync} readiness={readiness} run={run} />
-          <SyncStats sync={sync} audioEnabled={Boolean(audio)} />
+          <SyncStats sync={sync} audioEnabled={live.audioEnabled} />
         </div>
       </div>
 
@@ -381,13 +217,24 @@ export function JamRoom() {
         <ReadinessModal
           readiness={readiness}
           participantId={participantId}
-          onDecide={(decision) => void run(() => decideReadiness(jamId, decision)).then(() => setReadiness(null))}
+          onDecide={(decision) => void run(() => decideReadiness(jamId, decision))}
         />
       )}
       {owner && jam.autoplay_decision_required && (
         <AutoplayModal
           deadlineMs={jam.autoplay_prompt_deadline_ms}
           onDecide={(mode) => void run(() => decideAutoplay(jamId, mode))}
+        />
+      )}
+      {transferOpen && (
+        <TransferOwnershipModal
+          participants={jam.participants.filter((participant) => participant.participant_id !== participantId)}
+          onCancel={() => setTransferOpen(false)}
+          onTransfer={(nextOwnerId) => {
+            void live.transferAndLeaveCurrent(nextOwnerId)
+              .then(() => navigate('/jam'))
+              .catch(() => undefined);
+          }}
         />
       )}
     </div>
@@ -569,6 +416,31 @@ function Queue({ jam, memberId, owner, playingSongId, sync, run }: { jam: Jam; m
   );
 }
 
+function JamLyrics({ songId, session, sync }: { songId: string | null; session: SyncSession | null; sync: SyncSnapshot | null }) {
+  const lyrics = useAsync(
+    (signal) => (songId ? getLyrics(songId, signal).catch(() => null) : Promise.resolve(null)),
+    [songId],
+  );
+  const getPosition = useCallback(() => session?.positionMs() ?? 0, [session]);
+  const position = usePosition(getPosition, sync?.phase === 'PLAYING');
+
+  if (!songId) return null;
+  return (
+    <Card className="h-fit">
+      <h3 className="mb-4 flex items-center gap-2 font-headline text-base font-bold">
+        Synced lyrics <span className="font-mono text-xs font-normal text-secondary">· live</span>
+      </h3>
+      {lyrics.data?.status === 'READY' && lyrics.data.lines.length > 0 ? (
+        <LyricsView lines={lyrics.data.lines} positionMs={position} layout="natural" />
+      ) : (
+        <p className="py-4 text-sm text-on-surface-variant">
+          {lyrics.data?.status === 'PROCESSING' ? 'Lyrics are being processed…' : 'No synced lyrics for this song.'}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam; memberId: string | null; owner: boolean; sync: SyncSnapshot | null; readiness: Readiness | null; run: (action: () => Promise<Jam | void>) => Promise<void> }) {
   return (
     <Card className="p-4">
@@ -600,12 +472,12 @@ function Participants({ jam, memberId, owner, sync, readiness, run }: { jam: Jam
                   <span>R</span>
                 </span>
                 {owner && id !== memberId && jam.lifecycle_state === 'ACTIVE' && (
-                  <>
-                    <IconButton icon="manage_accounts" label={`Make ${participant.username} owner`} onClick={() => void run(() => transferOwnership(jam.jam_id, id))} />
-                    <IconButton icon="person_remove" label={`Remove ${participant.username}`} onClick={() => {
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    <Button icon="manage_accounts" className="min-h-9 px-2 py-1 text-[11px]" onClick={() => void run(() => transferOwnership(jam.jam_id, id))}>Make owner</Button>
+                    <Button variant="danger" icon="person_remove" className="min-h-9 px-2 py-1 text-[11px]" onClick={() => {
                       if (window.confirm(`Remove ${participant.username} from this Jam?`)) void run(() => leaveJam(jam.jam_id, id));
-                    }} />
-                  </>
+                    }}>Remove</Button>
+                  </div>
                 )}
               </div>
             </li>
@@ -664,6 +536,42 @@ function SyncStats({ sync, audioEnabled }: { sync: SyncSnapshot | null; audioEna
       </dl>
       <p className="mt-2 text-[10px] text-outline">Drift is reported by Sync when it corrects this device.</p>
     </Card>
+  );
+}
+
+function TransferOwnershipModal({
+  participants,
+  onCancel,
+  onTransfer,
+}: {
+  participants: Jam['participants'];
+  onCancel: () => void;
+  onTransfer: (participantId: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onCancel();
+    }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="transfer-owner-title" className="w-full max-w-md rounded-2xl bg-surface-container-low p-6 shadow-2xl ring-1 ring-primary/35">
+        <h2 id="transfer-owner-title" className="text-xl font-extrabold">Choose the next owner</h2>
+        <p className="mt-2 text-sm leading-6 text-on-surface-variant">A Jam with other listeners cannot be left without an owner. Your departure and the transfer happen together.</p>
+        <div className="mt-5 space-y-2">
+          {participants.map((participant) => (
+            <button
+              key={participant.participant_id}
+              type="button"
+              onClick={() => onTransfer(participant.participant_id)}
+              className="flex min-h-12 w-full items-center gap-3 rounded-xl bg-surface-container px-3 text-left ring-1 ring-outline-variant/35 hover:bg-surface-container-high focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <span className="flex size-8 items-center justify-center rounded-full bg-primary/15 font-mono text-xs font-bold text-primary">{initials(participant.username)}</span>
+              <span className="font-semibold">Transfer to {participant.username}</span>
+              <Icon name="arrow_forward" className="ml-auto text-primary" />
+            </button>
+          ))}
+        </div>
+        <Button variant="ghost" onClick={onCancel} className="mt-5 w-full">Stay in Jam</Button>
+      </section>
+    </div>
   );
 }
 

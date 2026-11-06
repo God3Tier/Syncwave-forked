@@ -15,7 +15,15 @@ const MAX_HZ = 10_000;
  * Service's peaks, this reads the player's Web Audio analyser every frame.
  * When playback stops the bars fall back to rest.
  */
-export function Visualizer({ active, height = 160 }: { active: boolean; height?: number }) {
+export function Visualizer({
+  active,
+  height = 160,
+  source,
+}: {
+  active: boolean;
+  height?: number;
+  source?: () => AnalyserNode | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const levels = useRef(new Float32Array(BARS));
   const { analyser } = usePlayer();
@@ -24,7 +32,7 @@ export function Visualizer({ active, height = 160 }: { active: boolean; height?:
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const node = active ? analyser() : null;
+    const node = active ? (source ?? analyser)() : null;
     const bins = new Uint8Array(node?.frequencyBinCount ?? 0);
     const hzPerBin = node ? node.context.sampleRate / 2 / bins.length : 1;
     // edges[i]..edges[i + 1] are the FFT bins behind bar i.
@@ -78,7 +86,7 @@ export function Visualizer({ active, height = 160 }: { active: boolean; height?:
     };
     draw();
     return () => cancelAnimationFrame(frame);
-  }, [active, analyser, height]);
+  }, [active, analyser, height, source]);
 
   return <canvas ref={canvasRef} style={{ height }} className="block w-full" role="img" aria-label="Audio visualiser" />;
 }

@@ -63,6 +63,12 @@ describe('SyncSession gapless playback', () => {
       currentTime: 10,
       destination: {},
       createGain: () => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }),
+      createAnalyser: () => ({
+        fftSize: 0,
+        smoothingTimeConstant: 0,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      }),
       createBufferSource: () => {
         const source = new FakeSource();
         sources.push(source);

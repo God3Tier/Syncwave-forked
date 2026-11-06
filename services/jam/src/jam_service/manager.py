@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import WebSocket
@@ -47,6 +49,7 @@ AUTOPLAY_DECISION_MS = 10_000
 # If there is not enough time both to decide and to preload, use the default
 # immediately so a short final track can still transition without a gap.
 AUTOPLAY_IMMEDIATE_THRESHOLD_MS = 15_000
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -56,6 +59,7 @@ class Jam:
     owner_id: UUID
     participant_ids: list[UUID]
     participant_usernames: dict[UUID, str]
+    last_listener_active_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     queue: list[QueueItem] = field(default_factory=list)
     current_queue_item_id: UUID | None = None
     sync_generation: int | None = None
@@ -77,11 +81,13 @@ class JamManager:
         sync: SyncClient,
         playlist: PlaylistClient,
         catalogue: CatalogueClient,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
         self._sync = sync
         self._playlist = playlist
         self._catalogue = catalogue
+        self._now = now or (lambda: datetime.now(UTC))
         self._jams: dict[UUID, Jam] = {}
         self._connections: dict[UUID, dict[WebSocket, UUID]] = {}
         self._lock = asyncio.Lock()
@@ -100,6 +106,7 @@ class JamManager:
                 state=value.state,
                 lifecycle_state=value.lifecycle_state,
                 ended_at=value.ended_at,
+                last_listener_active_at=value.last_listener_active_at,
                 autoplay_mode=(AutoplayMode(value.autoplay_mode) if value.autoplay_mode else None),
                 autoplay_seen_song_ids=set(value.autoplay_seen_song_ids or []),
                 autoplay_prompt_deadline_ms=value.autoplay_prompt_deadline_ms,
@@ -153,6 +160,7 @@ class JamManager:
                 owner_id=owner_id,
                 participant_ids=[owner_id],
                 participant_usernames={owner_id: username},
+                last_listener_active_at=self._now(),
                 queue=[
                     QueueItem(
                         queue_item_id=uuid4(),
@@ -278,24 +286,32 @@ class JamManager:
         await self._save(jam)
 
     async def leave(self, jam_id: UUID, participant_id: UUID) -> None:
+        ended = False
         async with self._lock:
             jam = self._find(jam_id)
             if participant_id == jam.owner_id:
-                raise JamConflictError("owner cannot leave an active Jam")
-            if participant_id not in jam.participant_ids:
+                if len(jam.participant_ids) > 1:
+                    raise JamConflictError("transfer ownership before leaving this Jam")
+                await self._close(jam, clear_sync=True)
+                ended = True
+            elif participant_id not in jam.participant_ids:
                 raise JamNotFoundError("member not found")
-            updated_participants = [
-                value for value in jam.participant_ids if value != participant_id
-            ]
-            if jam.sync_generation is not None:
-                await self._sync.update_participants(
-                    uuid4(), jam.jam_id, jam.sync_generation, updated_participants
-                )
-            jam.participant_ids.remove(participant_id)
-            jam.participant_usernames.pop(participant_id, None)
-            await self._save(jam)
-        await self._disconnect_participant(jam_id, participant_id)
-        await self.broadcast(jam_id)
+            else:
+                updated_participants = [
+                    value for value in jam.participant_ids if value != participant_id
+                ]
+                if jam.sync_generation is not None:
+                    await self._sync.update_participants(
+                        uuid4(), jam.jam_id, jam.sync_generation, updated_participants
+                    )
+                jam.participant_ids.remove(participant_id)
+                jam.participant_usernames.pop(participant_id, None)
+                await self._save(jam)
+        if ended:
+            await self._close_connections(jam_id, 4408, "Jam ended")
+        else:
+            await self._disconnect_participant(jam_id, participant_id)
+            await self.broadcast(jam_id)
 
     async def add(self, jam_id: UUID, actor_id: UUID, song_id: UUID) -> JamResponse:
         async with self._lock:
@@ -460,10 +476,23 @@ class JamManager:
         self._require_member(jam, participant_id)
         await websocket.accept()
         self._connections.setdefault(jam_id, {})[websocket] = participant_id
+        await self.touch_listener_activity(jam_id)
         await websocket.send_json(self.get(jam_id).model_dump(mode="json"))
 
-    def disconnect(self, jam_id: UUID, websocket: WebSocket) -> None:
-        self._connections.get(jam_id, {}).pop(websocket, None)
+    async def disconnect(self, jam_id: UUID, websocket: WebSocket) -> None:
+        participant_id = self._connections.get(jam_id, {}).pop(websocket, None)
+        if participant_id is not None:
+            await self.touch_listener_activity(jam_id)
+
+    async def touch_listener_activity(self, jam_id: UUID) -> None:
+        """Record server-observed listener presence for durable inactivity expiry."""
+        async with self._lock:
+            jam = self._find(jam_id)
+            if jam.lifecycle_state is JamLifecycle.ENDED:
+                return
+            active_at = self._now()
+            jam.last_listener_active_at = active_at
+            await self._repository.touch_listener_activity(jam_id, active_at)
 
     async def broadcast(self, jam_id: UUID) -> None:
         payload = self.get(jam_id).model_dump(mode="json")
@@ -474,7 +503,7 @@ class JamManager:
             except RuntimeError:
                 stale.append(websocket)
         for websocket in stale:
-            self.disconnect(jam_id, websocket)
+            await self.disconnect(jam_id, websocket)
 
     async def _disconnect_participant(self, jam_id: UUID, participant_id: UUID) -> None:
         connections = self._connections.get(jam_id, {})
@@ -518,17 +547,58 @@ class JamManager:
             self._require_owner(jam, actor_id)
             if jam.lifecycle_state is JamLifecycle.ENDED:
                 return self.get(jam_id)
-            if jam.sync_generation is not None:
-                await self._sync.update_participants(uuid4(), jam.jam_id, jam.sync_generation, [])
-            jam.lifecycle_state = JamLifecycle.ENDED
-            jam.state = JamState.ENDED
-            jam.ended_at = datetime.now(UTC)
-            await self._save(jam)
+            await self._close(jam, clear_sync=True)
         await self.broadcast(jam_id)
-        for websocket in list(self._connections.get(jam_id, {})):
-            await websocket.close(code=4408, reason="Jam ended")
-            self.disconnect(jam_id, websocket)
+        await self._close_connections(jam_id, 4408, "Jam ended")
         return self.get(jam_id)
+
+    async def expire_inactive(self, ttl: timedelta) -> list[UUID]:
+        """Close active rooms whose latest server-observed listener activity is stale."""
+        expired: list[UUID] = []
+        cutoff = self._now() - ttl
+        async with self._lock:
+            for jam in self._jams.values():
+                if (
+                    jam.lifecycle_state is JamLifecycle.ACTIVE
+                    and jam.last_listener_active_at <= cutoff
+                ):
+                    await self._close(jam, clear_sync=False)
+                    expired.append(jam.jam_id)
+        for jam_id in expired:
+            jam = self._find(jam_id)
+            if jam.sync_generation is not None:
+                try:
+                    await self._sync.update_participants(
+                        uuid4(), jam.jam_id, jam.sync_generation, []
+                    )
+                except SyncClientError as error:
+                    logger.warning(
+                        "expired Jam Sync cleanup failed",
+                        extra={"jam_id": str(jam_id), "error": str(error)},
+                    )
+            await self._close_connections(jam_id, 4408, "Jam expired after listener inactivity")
+        return expired
+
+    async def _close(self, jam: Jam, *, clear_sync: bool) -> None:
+        """Mark a room ended while the caller holds the manager lock."""
+        if jam.lifecycle_state is JamLifecycle.ENDED:
+            return
+        if clear_sync and jam.sync_generation is not None:
+            await self._sync.update_participants(uuid4(), jam.jam_id, jam.sync_generation, [])
+        jam.lifecycle_state = JamLifecycle.ENDED
+        jam.state = JamState.ENDED
+        jam.ended_at = self._now()
+        await self._save(jam)
+
+    async def _close_connections(self, jam_id: UUID, code: int, reason: str) -> None:
+        for websocket in list(self._connections.get(jam_id, {})):
+            try:
+                await websocket.close(code=code, reason=reason)
+            except Exception:
+                # A peer may already have closed while the expiry sweep was persisting.
+                logger.debug("Jam socket already closed", extra={"jam_id": str(jam_id)})
+            finally:
+                self._connections.get(jam_id, {}).pop(websocket, None)
 
     def _find(self, jam_id: UUID) -> Jam:
         try:
@@ -717,6 +787,7 @@ class JamManager:
                 queue=jam.queue,
                 lifecycle_state=jam.lifecycle_state,
                 ended_at=jam.ended_at,
+                last_listener_active_at=jam.last_listener_active_at,
                 autoplay_mode=jam.autoplay_mode.value if jam.autoplay_mode else None,
                 autoplay_seen_song_ids=list(jam.autoplay_seen_song_ids),
                 autoplay_prompt_deadline_ms=jam.autoplay_prompt_deadline_ms,
