@@ -12,6 +12,7 @@ services:
       PLAYLIST_GRPC_TARGET: playlist:50051
       PLAYLIST_INTERNAL_TOKEN: local-playlist-internal-token
       PLAYLIST_TIMEOUT_MS: "750"
+      CATALOGUE_HTTP_URL: http://catalogue:8080
       AUTH_JWKS_URL: http://auth:8080/.well-known/jwks.json
       JAM_MEMBER_TOKEN_SECRET: local-room-token-secret-replace-before-deploy
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
@@ -23,6 +24,8 @@ services:
       auth:
         condition: service_healthy
       playlist:
+        condition: service_healthy
+      catalogue:
         condition: service_healthy
     healthcheck:
       test:

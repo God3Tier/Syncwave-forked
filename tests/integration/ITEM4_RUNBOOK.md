@@ -1,7 +1,7 @@
 # Item 4 execution steps
 
-Backend scenario code, fault automation and CI configuration are provided.
-New scenarios still need actual PASS reports. Browser work stays deferred;
+Backend scenarios, fault automation, CI configuration and browser coverage are
+provided. Automated scenarios still need a passing target-pipeline report, and
 physical-device acceptance needs measured evidence from real devices.
 No script can establish audible synchronization from server schedules alone.
 
@@ -139,19 +139,30 @@ gateway. Its report is retained with the existing scenario reports and logs
 for one week. An earlier failure skips later scenarios; a missing later
 report is not a passing result.
 
-## 5. Browser tests (deferred)
+## 5. Run browser tests
 
-When frontend work resumes, integrate the teammate's frontend, add browser
-tests for the three journeys in `tests/e2e/README.md`, and implement
-`tests/e2e/run.sh` with a nonzero failure exit and retained screenshots/traces.
-The existing staging hook remains optional. This work is not completed by
-the backend scripts, and its plan checkbox must stay open.
+The staging integration job runs `tests/e2e/run.sh` after the backend and fault
+scenarios. The Playwright journey uploads unique audio, verifies search and
+listening, hosts a two-browser Jam, checks independent Connected/Ready states,
+observes a gapless transition into the default Top Hits batch, then leaves,
+rejoins by code and catches up without restarting the owner.
+
+Run it against the Compose stack from the repository root:
+
+```powershell
+$env:MSYS_NO_PATHCONV = '1' # Windows with Git Bash only
+& 'C:\Program Files\Git\bin\bash.exe' tests/e2e/run.sh docker
+$LASTEXITCODE
+```
+
+The runner must return nonzero on any assertion failure. Screenshots and the
+generated audio fixture are retained under `tests/e2e/artifacts/`.
 
 ## 6. Record physical-device evidence
 
-Follow `services/sync/OBSERVABILITY.md` with at least one laptop and two
-phones on the same documented Wi-Fi. Open the Sync demo through the laptop's
-LAN address on port 8080 and follow its setup controls. Record device/browser
+Follow `services/sync/OBSERVABILITY.md` on the same documented Wi-Fi using at
+least desktop Chrome, desktop Safari, iPhone Safari and Android Chrome. Open
+the Jam through the host's LAN address on port 8080. Record device/browser
 versions, network configuration and five completed clock samples per device.
 
 Create blank working copies of the supplied headers (do this once):
@@ -175,6 +186,12 @@ Perform at least 20 fresh starts. Fill one starts row per device per run:
 - Record at least one `delayed_client` and one `reconnect` event in the events
   CSV, using existing run/device IDs. Include measured recovery time, absolute
   drift after recovery, `room_timeline_restarted` (`true`/`false`) and evidence.
+- On both phones, cover lock/background, foreground auto-resume, the visible
+  **Tap to resume audio** fallback, wired/Bluetooth route changes, silent mode
+  and media-volume changes. Confirm suspended audio clears Ready but not
+  Connected, and that tapping resume restores Ready and catches up.
+- Pause and resume from the owner and verify audio animation and local position
+  stop while paused on every device.
 - Retain network/jitter settings and notes alongside the recordings. Repeat
   a subset with injected latency/jitter/loss where the environment supports it.
 

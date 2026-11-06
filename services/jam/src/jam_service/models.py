@@ -24,6 +24,11 @@ class JamLifecycle(StrEnum):
     ENDED = "ENDED"
 
 
+class AutoplayMode(StrEnum):
+    TOP_HITS = "TOP_HITS"
+    LOOP = "LOOP"
+
+
 class JamParticipant(StrictModel):
     participant_id: UUID
     username: str
@@ -50,6 +55,10 @@ class JamResponse(StrictModel):
     lifecycle_state: JamLifecycle
     member_token: str | None = None
     member_id: UUID | None = None
+    autoplay_mode: AutoplayMode | None = None
+    autoplay_decision_required: bool = False
+    autoplay_prompt_deadline_ms: int | None = None
+    autoplay_batch_number: int = 0
 
 
 class CreateJamRequest(StrictModel):
@@ -92,6 +101,10 @@ class ReadinessDecisionRequest(PlaybackCommandRequest):
     decision: ReadinessDecision
 
 
+class AutoplayDecisionRequest(StrictModel):
+    mode: AutoplayMode
+
+
 class ReadinessStatusResponse(StrictModel):
     generation: int
     prepare_deadline_ms: int
@@ -99,6 +112,8 @@ class ReadinessStatusResponse(StrictModel):
     decision_required: bool
     ready_participant_ids: list[UUID]
     unready_participant_ids: list[UUID]
+    target_generation: int | None = None
+    transition: bool = False
 
 
 class TransferOwnershipRequest(StrictModel):

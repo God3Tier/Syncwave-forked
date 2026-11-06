@@ -61,6 +61,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /songs/{song_id}/plays:
+    post:
+      security: []
+      summary: Record one idempotent playback start
+      operationId: catalogueRecordPlay
+      parameters:
+        - in: path
+          name: song_id
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playback_id, source]
+              properties:
+                playback_id: {type: string, format: uuid}
+                source: {type: string, enum: [SOLO, JAM]}
+      responses:
+        "200":
+          description: Current count and whether this idempotency key was newly counted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [song_id, play_count, counted]
+                properties:
+                  song_id: {type: string, format: uuid}
+                  play_count: {type: integer, minimum: 0}
+                  counted: {type: boolean}
   /songs:
     get:
       security: []
@@ -97,6 +129,13 @@ paths:
             type: string
             format: uuid
           description: Only return songs owned by this uploader account.
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [newest, top]
+            default: newest
+          description: Sort newest-first or by global play count.
       responses:
         "200":
           description: A page of songs.
@@ -114,7 +153,7 @@ components:
   schemas:
     Song:
       type: object
-      required: [song_id, uploader_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, created_at, updated_at]
+      required: [song_id, uploader_id, title, artist, audio_reference, lyrics_status, waveform_status, processing_status, play_count, created_at, updated_at]
       properties:
         song_id:
           type: string
@@ -147,6 +186,9 @@ components:
           type: string
           enum: [PROCESSING, PARTIAL, READY, FAILED]
           description: Derived from the two stage statuses. READY when both are READY.
+        play_count:
+          type: integer
+          minimum: 0
         created_at:
           type: string
           format: date-time

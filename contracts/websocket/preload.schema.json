@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syncwave.local/contracts/websocket/preload.schema.json",
+  "title": "PRELOAD",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "jam_id", "seq", "sent_at_ms", "payload"],
+  "properties": {
+    "type": { "const": "PRELOAD" },
+    "jam_id": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sent_at_ms": { "type": "integer", "minimum": 0 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "queue_item_id", "song_id", "stream_url", "manifest_url", "start_position_ms"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "queue_item_id": { "type": "string", "format": "uuid" },
+        "song_id": { "type": "string", "format": "uuid" },
+        "stream_url": { "type": "string", "minLength": 1 },
+        "manifest_url": { "type": "string", "minLength": 1 },
+        "start_position_ms": { "const": 0 }
+      }
+    }
+  }
+}

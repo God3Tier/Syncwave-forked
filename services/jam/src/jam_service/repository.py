@@ -1,8 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, delete, select, text
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -24,6 +24,11 @@ class JamRecord(Base):
     sync_generation: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     lifecycle_state: Mapped[str] = mapped_column(String(16), default=JamLifecycle.ACTIVE.value)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    autoplay_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    autoplay_seen_song_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    autoplay_prompt_deadline_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    autoplay_batch_number: Mapped[int] = mapped_column(Integer, default=0)
+    autoplay_catalogue_rechecked: Mapped[bool] = mapped_column(default=False)
 
 
 class JamMemberRecord(Base):
@@ -59,6 +64,11 @@ class PersistedJam:
     queue: list[QueueItem]
     lifecycle_state: JamLifecycle = JamLifecycle.ACTIVE
     ended_at: datetime | None = None
+    autoplay_mode: str | None = None
+    autoplay_seen_song_ids: list[UUID] = field(default_factory=list)
+    autoplay_prompt_deadline_ms: int | None = None
+    autoplay_batch_number: int = 0
+    autoplay_catalogue_rechecked: bool = False
 
 
 class JamRepository:
@@ -118,6 +128,13 @@ class JamRepository:
                 ],
                 lifecycle_state=JamLifecycle(row.lifecycle_state),
                 ended_at=row.ended_at,
+                autoplay_mode=row.autoplay_mode,
+                autoplay_seen_song_ids=[
+                    UUID(value) for value in (row.autoplay_seen_song_ids or [])
+                ],
+                autoplay_prompt_deadline_ms=row.autoplay_prompt_deadline_ms,
+                autoplay_batch_number=row.autoplay_batch_number,
+                autoplay_catalogue_rechecked=row.autoplay_catalogue_rechecked,
             )
             for row in jams
         ]
@@ -136,6 +153,13 @@ class JamRepository:
                 "sync_generation": jam.sync_generation,
                 "lifecycle_state": jam.lifecycle_state.value,
                 "ended_at": jam.ended_at,
+                "autoplay_mode": jam.autoplay_mode,
+                "autoplay_seen_song_ids": [
+                    str(value) for value in (jam.autoplay_seen_song_ids or [])
+                ],
+                "autoplay_prompt_deadline_ms": jam.autoplay_prompt_deadline_ms,
+                "autoplay_batch_number": jam.autoplay_batch_number,
+                "autoplay_catalogue_rechecked": jam.autoplay_catalogue_rechecked,
             }
             if row is None:
                 database.add(JamRecord(jam_id=jam_id, **values))

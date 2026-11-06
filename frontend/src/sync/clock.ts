@@ -49,3 +49,30 @@ export function pushSample(samples: readonly ClockSample[], sample: ClockSample,
 export function delayUntil(targetServerMs: number, offsetMs: number, nowLocalMs: number = Date.now()): number {
   return targetServerMs - (nowLocalMs + offsetMs);
 }
+
+export interface CompensatedSchedule {
+  delayMs: number;
+  latenessMs: number;
+  positionMs: number;
+  ended: boolean;
+}
+
+/** Applies the same late-target compensation to play, resume, seek and transition. */
+export function compensateSchedule(
+  targetServerMs: number,
+  startPositionMs: number,
+  playbackRate: number,
+  durationMs: number,
+  offsetMs: number,
+  nowLocalMs: number = Date.now(),
+): CompensatedSchedule {
+  const rawDelayMs = delayUntil(targetServerMs, offsetMs, nowLocalMs);
+  const latenessMs = Math.max(0, -rawDelayMs);
+  const positionMs = Math.min(durationMs, Math.max(0, startPositionMs + latenessMs * playbackRate));
+  return {
+    delayMs: Math.max(0, rawDelayMs),
+    latenessMs,
+    positionMs,
+    ended: positionMs >= durationMs,
+  };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { delayUntil, estimate, pushSample, toSample } from './clock';
+import { compensateSchedule, delayUntil, estimate, pushSample, toSample } from './clock';
 import { isStale, makeFrameFactory } from './protocol';
 
 describe('toSample', () => {
@@ -52,6 +52,26 @@ describe('delayUntil', () => {
     // Local clock reads 1000, server is 250 ms ahead, so server now = 1250.
     expect(delayUntil(3250, 250, 1000)).toBe(2000);
     expect(delayUntil(1200, 250, 1000)).toBe(-50);
+  });
+});
+
+describe('compensateSchedule', () => {
+  it('keeps future targets at their requested position', () => {
+    expect(compensateSchedule(2_000, 500, 1, 10_000, 0, 1_000)).toEqual({
+      delayMs: 1_000,
+      latenessMs: 0,
+      positionMs: 500,
+      ended: false,
+    });
+  });
+
+  it('advances late targets by playback rate and clamps at the end', () => {
+    expect(compensateSchedule(950, 2_000, 1.5, 10_000, 0, 1_000).positionMs).toBe(2_075);
+    expect(compensateSchedule(0, 9_900, 1, 10_000, 0, 1_000)).toMatchObject({
+      delayMs: 0,
+      positionMs: 10_000,
+      ended: true,
+    });
   });
 });
 
