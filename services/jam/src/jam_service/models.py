@@ -57,6 +57,8 @@ class JamResponse(StrictModel):
     member_id: UUID | None = None
     autoplay_mode: AutoplayMode | None = None
     autoplay_decision_required: bool = False
+    autoplay_prompt_deadline_ms: int | None = None
+    autoplay_batch_number: int = 0
 
 
 class CreateJamRequest(StrictModel):

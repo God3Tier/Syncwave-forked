@@ -71,7 +71,7 @@ def test_owner_gets_top_hits_prompt_near_queue_end_and_batches_continue(
         generation=1,
         state=JamState.PLAYING,
         queue_item_id=UUID(current_item["queue_item_id"]),
-        duration_ms=20_000,
+        duration_ms=25_000,
         anchor_server_time_ms=now_ms,
     )
 
@@ -83,8 +83,12 @@ def test_owner_gets_top_hits_prompt_near_queue_end_and_batches_continue(
     assert decision.status_code == 200
     body = decision.json()
     assert body["autoplay_mode"] == "TOP_HITS"
+    assert body["autoplay_batch_number"] == 1
     assert [UUID(item["song_id"]) for item in body["queue"][1:]] == top_hits[:5]
     assert len(catalogue_client.plays) == 1
+    repeated = client.post(f"/jams/{jam_id}/playback/autoplay", json={"mode": "TOP_HITS"}).json()
+    assert repeated["queue"] == body["queue"]
+    assert repeated["autoplay_batch_number"] == 1
 
     last = body["queue"][-1]
     sync_client._snapshots[jam_uuid] = SyncSnapshot(
@@ -96,6 +100,71 @@ def test_owner_gets_top_hits_prompt_near_queue_end_and_batches_continue(
     )
     next_batch = client.get(f"/jams/{jam_id}").json()
     assert UUID(next_batch["queue"][-1]["song_id"]) == top_hits[5]
+    assert next_batch["autoplay_batch_number"] == 2
+
+
+def test_short_final_track_applies_top_hits_without_waiting_for_prompt(
+    client: TestClient,
+) -> None:
+    owner_id = str(uuid4())
+    initial_song, top_hit = uuid4(), uuid4()
+    assert isinstance(catalogue_client, FakeCatalogueClient)
+    catalogue_client.songs.append(top_hit)
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(initial_song)}).json()
+    current = queued["queue"][0]
+    client.post(
+        f"/jams/{jam_id}/playback/start",
+        json={"request_id": str(uuid4()), "queue_item_id": current["queue_item_id"]},
+    ).raise_for_status()
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(
+        generation=1,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(current["queue_item_id"]),
+        duration_ms=10_000,
+        anchor_server_time_ms=time.time_ns() // 1_000_000,
+    )
+
+    refreshed = client.get(f"/jams/{jam_id}").json()
+
+    assert refreshed["autoplay_mode"] == "TOP_HITS"
+    assert refreshed["autoplay_decision_required"] is False
+    assert refreshed["autoplay_prompt_deadline_ms"] is None
+    assert refreshed["queue"][-1]["song_id"] == str(top_hit)
+
+
+def test_top_hits_checks_catalogue_once_more_then_loops_full_queue(
+    client: TestClient,
+) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    queued = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).json()
+    current = queued["queue"][0]
+    client.post(
+        f"/jams/{jam_id}/playback/start", json={"request_id": str(uuid4())}
+    ).raise_for_status()
+    jam_uuid = UUID(jam_id)
+    sync_client._snapshots[jam_uuid] = SyncSnapshot(
+        generation=1,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(current["queue_item_id"]),
+        duration_ms=10_000,
+        anchor_server_time_ms=time.time_ns() // 1_000_000,
+    )
+
+    first_check = client.get(f"/jams/{jam_id}").json()
+    assert first_check["autoplay_mode"] == "TOP_HITS"
+    second_check = client.get(f"/jams/{jam_id}").json()
+    assert second_check["autoplay_mode"] == "LOOP"
+
+    sync_client._snapshots[jam_uuid] = SyncSnapshot(
+        generation=1,
+        state=JamState.ENDED,
+        queue_item_id=UUID(current["queue_item_id"]),
+    )
+    looped = client.get(f"/jams/{jam_id}").json()
+    assert looped["current_queue_item_id"] == current["queue_item_id"]
+    assert looped["state"] == "PREPARING"
 
 
 def test_jam_has_unique_eight_digit_code_and_guests_can_join_with_it(
@@ -218,6 +287,30 @@ def test_owner_queue_controls_and_websocket(client: TestClient) -> None:
         assert websocket.receive_json()["queue"] == reordered.json()["queue"]
         client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())})
         assert len(websocket.receive_json()["queue"]) == 4
+
+
+def test_current_and_committed_next_queue_items_are_locked(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    jam_id = create_jam(client, owner_id)["jam_id"]
+    queue = []
+    for _ in range(3):
+        queue = client.post(f"/jams/{jam_id}/queue", json={"song_id": str(uuid4())}).json()["queue"]
+    client.post(
+        f"/jams/{jam_id}/playback/start", json={"request_id": str(uuid4())}
+    ).raise_for_status()
+    sync_client._snapshots[UUID(jam_id)] = SyncSnapshot(
+        generation=1,
+        state=JamState.PLAYING,
+        queue_item_id=UUID(queue[0]["queue_item_id"]),
+        pending_queue_item_id=UUID(queue[1]["queue_item_id"]),
+    )
+
+    assert client.delete(f"/jams/{jam_id}/queue/{queue[0]['queue_item_id']}").status_code == 409
+    assert client.delete(f"/jams/{jam_id}/queue/{queue[1]['queue_item_id']}").status_code == 409
+    moved = [queue[0]["queue_item_id"], queue[2]["queue_item_id"], queue[1]["queue_item_id"]]
+    assert client.put(f"/jams/{jam_id}/queue", json={"queue_item_ids": moved}).status_code == 409
+
+    assert client.delete(f"/jams/{jam_id}/queue/{queue[2]['queue_item_id']}").status_code == 200
 
 
 def test_get_reconciles_readiness_driven_sync_state(client: TestClient) -> None:

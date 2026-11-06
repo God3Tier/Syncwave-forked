@@ -42,6 +42,13 @@ class JamConflictError(ValueError):
     pass
 
 
+AUTOPLAY_PROMPT_WINDOW_MS = 30_000
+AUTOPLAY_DECISION_MS = 10_000
+# If there is not enough time both to decide and to preload, use the default
+# immediately so a short final track can still transition without a gap.
+AUTOPLAY_IMMEDIATE_THRESHOLD_MS = 15_000
+
+
 @dataclass(slots=True)
 class Jam:
     jam_id: UUID
@@ -58,6 +65,9 @@ class Jam:
     autoplay_mode: AutoplayMode | None = None
     autoplay_seen_song_ids: set[UUID] = field(default_factory=set)
     autoplay_prompt_due: bool = False
+    autoplay_prompt_deadline_ms: int | None = None
+    autoplay_batch_number: int = 0
+    autoplay_catalogue_rechecked: bool = False
 
 
 class JamManager:
@@ -92,6 +102,9 @@ class JamManager:
                 ended_at=value.ended_at,
                 autoplay_mode=(AutoplayMode(value.autoplay_mode) if value.autoplay_mode else None),
                 autoplay_seen_song_ids=set(value.autoplay_seen_song_ids or []),
+                autoplay_prompt_deadline_ms=value.autoplay_prompt_deadline_ms,
+                autoplay_batch_number=value.autoplay_batch_number,
+                autoplay_catalogue_rechecked=value.autoplay_catalogue_rechecked,
             )
 
     async def close(self) -> None:
@@ -125,6 +138,8 @@ class JamManager:
             member_token=None,
             autoplay_mode=jam.autoplay_mode,
             autoplay_decision_required=self._autoplay_decision_required(jam),
+            autoplay_prompt_deadline_ms=jam.autoplay_prompt_deadline_ms,
+            autoplay_batch_number=jam.autoplay_batch_number,
         )
 
     async def create(
@@ -174,15 +189,23 @@ class JamManager:
             previous_generation = jam.sync_generation
             previous_current = jam.current_queue_item_id
             previous_queue_size = len(jam.queue)
+            previous_autoplay = (
+                jam.autoplay_mode,
+                jam.autoplay_prompt_due,
+                jam.autoplay_prompt_deadline_ms,
+                jam.autoplay_batch_number,
+                jam.autoplay_catalogue_rechecked,
+            )
             snapshot = await self._sync.playback_state(jam.jam_id)
             if snapshot.queue_item_id is not None:
                 jam.current_queue_item_id = snapshot.queue_item_id
-            jam.autoplay_prompt_due = self._should_prompt_for_autoplay(jam, snapshot)
+            autoplay_activated = await self._refresh_autoplay(jam, snapshot)
             if jam.current_queue_item_id is not None:
                 current = self._queue_item(jam, jam.current_queue_item_id)
                 if (
                     current.position == len(jam.queue) - 1
                     and jam.autoplay_mode is AutoplayMode.TOP_HITS
+                    and not autoplay_activated
                 ):
                     await self._append_top_hits(jam)
             if snapshot.state is JamState.ENDED and jam.current_queue_item_id is not None:
@@ -203,6 +226,14 @@ class JamManager:
                 or jam.state != snapshot.state
                 or previous_current != jam.current_queue_item_id
                 or previous_queue_size != len(jam.queue)
+                or previous_autoplay
+                != (
+                    jam.autoplay_mode,
+                    jam.autoplay_prompt_due,
+                    jam.autoplay_prompt_deadline_ms,
+                    jam.autoplay_batch_number,
+                    jam.autoplay_catalogue_rechecked,
+                )
             )
             self._apply_snapshot(jam, snapshot.generation, snapshot.state)
             await self._update_sync_queue(jam)
@@ -288,8 +319,9 @@ class JamManager:
         async with self._lock:
             jam = self._find(jam_id)
             self._require_owner(jam, actor_id)
-            if jam.current_queue_item_id == queue_item_id:
-                raise JamConflictError("cannot remove the current queue item")
+            locked = await self._locked_queue_item_ids(jam)
+            if queue_item_id in locked:
+                raise JamConflictError("cannot remove the current or committed-next queue item")
             original = len(jam.queue)
             jam.queue = [item for item in jam.queue if item.queue_item_id != queue_item_id]
             if len(jam.queue) == original:
@@ -310,6 +342,11 @@ class JamManager:
                 raise JamConflictError("queue item IDs must be unique")
             if set(queue_item_ids) != {item.queue_item_id for item in jam.queue}:
                 raise JamConflictError("reorder must contain every queue item exactly once")
+            locked = await self._locked_queue_item_ids(jam)
+            old_positions = {item.queue_item_id: item.position for item in jam.queue}
+            new_positions = {item_id: position for position, item_id in enumerate(queue_item_ids)}
+            if any(old_positions[item_id] != new_positions[item_id] for item_id in locked):
+                raise JamConflictError("cannot move the current or committed-next queue item")
             items = {item.queue_item_id: item for item in jam.queue}
             jam.queue = [items[item_id] for item_id in queue_item_ids]
             self._renumber(jam)
@@ -404,7 +441,11 @@ class JamManager:
     async def set_autoplay(self, jam_id: UUID, actor_id: UUID, mode: AutoplayMode) -> JamResponse:
         async with self._lock:
             jam = self._active_owner(jam_id, actor_id)
+            if jam.autoplay_mode is not None:
+                return self.get(jam_id)
             jam.autoplay_mode = mode
+            jam.autoplay_prompt_due = False
+            jam.autoplay_prompt_deadline_ms = None
             jam.autoplay_seen_song_ids.update(item.song_id for item in jam.queue)
             if mode is AutoplayMode.TOP_HITS:
                 await self._append_top_hits(jam)
@@ -544,40 +585,83 @@ class JamManager:
             return
         await self._sync.update_queue(uuid4(), jam.jam_id, jam.sync_generation, jam.queue)
 
+    async def _locked_queue_item_ids(self, jam: Jam) -> set[UUID]:
+        locked = {jam.current_queue_item_id} if jam.current_queue_item_id is not None else set()
+        if jam.sync_generation is None:
+            return locked
+        try:
+            snapshot = await self._sync.playback_state(jam.jam_id)
+        except SyncClientError:
+            return locked
+        if snapshot.pending_queue_item_id is not None:
+            locked.add(snapshot.pending_queue_item_id)
+        return locked
+
     def _autoplay_decision_required(self, jam: Jam) -> bool:
         if jam.autoplay_mode is not None or jam.current_queue_item_id is None:
             return False
         current = self._queue_item(jam, jam.current_queue_item_id)
         return current.position == len(jam.queue) - 1 and jam.autoplay_prompt_due
 
-    @staticmethod
-    def _should_prompt_for_autoplay(jam: Jam, snapshot: SyncSnapshot) -> bool:
+    async def _refresh_autoplay(self, jam: Jam, snapshot: SyncSnapshot) -> bool:
         if jam.autoplay_mode is not None or jam.current_queue_item_id is None:
+            jam.autoplay_prompt_due = False
+            jam.autoplay_prompt_deadline_ms = None
             return False
-        current = JamManager._queue_item(jam, jam.current_queue_item_id)
+        current = self._queue_item(jam, jam.current_queue_item_id)
         if current.position != len(jam.queue) - 1:
+            jam.autoplay_prompt_due = False
+            jam.autoplay_prompt_deadline_ms = None
             return False
-        if snapshot.state is JamState.ENDED:
+        remaining_ms = self._remaining_ms(snapshot)
+        if snapshot.state is not JamState.ENDED and (
+            remaining_ms is None or remaining_ms > AUTOPLAY_PROMPT_WINDOW_MS
+        ):
+            return False
+        now_ms = time.time_ns() // 1_000_000
+        if jam.autoplay_prompt_deadline_ms is None:
+            jam.autoplay_prompt_deadline_ms = now_ms + AUTOPLAY_DECISION_MS
+        jam.autoplay_prompt_due = True
+        if (
+            snapshot.state is JamState.ENDED
+            or (remaining_ms is not None and remaining_ms <= AUTOPLAY_IMMEDIATE_THRESHOLD_MS)
+            or now_ms >= jam.autoplay_prompt_deadline_ms
+        ):
+            jam.autoplay_mode = AutoplayMode.TOP_HITS
+            jam.autoplay_prompt_due = False
+            jam.autoplay_prompt_deadline_ms = None
+            jam.autoplay_seen_song_ids.update(item.song_id for item in jam.queue)
+            await self._append_top_hits(jam)
             return True
+        return False
+
+    @staticmethod
+    def _remaining_ms(snapshot: SyncSnapshot) -> int | None:
         if (
             snapshot.state is not JamState.PLAYING
             or snapshot.duration_ms <= 0
             or snapshot.anchor_server_time_ms is None
         ):
-            return False
+            return None
         now_ms = time.time_ns() // 1_000_000
         position_ms = (
             snapshot.anchor_position_ms
             + max(0, now_ms - snapshot.anchor_server_time_ms) * snapshot.playback_rate
         )
-        return snapshot.duration_ms - position_ms <= 30_000
+        return max(0, round(snapshot.duration_ms - position_ms))
 
     async def _append_top_hits(self, jam: Jam) -> None:
         excluded = {item.song_id for item in jam.queue} | jam.autoplay_seen_song_ids
         song_ids = await self._catalogue.top_songs(excluded, limit=5)
         if not song_ids:
-            jam.autoplay_mode = AutoplayMode.LOOP
+            if jam.autoplay_catalogue_rechecked:
+                jam.autoplay_mode = AutoplayMode.LOOP
+            else:
+                # Keep TOP_HITS for one fresh ranking pass. The next room
+                # refresh is the single check for songs published meanwhile.
+                jam.autoplay_catalogue_rechecked = True
             return
+        jam.autoplay_catalogue_rechecked = False
         for song_id in song_ids:
             jam.queue.append(
                 QueueItem(
@@ -588,6 +672,7 @@ class JamManager:
                 )
             )
         jam.autoplay_seen_song_ids.update(song_ids)
+        jam.autoplay_batch_number += 1
 
     async def _record_play(self, jam: Jam) -> None:
         if jam.sync_generation is None or jam.current_queue_item_id is None:
@@ -634,5 +719,8 @@ class JamManager:
                 ended_at=jam.ended_at,
                 autoplay_mode=jam.autoplay_mode.value if jam.autoplay_mode else None,
                 autoplay_seen_song_ids=list(jam.autoplay_seen_song_ids),
+                autoplay_prompt_deadline_ms=jam.autoplay_prompt_deadline_ms,
+                autoplay_batch_number=jam.autoplay_batch_number,
+                autoplay_catalogue_rechecked=jam.autoplay_catalogue_rechecked,
             )
         )
