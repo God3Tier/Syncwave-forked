@@ -1,6 +1,15 @@
 # Layer over root Compose for deterministic item 2 checks. All media, storage,
 # queues, consumers and Catalogue are real; only the external weather is fixed.
 services:
+  auth:
+    environment:
+      APP_ORIGIN: http://gateway:8080
+  jam:
+    environment:
+      APP_ORIGIN: http://gateway:8080
+  playlist:
+    environment:
+      APP_ORIGIN: http://gateway:8080
   recommendation:
     environment:
       CATALOGUE_MODE: http
