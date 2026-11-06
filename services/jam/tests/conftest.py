@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from collections.abc import Iterator
@@ -29,6 +30,7 @@ class FakeAuthVerifier:
 def clear_jams() -> Iterator[None]:
     manager._jams.clear()
     manager._connections.clear()
+    manager._lock = asyncio.Lock()
     manager._now = DEFAULT_NOW
     playlist_client.playlists.clear()
     catalogue_client.songs.clear()

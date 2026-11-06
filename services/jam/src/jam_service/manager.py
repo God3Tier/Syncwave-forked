@@ -551,7 +551,11 @@ class JamManager:
         expired: list[UUID] = []
         cutoff = self._now() - ttl
         async with self._lock:
+            persisted_activity = await self._repository.listener_activity()
             for jam in self._jams.values():
+                jam.last_listener_active_at = persisted_activity.get(
+                    jam.jam_id, jam.last_listener_active_at
+                )
                 if (
                     jam.lifecycle_state is JamLifecycle.ACTIVE
                     and jam.last_listener_active_at <= cutoff

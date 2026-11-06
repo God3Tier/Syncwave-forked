@@ -205,3 +205,20 @@ class JamRepository:
             row = await database.get(JamRecord, str(jam_id))
             if row is not None:
                 row.last_listener_active_at = active_at
+
+    async def listener_activity(self) -> dict[UUID, datetime]:
+        """Return durable activity for active rooms so expiry does not trust process cache."""
+        async with self._sessions() as database:
+            rows = (
+                await database.execute(
+                    select(JamRecord.jam_id, JamRecord.last_listener_active_at).where(
+                        JamRecord.lifecycle_state == JamLifecycle.ACTIVE.value
+                    )
+                )
+            ).all()
+        return {
+            UUID(jam_id): (
+                active_at if active_at.tzinfo is not None else active_at.replace(tzinfo=UTC)
+            )
+            for jam_id, active_at in rows
+        }

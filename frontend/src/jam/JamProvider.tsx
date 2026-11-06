@@ -261,6 +261,7 @@ export function JamProvider({ children }: { readonly children: ReactNode }) {
   const clear = useCallback(() => {
     sessionRef.current?.close();
     sessionRef.current = null;
+    setAudio(null);
     setSession(null);
     setSync(null);
     setReadiness(null);

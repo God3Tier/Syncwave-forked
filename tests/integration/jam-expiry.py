@@ -78,7 +78,7 @@ def run(base_url: str, timeout: float, report_path: Path) -> int:
         credentials = {"username": f"expiry_{run_id[:16]}", "password": f"Expiry-{run_id}"}
         api.call("POST", "/api/auth/signup", credentials, expected=201)
         api.call("POST", "/api/auth/login", credentials)
-        jam = api.call("POST", "/api/jam/jams", {})
+        jam = api.call("POST", "/api/jam/jams", {}, expected=201)
         jam_id = str(uuid.UUID(jam["jam_id"]))
         report["jam_id"] = jam_id
         report["checks"].append("created a persisted Jam through the public API")

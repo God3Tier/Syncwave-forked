@@ -447,6 +447,22 @@ def test_listener_heartbeat_postpones_durable_inactivity_expiry(client: TestClie
     assert retained.json()["lifecycle_state"] == "ENDED"
 
 
+def test_expiry_uses_persisted_listener_activity(client: TestClient) -> None:
+    owner_id = str(uuid4())
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=UTC)
+    manager._now = lambda: now
+    jam_id = UUID(create_jam(client, owner_id)["jam_id"])
+
+    client.portal.call(
+        manager._repository.touch_listener_activity,
+        jam_id,
+        now - timedelta(hours=25),
+    )
+
+    assert jam_id in client.portal.call(manager.expire_inactive, timedelta(hours=24))
+    assert client.get(f"/jams/{jam_id}").json()["lifecycle_state"] == "ENDED"
+
+
 def test_play_now_during_playback_keeps_the_sync_session(client: TestClient) -> None:
     owner_id = str(uuid4())
     jam_id = create_jam(client, owner_id)["jam_id"]
