@@ -139,3 +139,7 @@ open MR runs a pipeline; a newer push cancels the older one).
 2. Add `- services/<name>/compose.yaml` to `include:` in `docker-compose.yml`.
 3. Its trigger job in `.gitlab-ci.yml` already exists and starts running
    as soon as `services/<name>/.gitlab-ci.yml` is committed.
+
+## License
+
+SyncWave is licensed under the [MIT License](LICENSE).

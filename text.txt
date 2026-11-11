@@ -1,0 +1,54 @@
+Yes. Based on the SyncWave repository, here’s a first set of likely Q&A questions with answer outlines grounded in what the project documents and implements. Treat these as rehearsal notes: check each claim against the version you freeze and be candid about anything that is still pending.
+Architecture and scenarios
+Why did you choose these three scenarios?
+“We chose Discover & Listen, Upload & Process, and Create & Synchronise a Jam because they exercise different parts of the platform: synchronous browsing and playback, asynchronous media processing, and coordinated real-time playback across clients. Together they let us show HTTP APIs, event-driven processing, and an orchestrated workflow.”
+
+Why split the system into so many services? Isn’t that too fine-grained?
+“Our services own distinct capabilities and data—for example, Catalogue owns song metadata and processing state, while Lyrics and Waveform own their processing and retrieval. That lets the upload flow process lyrics and waveforms independently. The trade-off is more deployment and integration complexity, so we should be ready to justify each boundary and acknowledge any services whose separation adds limited value.”
+
+Why use choreography for upload processing and orchestration for Jams?
+“Upload publishes a SongUploaded event, and Lyrics and Waveform process it independently; that suits parallel work where no central coordinator needs to direct every step. For Jams, playback depends on participant readiness and a coordinated future start time, so Jam coordinates the owner’s command through Sync. That gives us clearer control over decisions like waiting, continuing without an unready participant, or cancelling.”
+
+How do your services reuse functionality across scenarios?
+“Catalogue and Streaming are used beyond a single scenario: the upload flow populates Catalogue, while discovery and playback read from it; Streaming supplies audio to both solo playback and Jam playback. We should point to the concrete call paths in the code and explain which service owns each piece of data.”
+Failure handling and guarantees
+What happens if Lyrics or Waveform fails after an upload?
+“The work is asynchronous, so a song can remain in a processing or partial state rather than being treated as ready. The integration notes describe recovery from invalid lyrics by repairing the stored lyrics object and replaying the captured event; the successful waveform result remained intact. We should explain what the UI reports and which retry or replay path is actually available in the submitted version.”
+
+What guarantees do you provide for duplicate events?
+“The project has checks for repeated SongReady delivery and duplicate indexing, and the ingestion run recorded that repeated deliveries did not create duplicate search results. We should describe the idempotency key or upsert behavior in the relevant consumer code, rather than claiming that every message in the system is exactly-once. The practical guarantee is based on idempotent processing and acknowledgements, not exactly-once delivery.”
+
+What if RabbitMQ is unavailable?
+“Upload records a durable receipt and uses publisher confirms, so we can discuss how pending publication is observed and retried. The key limit is that accepting an upload and completing downstream processing are separate events; the song should not be presented as fully ready just because the upload request succeeded. We should point to the publisher and receipt logic and be precise about what happens on restart.”
+
+What if the weather API is down?
+“Recommendations fall back to general ranking without weather context. The service uses Open-Meteo when weather mode is enabled, and the README documents timeout/error fallback. Weather improves ranking when it meaningfully matches song mood; it is not required for recommendations to work.”
+
+How synchronized is Jam playback?
+“Sync estimates client/server clock offset from samples, waits for clients to prepare, then sends a shared PLAY_AT time. It measures playback status and can correct drift. Our backend tests show two clients receiving identical scheduled-start payloads, but the repository explicitly says physical-device timing evidence is still pending. We should not claim a measured audible cross-device accuracy target until we have those measurements.”
+CI/CD and deployment
+Walk us through the pipeline for a service.
+“The parent pipeline triggers child pipelines only for changed services or relevant contracts. A service pipeline runs lint, tests, builds an image, and on dev scans it. The root staging pipeline pulls the staged images and runs integration flows; main has an ECS deployment job that authenticates to AWS with GitLab OIDC. We should open a real pipeline and show its status, since configuration alone doesn’t prove the full flow ran successfully.”
+
+What happens if the instructor’s code change breaks a test?
+“The service test stage should fail and prevent later build/deploy stages from succeeding. We should be ready to make a small, reversible change in a service, show the failure, restore or fix it, and show a passing pipeline and deployment path. The instructions expect the live change to demonstrate both outcomes, so rehearse the exact sequence.”
+
+Is production deployment verified?
+“The repository contains ECS deployment configuration, but the integration notes flag live GitLab publishing and staging verification as pending. We should distinguish ‘deployment is configured’ from ‘we have evidence it deployed successfully.’ If there is a newer successful pipeline or environment state, use that as evidence; otherwise describe the gap honestly.”
+
+Why use content-tagged images and OIDC?
+“Content-based image tags let us promote the same built image instead of rebuilding different artifacts for each environment. OIDC gives GitLab short-lived AWS credentials instead of storing a long-lived AWS key. We should be able to show where the tag is created and how the deploy job uses it.”
+Requirements, trade-offs, and evidence
+How do you satisfy the language requirement?
+“Most services use Python; the Streaming service is written in Rust. The repository also includes a Rust song-request orchestrator, though it is described as standalone. We should point to the service directories and make clear which Rust service is actually included in the submitted application.”
+
+What external API adds value?
+“Recommendation calls Open-Meteo to use current weather as one ranking signal. A user can request weather-aware recommendations, and songs with matching moods are promoted. If the API is unavailable or returns unusable data, recommendations continue without that signal.”
+
+Which self-directed research items would you defend?
+“Potential examples in this repository include gRPC service communication, automated multi-service/browser flows, fault-recovery scenarios, and the browser’s chunked playback buffer. For each, we should explain the problem it addresses, evidence that it helped, and its operational cost. We should only claim these as eligible research items if they go beyond what the course covered and the report explains their value; the project instructions count at most three.”
+
+What are the main limitations you would disclose?
+“The integration plan calls out pending physical-device synchronization measurements, live staging verification, and production readiness work such as HTTPS/WSS, secrets, service discovery, and a supported Jam/Sync replica topology. It also notes that horizontal scaling needs care because WebSocket/session ownership is in memory. We should use the current submitted branch to confirm which of these remain true.”
+
+For the session, it would help to rehearse these answers with the repository open and have each member explain their own code, plus one failure mode and one trade-off in the full system. The most important caveat to resolve before presenting is the difference between what the pipeline and deployment files describe and what has actually passed in GitLab.
